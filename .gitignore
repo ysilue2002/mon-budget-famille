@@ -1,0 +1,11 @@
+node_modules
+dist
+dev-dist
+*.local
+.env
+.env.*
+!.env.example
+server/.env
+server/dist
+coverage
+*.log
