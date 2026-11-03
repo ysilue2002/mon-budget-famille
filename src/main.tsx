@@ -5,6 +5,7 @@ import './i18n';
 import './index.css';
 import App from './App';
 import { bootstrapApp } from './db/seed';
+import { materializeDueRecurrences } from './core/recurring';
 
 async function mount(): Promise<void> {
   // Amorçage idempotent (foyer, catégories, compte espèces) avant le rendu.
@@ -18,6 +19,12 @@ async function mount(): Promise<void> {
       `${err.inner?.name}: ${err.inner?.message}`,
       err.inner?.stack,
     );
+  });
+
+  // Échéances récurrentes dues (idempotent : un identifiant déterministe par
+  // échéance empêche tout doublon si la génération est rejouée).
+  await materializeDueRecurrences().catch((error) => {
+    console.error('recurring generation error', error);
   });
 
   const container = document.getElementById('root');

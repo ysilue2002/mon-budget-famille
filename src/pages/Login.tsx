@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { apiFetch, clearAuth, setAuth, type Session } from '@/lib/api';
+import { adoptInvitedFamily, type InvitedFamily } from '@/core/join';
+import { runSync } from '@/sync/sync';
 import { Card, Field, Page, TextInput, btnPrimary } from '@/components/common';
 
 type Mode = 'login' | 'register';
@@ -18,8 +20,12 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [familyName, setFamilyName] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Un code d'invitation saisi bascule l'inscription vers le foyer partagé.
+  const invited = /^[A-HJKMNP-Z2-9]{8}$/.test(inviteCode.trim().toUpperCase());
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,9 +36,30 @@ export default function Login() {
       const body =
         mode === 'login'
           ? { email: email.trim(), password }
-          : { email: email.trim(), password, name: name.trim(), familyName: familyName.trim() };
-      const session = await apiFetch<Session>(path, { method: 'POST', body });
+          : invited
+            // Inscription par invitation : le foyer distant partagé est créé —
+            // familyName indifférent, mais le schéma l'exige.
+            ? {
+                email: email.trim(),
+                password,
+                name: name.trim(),
+                familyName: familyName.trim() || 'Invité',
+                invitationCode: inviteCode.trim().toUpperCase(),
+              }
+            : { email: email.trim(), password, name: name.trim(), familyName: familyName.trim() };
+      const session = await apiFetch<Session & { family?: InvitedFamily; role?: string }>(path, {
+        method: 'POST',
+        body,
+      });
       setAuth(session);
+      // Adhésion par code : l'appareil adopte le foyer partagé (base locale
+      // recréée, pull intégral). Sans code, le foyer local amorcé suffit.
+      if (mode === 'register' && invited && session.family) {
+        await adoptInvitedFamily(session.family);
+        void navigate('/');
+        void runSync().catch(() => undefined);
+        return;
+      }
       void navigate('/');
     } catch {
       setError(t('login.error'));
@@ -73,8 +100,33 @@ export default function Login() {
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
               </Field>
               <Field label={t('login.familyName')}>
-                <TextInput value={familyName} onChange={(e) => setFamilyName(e.target.value)} required minLength={2} />
+                <TextInput
+                  value={familyName}
+                  onChange={(e) => setFamilyName(e.target.value)}
+                  required={!invited}
+                  minLength={invited ? 0 : 2}
+                />
               </Field>
+              <Field label={t('login.inviteCode')} hint={t('login.inviteHint')}>
+                <TextInput
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                  placeholder="ABCD1234"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  maxLength={9}
+                  inputMode="text"
+                />
+              </Field>
+              {!invited && (
+                <p className="text-xs text-sage-600">
+                  {t('login.inviteJoin')}{' '}
+                  <button type="button" className="underline hover:text-forest-800" onClick={() => void navigate('/join')}>
+                    {t('login.joinLink')}
+                  </button>
+                </p>
+              )}
             </>
           )}
           <Field label={t('login.email')}>
@@ -85,6 +137,15 @@ export default function Login() {
           </Field>
 
           {error && <p className="text-sm font-medium text-red-700">{error}</p>}
+
+          {mode === 'login' && (
+            <p className="text-xs text-sage-600">
+              {t('login.forgot')}{' '}
+              <button type="button" className="underline hover:text-forest-800" onClick={() => void navigate('/reset')}>
+                {t('login.forgotLink')}
+              </button>
+            </p>
+          )}
 
           <button type="submit" className={btnPrimary} disabled={busy}>
             {busy ? '…' : mode === 'login' ? t('login.tabLogin') : t('login.tabRegister')}

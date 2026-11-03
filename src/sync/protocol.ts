@@ -36,11 +36,19 @@ export interface PushConflict {
 
 export interface PushResult {
   opId: string;
-  status: 'applied' | 'conflict' | 'duplicate';
+  /** `failed` : opération refusée isolément côté serveur, à réessayer plus tard. */
+  status: 'applied' | 'conflict' | 'duplicate' | 'failed';
   rev: number;
+  /** Motif générique renvoyé quand `status === 'failed'`. */
+  error?: string;
   /** Payload fusionné appliqué par le serveur (dans le cas d'une fusion auto). */
   mergedPayload?: unknown;
   conflicts?: PushConflict[];
+  /**
+   * true quand la ligne est supprimée côté serveur (tombstone plus récent que
+   * la base de l'opération) : le client doit retirer l'enregistrement local.
+   */
+  deleted?: boolean;
 }
 
 export interface PushResponse {
@@ -50,7 +58,14 @@ export interface PushResponse {
 
 export interface PullChange {
   entity: SyncEntity;
-  record: Record<string, unknown>;
+  /** Enregistrement complet, ou `null` pour une suppression (tombstone). */
+  record: Record<string, unknown> | null;
+  /** Identifiant stable côté serveur — seul moyen de supprimer un tombstone. */
+  recordId?: string;
+  /** true si la modification est une suppression. */
+  deleted?: boolean;
+  /** Révision serveur de la modification. */
+  rev?: number;
 }
 
 export interface PullResponse {

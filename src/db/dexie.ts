@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type {
   AppMeta,
   Budget,
+  Business,
   Category,
   Debt,
   Family,
@@ -9,9 +10,11 @@ import type {
   HouseholdMember,
   OutboxOperation,
   RateSnapshot,
+  RecurringRule,
   SavingsGoal,
   SyncConflict,
   Transaction,
+  WealthSnapshot,
 } from '@/core/types';
 
 /** Document de taux stocké dans IndexedDB (clé fixe). */
@@ -23,11 +26,14 @@ export class BudgetFamilyDB extends Dexie {
   families!: Table<Family, string>;
   members!: Table<HouseholdMember, string>;
   accounts!: Table<FinancialAccount, string>;
+  businesses!: Table<Business, string>;
   categories!: Table<Category, string>;
   transactions!: Table<Transaction, string>;
   budgets!: Table<Budget, string>;
   goals!: Table<SavingsGoal, string>;
   debts!: Table<Debt, string>;
+  recurring!: Table<RecurringRule, string>;
+  wealth!: Table<WealthSnapshot, string>;
   rates!: Table<RateDoc, string>;
   outbox!: Table<OutboxOperation, string>;
   conflicts!: Table<SyncConflict, string>;
@@ -69,6 +75,22 @@ export class BudgetFamilyDB extends Dexie {
       outbox: 'id, entity, entityId, status, createdAt',
       conflicts: 'id, entity, entityId, createdAt',
       meta: 'key',
+    });
+    // v4 : opérations récurrentes. Pas d'index sur `active` (booléen refusé
+    // par IndexedDB) : le filtrage se fait en JS.
+    this.version(4).stores({
+      recurring: 'id, familyId, nextDueDate, syncStatus',
+    });
+    // v5 : valorisations du patrimoine (une par jour, id `wealth-<date>`).
+    this.version(5).stores({
+      wealth: 'id, familyId, date, syncStatus',
+    });
+    // v6 : activités professionnelles + rattachement des opérations. Pas
+    // d'index sur `archived`/`settled` (booléens refusés par IndexedDB).
+    this.version(6).stores({
+      businesses: 'id, familyId, name, syncStatus',
+      transactions:
+        'id, familyId, accountId, toAccountId, date, type, categoryId, businessId, syncStatus, updatedAt, [familyId+date], [familyId+type]',
     });
   }
 }

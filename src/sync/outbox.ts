@@ -51,19 +51,34 @@ export async function pendingCount(): Promise<number> {
   return db.outbox.count();
 }
 
+/** Délai avant nouvel essai : 30 s, doublé à chaque échec, plafonné à 15 min. */
+export function retryDelayMs(retryCount: number): number {
+  return Math.min(30_000 * 2 ** Math.min(retryCount, 5), 15 * 60_000);
+}
+
+/**
+ * Opérations prêtes à être poussées. Les opérations en repli exponentiel sont
+ * ignorées sans bloquer les suivantes : une seule opération refusée ne fige
+ * plus la file entière.
+ */
 export async function listPending(limit = 100): Promise<OutboxOperation[]> {
-  return db.outbox.orderBy('createdAt').limit(limit).toArray();
+  const now = Date.now();
+  // On lit au-delà de `limit` pour ne pas affamer la file derrière des
+  // opérations en attente de nouvel essai.
+  const scanned = await db.outbox.orderBy('createdAt').limit(limit * 5).toArray();
+  return scanned.filter((op) => (op.nextAttemptAt ?? 0) <= now).slice(0, limit);
 }
 
 export async function removeOperation(opId: string): Promise<void> {
   await db.outbox.delete(opId);
 }
 
-export async function markFailed(opId: string, error: string, retryAfterNs = 0): Promise<void> {
+export async function markFailed(opId: string, error: string, retryAfterMs = 0): Promise<void> {
   await db.outbox.where('id').equals(opId).modify((op: OutboxOperation) => {
     op.status = 'queued';
     op.retryCount = op.retryCount + 1;
     op.lastError = error.slice(0, 300);
-    if (retryAfterNs) op.createdAt = op.createdAt + retryAfterNs;
+    if (retryAfterMs > 0) op.nextAttemptAt = Date.now() + retryAfterMs;
+    else delete op.nextAttemptAt;
   });
 }

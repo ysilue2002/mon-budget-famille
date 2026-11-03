@@ -22,6 +22,13 @@ export function monthOf(isoDate: string): string {
   return isoDate.slice(0, 7);
 }
 
+/** Dernier jour d'un mois « YYYY-MM » (inclus). */
+export function endOfMonth(month: string): string {
+  const [year, m] = month.split('-').map(Number);
+  const last = new Date(year, m, 0).getDate();
+  return `${year}-${`${m}`.padStart(2, '0')}-${`${last}`.padStart(2, '0')}`;
+}
+
 export function addMonths(month: string, delta: number): string {
   const [y, m] = month.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);

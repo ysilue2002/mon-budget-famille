@@ -22,3 +22,60 @@
     @apply transition hover:bg-forest-50/70;
   }
 }
+
+/* ------------------------------------------------------------------ impression
+ * Module d'impression des états : seule la feuille du bilan est imprimée.
+ * La navigation, les contrôles et les fonds colorés sont retirés pour rester
+ * lisible en noir et blanc sur A4. */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .app-chrome,
+  .no-print {
+    display: none !important;
+  }
+
+  .app-main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .print-sheet {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .print-sheet table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .print-sheet thead {
+    display: table-header-group;
+  }
+
+  .print-sheet tr,
+  .print-sheet h3,
+  .print-sheet header {
+    break-inside: avoid;
+  }
+
+  .print-sheet h2,
+  .print-sheet h3,
+  .print-sheet td,
+  .print-sheet th,
+  .print-sheet p {
+    color: #000 !important;
+  }
+}

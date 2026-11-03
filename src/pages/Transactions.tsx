@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
-import { useAccounts, useCategories, useRates, useTransactions } from '@/hooks/useData';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { useAccounts, useBusinesses, useCategories, useRates, useTransactions } from '@/hooks/useData';
 import { db } from '@/db/dexie';
 import { createTransaction, deleteTransaction, updateTransactionToAmount } from '@/core/repo';
+import { defaultMemberFor } from '@/core/members';
+import { getAuth } from '@/lib/api';
 import { convertMinor } from '@/core/money';
 import { formatAmount } from '@/core/currencies';
 import { todayISO } from '@/lib/date';
@@ -17,6 +20,7 @@ const schema = z.object({
   amountOriginal: z.number().int().positive(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   categoryId: z.string().optional(),
+  member: z.string().max(60).optional(),
   note: z.string().max(500).optional(),
 });
 
@@ -27,6 +31,10 @@ interface FormState {
   amountOriginal: number;
   currency: CurrencyCode;
   categoryId: string;
+  member: string;
+  businessId: string;
+  /** Facture professionnelle réglée (encaissée / payée). */
+  settled: boolean;
   date: string;
   note: string;
 }
@@ -35,8 +43,17 @@ function Transactions() {
   const { t, i18n } = useTranslation();
   const accounts = useAccounts();
   const categories = useCategories();
+  const businesses = useBusinesses();
   const transactions = useTransactions();
   const rates = useRates();
+  const members = useLiveQuery(async () => {
+    const rows = await db.members.toArray();
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
+
+  // Membre de l'utilisateur connecté, repris par défaut sur les nouvelles opérations.
+  const user = useMemo(() => getAuth()?.user ?? null, []);
+  const defaultMember = useMemo(() => defaultMemberFor(members ?? [], user)?.name ?? '', [members, user]);
 
   const [open, setOpen] = useState(false);
   const [filterType, setFilterType] = useState('all');
@@ -58,6 +75,9 @@ function Transactions() {
       amountOriginal: 0,
       currency: first.currency,
       categoryId: '',
+      member: type === 'transfer' ? '' : defaultMember,
+      businessId: '',
+      settled: true,
       date: todayISO(),
       note: '',
     });
@@ -81,6 +101,7 @@ function Transactions() {
       amountOriginal: form.amountOriginal,
       date: form.date,
       categoryId: form.categoryId || undefined,
+      member: form.member.trim() || undefined,
       note: form.note || undefined,
     });
     if (!parsed.success) {
@@ -98,6 +119,9 @@ function Transactions() {
       amountOriginal: form.amountOriginal,
       currencyOriginal: account.currency,
       categoryId: form.categoryId || undefined,
+      member: form.member.trim() || undefined,
+      businessId: form.type === 'transfer' ? undefined : form.businessId || undefined,
+      settled: form.type !== 'transfer' && form.businessId ? form.settled : undefined,
       date: form.date,
       note: form.note || undefined,
     });
@@ -184,6 +208,11 @@ function Transactions() {
                       : `${accounts?.find((a) => a.id === tx.accountId)?.name ?? ''}${
                           tx.toAccountId ? ` → ${accounts?.find((a) => a.id === tx.toAccountId)?.name ?? ''}` : ''
                         }`}
+                    {tx.businessId && (
+                      <span className="ml-1 text-[11px] font-medium text-forest-600">
+                        · {(businesses ?? []).find((business) => business.id === tx.businessId)?.name ?? ''}
+                      </span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right font-semibold">
                     {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : '⇄'}{' '}
@@ -221,7 +250,14 @@ function Transactions() {
             <SelectInput
               label={t('transactions.type')}
               value={form.type}
-              onChange={(v) => setForm({ ...form, type: v as TransactionType, categoryId: '' })}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  type: v as TransactionType,
+                  categoryId: '',
+                  businessId: v === 'transfer' ? '' : form.businessId,
+                })
+              }
               options={['expense', 'income', 'transfer'].map((v) => ({ value: v, label: t(`transactions.${v}`) }))}
             />
             <SelectInput
@@ -258,6 +294,52 @@ function Transactions() {
             <Field label={t('common.date')}>
               <TextInput type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
             </Field>
+            <Field
+              label={t('transactions.member')}
+              hint={form.member && form.member === defaultMember ? t('transactions.memberDefault') : t('transactions.memberHint')}
+            >
+              <SelectInput
+                label={t('transactions.member')}
+                value={form.member}
+                onChange={(value) => setForm({ ...form, member: value })}
+                options={[
+                  { value: '', label: '—' },
+                  ...(members ?? []).map((member) => ({ value: member.name, label: member.name })),
+                  ...(form.member && !(members ?? []).some((member) => member.name === form.member)
+                    ? [{ value: form.member, label: form.member }]
+                    : []),
+                ]}
+              />
+            </Field>
+            {(businesses ?? []).filter((business) => !business.archived).length > 0 && form.type !== 'transfer' && (
+              <>
+                <SelectInput
+                  label={t('transactions.business')}
+                  value={form.businessId}
+                  onChange={(value) => setForm({ ...form, businessId: value })}
+                  options={[
+                    { value: '', label: '—' },
+                    ...(businesses ?? [])
+                      .filter((business) => !business.archived)
+                      .map((business) => ({ value: business.id, label: business.name })),
+                  ]}
+                />
+                {form.businessId && (
+                  <label className="flex items-center gap-2 text-sm text-forest-900">
+                    <input
+                      type="checkbox"
+                      checked={form.settled}
+                      onChange={(e) => setForm({ ...form, settled: e.target.checked })}
+                      className="h-4 w-4 rounded border-forest-300"
+                    />
+                    {form.type === 'income'
+                      ? t('transactions.businessSettledIncome')
+                      : t('transactions.businessSettledExpense')}
+                  </label>
+                )}
+                <p className="text-xs text-sage-500">{t('transactions.businessHint')}</p>
+              </>
+            )}
             <Field label={t('transactions.note')}>
               <TextArea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
             </Field>

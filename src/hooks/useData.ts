@@ -48,10 +48,25 @@ export function useAccounts() {
   return useLiveQuery(() => db.accounts.orderBy('name').toArray(), []);
 }
 
+/** Activités professionnelles : les actives d'abord, puis les archivées. */
+export function useBusinesses() {
+  return useLiveQuery(async () => {
+    const rows = await db.businesses.toArray();
+    return rows.sort(
+      (a, b) => Number(a.archived) - Number(b.archived) || a.name.localeCompare(b.name),
+    );
+  }, []);
+}
+
 export function useCategories() {
   return useLiveQuery(() => db.categories.toArray(), []);
 }
 
 export function useTransactions() {
   return useLiveQuery(() => db.transactions.orderBy('date').reverse().toArray(), []);
+}
+
+/** Règles récurrentes, triées par prochaine échéance. */
+export function useRecurringRules() {
+  return useLiveQuery(() => db.recurring.orderBy('nextDueDate').toArray(), []);
 }

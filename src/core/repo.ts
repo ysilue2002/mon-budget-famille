@@ -3,19 +3,30 @@ import type { Table } from 'dexie';
 import { syncFields as newSyncFields, getActiveFamily } from '@/db/seed';
 import { enqueue, enqueueUpsert } from '@/sync/outbox';
 import { getRates } from '@/core/exchange';
+import { monthEndsSince, planMonthEndValuations } from '@/core/wealth';
+import { defaultMemberFor } from '@/core/members';
+import { getAuth } from '@/lib/api';
 import { convertMinor } from '@/core/money';
 import { uuid } from '@/lib/id';
+import { todayISO } from '@/lib/date';
+import { firstRecurringDue } from '@/lib/recurrence';
 import type {
   Budget,
+  Business,
   Category,
+  CurrencyCode,
   Debt,
   DebtKind,
   Family,
   FinancialAccount,
+  HouseholdMember,
+  RecurrenceFrequency,
+  RecurringRule,
   SavingsGoal,
   SyncFields,
   Transaction,
   TransactionType,
+  WealthSnapshot,
 } from '@/core/types';
 
 /**
@@ -29,7 +40,10 @@ type SyncedEntity =
   | 'budget'
   | 'goal'
   | 'debt'
-  | 'category';
+  | 'category'
+  | 'recurring'
+  | 'wealth'
+  | 'business';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -46,6 +60,12 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.debts;
       case 'category':
         return db.categories;
+      case 'recurring':
+        return db.recurring;
+      case 'wealth':
+        return db.wealth;
+      case 'business':
+        return db.businesses;
     }
   })();
   const row = await table.get(id);
@@ -87,20 +107,25 @@ export async function updateAccount(id: string, patch: Partial<AccountInput>): P
   await enqueueUpsert('account', id, recordOf(updated), current.rev, base);
 }
 
+/**
+ * Supprime un compte **et toutes les opérations qui le touchent** : celles qui
+ * en partent et les transferts qui y arrivent. Laisser des opérations orphelines
+ * fausserait les soldes et le bilan, localement comme sur le serveur.
+ */
 export async function deleteAccount(id: string): Promise<void> {
-  const related = await db.transactions.where('accountId').equals(id).toArray();
+  const [outgoing, incoming] = await Promise.all([
+    db.transactions.where('accountId').equals(id).toArray(),
+    db.transactions.where('toAccountId').equals(id).toArray(),
+  ]);
+  const related = [...new Map([...outgoing, ...incoming].map((tx) => [tx.id, tx])).values()];
   await db.transaction('rw', db.transactions, db.accounts, async () => {
-    await db.transactions.bulkDelete([id, ...related.map((t) => toAccountId(t))].filter(Boolean) as string[]);
+    await db.transactions.bulkDelete(related.map((tx) => tx.id));
     await db.accounts.delete(id);
   });
   await enqueue('account', id, 'delete', null);
   for (const tx of related) {
     await enqueue('transaction', tx.id, 'delete', null);
   }
-}
-
-function toAccountId(tx: Transaction): string | undefined {
-  return tx.toAccountId;
 }
 
 // ----------------------------------------------------------------------------- catégories
@@ -140,6 +165,12 @@ export interface TransactionInput {
   amountOriginal: number;
   currencyOriginal: Transaction['currencyOriginal'];
   categoryId?: string;
+  /** Membre du foyer à qui l'opération est attribuée (facultatif). */
+  member?: string;
+  /** Activité professionnelle rattachée (ignorée pour un transfert). */
+  businessId?: string;
+  /** Facture professionnelle non encore encaissée / payée. */
+  settled?: boolean;
   date: string;
   note?: string;
 }
@@ -157,24 +188,35 @@ export async function computePrimary(
   return { amountInPrimary: converted ?? amountMinor, exchangeRate: Number(rate.toFixed(6)), primary };
 }
 
-export async function createTransaction(input: TransactionInput): Promise<string> {
+/** Crée une opération ; `id` est imposé par la génération des récurrences. */
+export async function createTransaction(input: TransactionInput, id?: string): Promise<string> {
   const family = await getActiveFamily();
   if (!family) throw new Error('no-family');
   const { amountInPrimary, exchangeRate, primary } = await computePrimary(input.amountOriginal, input.currencyOriginal);
-  const member = (await db.members.toCollection().first()) ?? null;
+  const user = getAuth()?.user ?? null;
+  // Un membre par défaut est repris de l'utilisateur connecté s'il est reconnu.
+  const memberName =
+    input.member?.trim() || (input.type === 'transfer' ? undefined : await defaultMemberName());
+  // Un transfert interne n'appartient pas à une activité ; sinon le règlement
+  // vaut réglé par défaut (les factures en attente sont marquées explicitement).
+  const businessId = input.type === 'transfer' ? undefined : input.businessId;
+  const settled = businessId ? input.settled ?? true : undefined;
   const tx: Transaction = {
-    id: uuid(),
+    id: id ?? uuid(),
     familyId: family.id,
     accountId: input.accountId,
     toAccountId: input.toAccountId,
-    authorId: member?.id ?? 'local-user',
-    authorName: member?.name ?? '—',
+    authorId: user?.id ?? 'local-user',
+    authorName: user?.name ?? '—',
     type: input.type,
     amountOriginal: input.amountOriginal,
     currencyOriginal: input.currencyOriginal,
     exchangeRate,
     amountInPrimary: input.currencyOriginal === primary ? input.amountOriginal : amountInPrimary,
     categoryId: input.categoryId,
+    member: memberName,
+    businessId,
+    settled,
     date: input.date,
     note: input.note,
     ...newSyncFields(),
@@ -405,6 +447,73 @@ export async function repayDebt(
   return payment.id;
 }
 
+// ----------------------------------------------------------------------------- récurrences
+
+export interface RecurringInput {
+  name: string;
+  type: RecurringRule['type'];
+  accountId: string;
+  categoryId: string;
+  amountOriginal: number;
+  currency: RecurringRule['currency'];
+  note?: string;
+  frequency: RecurrenceFrequency;
+  interval: number;
+  startDate: string;
+  endDate: string | null;
+}
+
+/** Champs mis à jour par l'écran ou par la génération automatique. */
+export type RecurringPatch = Partial<RecurringInput> & {
+  active?: boolean;
+  nextDueDate?: string;
+  lastGeneratedDate?: string;
+};
+
+/**
+ * Crée une règle. La première échéance traitée est celle du jour ou la suivante :
+ * le passé n'est jamais généré rétroactivement (pas de fausse dette historique).
+ */
+export async function createRecurringRule(input: RecurringInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const rule: RecurringRule = {
+    id: uuid(),
+    familyId: family.id,
+    ...input,
+    nextDueDate: firstRecurringDue(input.startDate, input.frequency, input.interval, todayISO()),
+    active: true,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db.recurring.put(rule);
+  await enqueue('recurring', rule.id, 'upsert', recordOf(rule));
+  return rule.id;
+}
+
+/**
+ * Modifie une règle. Si le calendrier change (début, fréquence, intervalle),
+ * la prochaine échéance est recalculée à partir d'aujourd'hui.
+ */
+export async function updateRecurringRule(id: string, patch: RecurringPatch): Promise<void> {
+  const base = await baseSnapshotOf('recurring', id);
+  const current = await db.recurring.get(id);
+  if (!current) throw new Error('not-found');
+  const updated: RecurringRule = { ...current, ...patch };
+  if (patch.startDate !== undefined || patch.frequency !== undefined || patch.interval !== undefined) {
+    updated.nextDueDate = firstRecurringDue(updated.startDate, updated.frequency, updated.interval, todayISO());
+  }
+  const final: RecurringRule = { ...updated, ...(updatedSyncFields(current) as object) };
+  await db.recurring.put(final);
+  await enqueueUpsert('recurring', id, recordOf(final), current.rev, base);
+}
+
+/** Supprime la règle ; les opérations déjà générées restent dans l'historique. */
+export async function deleteRecurringRule(id: string): Promise<void> {
+  await db.recurring.delete(id);
+  await enqueue('recurring', id, 'delete', null);
+}
+
 // ----------------------------------------------------------------------------- foyer
 
 /** Modifie le profil du foyer : nom et/ou devise de consolidation. */
@@ -417,14 +526,246 @@ export async function updateFamilyProfile(input: { name?: string; primaryCurrenc
 
 // ----------------------------------------------------------------------------- utilitaires
 
+// ----------------------------------------------------------------------------- activités professionnelles
+
+export interface BusinessInput {
+  name: string;
+  activity: string;
+  taxId?: string;
+  notes?: string;
+}
+
+export async function createBusiness(input: BusinessInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const business: Business = {
+    id: uuid(),
+    familyId: family.id,
+    name: input.name.trim(),
+    activity: input.activity.trim(),
+    taxId: input.taxId?.trim() || undefined,
+    notes: input.notes?.trim() || undefined,
+    archived: false,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db.businesses.put(business);
+  await enqueue('business', business.id, 'upsert', recordOf(business));
+  return business.id;
+}
+
+export async function updateBusiness(id: string, patch: Partial<BusinessInput>): Promise<void> {
+  const base = await baseSnapshotOf('business', id);
+  const current = await db.businesses.get(id);
+  if (!current) throw new Error('not-found');
+  const updated: Business = { ...current, ...patch, ...(updatedSyncFields(current) as object) };
+  await db.businesses.put(updated);
+  await enqueueUpsert('business', id, recordOf(updated), current.rev, base);
+}
+
+/**
+ * Archive une activité : elle disparaît des écrans mais son historique reste
+ * intact (les opérations conservent leur rattachement).
+ */
+export async function archiveBusiness(id: string): Promise<void> {
+  const base = await baseSnapshotOf('business', id);
+  const current = await db.businesses.get(id);
+  if (!current) throw new Error('not-found');
+  const updated: Business = { ...current, archived: true, ...(updatedSyncFields(current) as object) };
+  await db.businesses.put(updated);
+  await enqueueUpsert('business', id, recordOf(updated), current.rev, base);
+}
+
+/** Marque une opération professionnelle comme réglée (ou en attente). */
+export async function setTransactionSettled(id: string, settled: boolean): Promise<void> {
+  await patchTransaction(id, { settled });
+}
+
+// ----------------------------------------------------------------------------- membres
+
+/**
+ * Liste locale des membres du foyer, utilisée pour attribuer les opérations.
+ * La vérité reste portée par `Transaction.member` (nom, synchronisé) : la table
+ * `members` n'est qu'un index alimenté par `syncMemberNames()`.
+ */
+
+/**
+ * Membre correspondant à l'utilisateur connecté (identifiant serveur, e-mail
+ * puis nom) : sert à pré-remplir l'attribution des nouvelles opérations.
+ */
+export async function defaultMemberName(): Promise<string | undefined> {
+  const user = getAuth()?.user ?? null;
+  if (!user) return undefined;
+  const members = await db.members.toArray();
+  return defaultMemberFor(members, user)?.name;
+}
+
+export async function createMember(name: string): Promise<string | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const family = await getActiveFamily();
+  if (!family) return null;
+  const existing = await db.members
+    .filter((member) => member.name.toLowerCase() === trimmed.toLowerCase())
+    .first();
+  if (existing) return existing.id;
+  // Le membre créé pour l'utilisateur connecté lui est rattaché, ce qui rend
+  // l'attribution par défaut insensible à un futur renommage.
+  const user = getAuth()?.user ?? null;
+  const isSelf = Boolean(user && user.name.trim().toLowerCase() === trimmed.toLowerCase());
+  const member: HouseholdMember = {
+    id: uuid(),
+    familyId: family.id,
+    userId: isSelf ? user!.id : '',
+    name: trimmed,
+    email: isSelf ? user!.email : '',
+    role: 'member',
+  };
+  await db.members.put(member);
+  return member.id;
+}
+
+/** Applique un correctif à une opération (et l'envoie à la synchronisation). */
+async function patchTransaction(id: string, patch: Partial<Transaction>): Promise<void> {
+  const current = await db.transactions.get(id);
+  if (!current) return;
+  const base = await baseSnapshotOf('transaction', id);
+  const updated: Transaction = { ...current, ...patch, ...(updatedSyncFields(current) as object) };
+  await db.transactions.put(updated);
+  await enqueueUpsert('transaction', id, recordOf(updated), current.rev, base);
+}
+
+/** Renomme un membre et reporte le nouveau nom sur ses opérations. */
+export async function renameMember(id: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const member = await db.members.get(id);
+  if (!member || member.name === trimmed) return;
+  await db.members.put({ ...member, name: trimmed });
+  const transactions = await db.transactions.filter((tx) => tx.member === member.name).toArray();
+  for (const tx of transactions) await patchTransaction(tx.id, { member: trimmed });
+}
+
+/** Retire un membre et désattribue ses opérations. */
+export async function deleteMember(id: string): Promise<void> {
+  const member = await db.members.get(id);
+  if (!member) return;
+  const transactions = await db.transactions.filter((tx) => tx.member === member.name).toArray();
+  for (const tx of transactions) await patchTransaction(tx.id, { member: undefined });
+  await db.members.delete(id);
+}
+
+/** Attribue une opération à un membre (`undefined` pour la désattribuer). */
+export async function assignTransactionMember(transactionId: string, member: string | undefined): Promise<void> {
+  await patchTransaction(transactionId, { member: member?.trim() || undefined });
+}
+
+/**
+ * Crée la ligne membre de chaque nom déjà utilisé par une opération, plus celle
+ * de l'utilisateur connecté (pour qu'il soit proposé par défaut).
+ */
+export async function syncMemberNames(): Promise<void> {
+  const transactions = await db.transactions.toArray();
+  const names = new Set(transactions.map((tx) => tx.member?.trim()).filter(Boolean) as string[]);
+  for (const name of names) await createMember(name);
+  const user = getAuth()?.user;
+  if (user?.name.trim()) await createMember(user.name);
+}
+
+// ----------------------------------------------------------------------------- patrimoine
+
+export interface WealthInput {
+  /** Épargne, créances et dettes **déjà consolidées** dans `primary`. */
+  savings: number;
+  receivables: number;
+  payables: number;
+  primary: CurrencyCode;
+  /** Date de la valorisation (aujourd'hui par défaut). */
+  date?: string;
+  /** Marquage d'une valeur estimée (repli sans relevé antérieur). */
+  estimated?: boolean;
+}
+
+/**
+ * Enregistre la valorisation du jour (id déterministe `wealth-<date>`).
+ * Idempotent : rien n'est écrit si les montants sont inchangés, ce qui évite de
+ * saturer la file de synchronisation à chaque rendu. Un relevé par jour suffit :
+ * le bilan d'une période utilise le dernier relevé antérieur à sa clôture.
+ */
+export async function recordWealthSnapshot(input: WealthInput): Promise<void> {
+  const family = await getActiveFamily();
+  if (!family) return;
+  const date = input.date ?? todayISO();
+  const id = `wealth-${date}`;
+  const existing = await db.wealth.get(id);
+  if (
+    existing &&
+    existing.savings === input.savings &&
+    existing.receivables === input.receivables &&
+    existing.payables === input.payables &&
+    existing.primary === input.primary &&
+    Boolean(existing.estimated) === Boolean(input.estimated)
+  ) {
+    return;
+  }
+  const base = existing ? await baseSnapshotOf('wealth', id) : null;
+  const row: WealthSnapshot = {
+    id,
+    familyId: family.id,
+    date,
+    primary: input.primary,
+    savings: input.savings,
+    receivables: input.receivables,
+    payables: input.payables,
+    estimated: input.estimated,
+    createdAt: existing?.createdAt ?? Date.now(),
+    ...(existing ? updatedSyncFields(existing) : newSyncFields()),
+  };
+  await db.wealth.put(row);
+  if (existing) await enqueueUpsert('wealth', id, recordOf(row), existing.rev, base);
+  else await enqueue('wealth', id, 'upsert', recordOf(row));
+}
+
+/**
+ * Complète les valorisations de fin de mois manquantes (voir `wealth.ts`).
+ * Appelé à chaque ouverture : l'application n'a pas besoin d'être ouverte le
+ * dernier jour du mois pour que ce jour soit valorisé.
+ */
+export async function ensureMonthEndValuations(
+  input: WealthInput & { startISO?: string },
+): Promise<number> {
+  const existing = await db.wealth.orderBy('date').toArray();
+  const today = todayISO();
+  const start = input.startISO ?? existing[0]?.date ?? `${today.slice(0, 7)}-01`;
+  const ends = monthEndsSince(start, today).slice(-24);
+  const plan = planMonthEndValuations(existing, ends, input);
+  for (const item of plan) {
+    await recordWealthSnapshot({
+      savings: item.savings,
+      receivables: item.receivables,
+      payables: item.payables,
+      primary: input.primary,
+      date: item.date,
+      estimated: item.estimated,
+    });
+  }
+  return plan.length;
+}
+
 function recordOf(value: object): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Champs de synchronisation d'une modification locale (new updatedAt). */
+/**
+ * Champs de synchronisation d'une modification locale (new updatedAt).
+ * Ne renvoie QUE les champs de synchronisation : étalé après un patch, il ne
+ * doit jamais réinjecter l'ancienne valeur des champs métier.
+ */
 export function updatedSyncFields(current: SyncFields): SyncFields {
   return {
-    ...current,
+    baseRev: current.baseRev,
+    rev: current.rev,
+    deviceId: current.deviceId,
     updatedAt: Date.now(),
     syncStatus: 'pending' as const,
   };
@@ -447,6 +788,10 @@ export async function resolveConflict(conflictId: string, keep: 'local' | 'remot
         return db.goals;
       case 'debt':
         return db.debts;
+      case 'recurring':
+        return db.recurring;
+      case 'business':
+        return db.businesses;
       default:
         return null;
     }

@@ -10,7 +10,7 @@ const ratesResponseSchema = z.object({
   base_code: z.string(),
   time_last_update_unix: z.number().optional(),
   time_last_update_utc: z.string().optional(),
-  rates: z.record(z.number().positive()),
+  rates: z.record(z.string(), z.number().positive()),
 });
 
 export type RatesSource = 'network' | 'cache' | 'fallback';

@@ -20,6 +20,7 @@ export type MobileProvider =
   | null;
 export type TransactionType = 'income' | 'expense' | 'transfer';
 export type DebtKind = 'payable' | 'receivable';
+export type RecurrenceFrequency = 'weekly' | 'monthly' | 'yearly';
 export type DebtStatus = 'open' | 'settled';
 export type SavingsStatus = 'active' | 'completed';
 
@@ -97,9 +98,36 @@ export interface Transaction extends SyncFields {
   /** Montant en sous-unités de la devise du foyer. */
   amountInPrimary: number;
   categoryId?: string;
+  /** Membre du foyer à qui l'opération est attribuée (facultatif). */
+  member?: string;
+  /** Activité professionnelle à laquelle l'opération se rattache (facultatif). */
+  businessId?: string;
+  /**
+   * Règlement d'une opération professionnelle : `false` = facture émise non
+   * encaissée (créance) ou facture reçue non payée (dette). Absent = réglée.
+   */
+  settled?: boolean;
   /** ISO date (YYYY-MM-DD). */
   date: string;
   note?: string;
+}
+
+/**
+ * Activité professionnelle suivie à côté du budget du foyer. Les opérations
+ * rattachées (`Transaction.businessId`) alimentent son compte de résultat, son
+ * bilan simplifié et son tableau de trésorerie.
+ */
+export interface Business extends SyncFields {
+  id: string;
+  familyId: string;
+  name: string;
+  /** Activité exercée (texte libre : vente, prestation, élevage…). */
+  activity: string;
+  /** Identifiant fiscal / RCCM (facultatif). */
+  taxId?: string;
+  notes?: string;
+  archived: boolean;
+  createdAt: number;
 }
 
 export interface Budget extends SyncFields {
@@ -151,6 +179,59 @@ export interface Debt extends SyncFields {
   createdAt: number;
 }
 
+/**
+ * Règle d'opération récurrente (loyer, salaire, abonnement…).
+ * À chaque échéance due, une opération est générée puis `nextDueDate` avance.
+ * L'identifiant de l'opération générée est déterministe : `rec-<ruleId>-<date>`,
+ * ce qui rend la génération idempotente (aucun doublon, même entre appareils).
+ */
+export interface RecurringRule extends SyncFields {
+  id: string;
+  familyId: string;
+  /** Libellé lisible (« Loyer », « Salaire »…). */
+  name: string;
+  type: 'income' | 'expense';
+  accountId: string;
+  categoryId: string;
+  /** Montant en sous-unités de `currency` (toujours positif). */
+  amountOriginal: number;
+  currency: CurrencyCode;
+  note?: string;
+  frequency: RecurrenceFrequency;
+  /** Toutes les N semaines / mois / années (>= 1). */
+  interval: number;
+  /** Première échéance (YYYY-MM-DD) ; son jour sert d'ancre aux échéances suivantes. */
+  startDate: string;
+  /** Prochaine échéance non encore générée (YYYY-MM-DD). */
+  nextDueDate: string;
+  /** Dernière échéance générée (YYYY-MM-DD). */
+  lastGeneratedDate?: string;
+  /** Fin de récurrence (YYYY-MM-DD) ou null. */
+  endDate: string | null;
+  active: boolean;
+  createdAt: number;
+}
+
+/**
+ * Valorisation du patrimoine à une date donnée (une par jour, id déterministe
+ * `wealth-<date>`). L'épargne et les dettes ne portent que leur montant courant :
+ * ces relevés permettent de reconstituer le patrimoine d'un bilan passé.
+ * Les montants sont déjà consolidés dans `primary`.
+ */
+export interface WealthSnapshot extends SyncFields {
+  id: string;
+  familyId: string;
+  /** ISO date (YYYY-MM-DD). */
+  date: string;
+  primary: CurrencyCode;
+  savings: number;
+  receivables: number;
+  payables: number;
+  /** true si la valeur est une estimation (aucun relevé antérieur à reporter). */
+  estimated?: boolean;
+  createdAt: number;
+}
+
 /** Ligne de taux de change (base USD). */
 export interface RateSnapshot {
   base: CurrencyCode;
@@ -162,7 +243,16 @@ export interface RateSnapshot {
 }
 
 /** Opération en file d'attente de synchronisation (idempotente par UUID). */
-export type SyncEntity = 'account' | 'transaction' | 'budget' | 'goal' | 'debt' | 'category';
+export type SyncEntity =
+  | 'account'
+  | 'transaction'
+  | 'budget'
+  | 'goal'
+  | 'debt'
+  | 'category'
+  | 'recurring'
+  | 'wealth'
+  | 'business';
 
 export interface OutboxOperation {
   id: string;
@@ -174,6 +264,8 @@ export interface OutboxOperation {
   createdAt: number;
   retryCount: number;
   lastError?: string;
+  /** Horodatage du prochain essai (repli exponentiel après refus). */
+  nextAttemptAt?: number;
   status: 'queued' | 'inflight' | 'failed';
 }
 
