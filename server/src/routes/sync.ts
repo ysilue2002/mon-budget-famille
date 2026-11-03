@@ -79,9 +79,11 @@ async function logChange(client: TxClient, familyId: string, entity: string, rec
 interface PushResult {
   opId: string;
   rev: number;
-  status: 'applied' | 'conflict' | 'duplicate';
+  status: 'applied' | 'conflict' | 'duplicate' | 'failed';
   mergedPayload: Record<string, unknown> | null;
   conflicts?: { field: string; remoteValue: unknown; localValue: unknown }[];
+  /** La ligne est supprimée côté serveur : le client doit retirer la sienne. */
+  deleted?: boolean;
 }
 
 async function applyUpsert(client: TxClient, familyId: string, op: PushOpInput, rev: number): Promise<PushResult> {
@@ -90,17 +92,36 @@ async function applyUpsert(client: TxClient, familyId: string, op: PushOpInput, 
   const changedFields = op.changedFields ?? Object.keys(payload);
   const baseSnapshot = isPlainObject(op.baseSnapshot) ? op.baseSnapshot : {};
 
+  if (existing?.deleted && op.baseRev < existing.rev) {
+    // Le client a construit son opération avant d'apprendre la suppression :
+    // la suppression gagne, l'upsert ne ressuscite pas la ligne. Les champs
+    // abandonnés remontent en conflit pour que l'utilisateur le voie.
+    return {
+      opId: op.opId,
+      rev: existing.rev,
+      status: 'conflict',
+      mergedPayload: null,
+      deleted: true,
+      conflicts: changedFields.map((field) => ({ field, remoteValue: null, localValue: payload[field] })),
+    };
+  }
+
   if (!existing || existing.deleted) {
-    const record: Record<string, unknown> = { ...payload, id: op.entityId, rev: 1, baseRev: 0, syncStatus: 'synced' };
+    // Création, ou recréation après une suppression connue du client : la
+    // révision reprend après le tombstone au lieu de revenir à 1, sinon le
+    // client se croit à jour d'une révision que le serveur a dépassée.
+    const baseRev = existing?.rev ?? 0;
+    const newRev = baseRev + 1;
+    const record: Record<string, unknown> = { ...payload, id: op.entityId, rev: newRev, baseRev: newRev, syncStatus: 'synced' };
     await client.query(
       `INSERT INTO records (family_id, entity, record_id, record, rev, deleted, updated_at)
-       VALUES ($1, $2, $3, $4, 1, false, now())
+       VALUES ($1, $2, $3, $4, $5, false, now())
        ON CONFLICT (family_id, entity, record_id)
-       DO UPDATE SET record = $4, rev = records.rev + 1, deleted = false, updated_at = now()`,
-      [familyId, op.entity, op.entityId, JSON.stringify(record)],
+       DO UPDATE SET record = $4, rev = $5, deleted = false, updated_at = now()`,
+      [familyId, op.entity, op.entityId, JSON.stringify(record), newRev],
     );
-    await logChange(client, familyId, op.entity, op.entityId, record, existing ? existing.rev + 1 : 1, false);
-    return { opId: op.opId, rev: 1, status: 'applied', mergedPayload: null };
+    await logChange(client, familyId, op.entity, op.entityId, record, newRev, false);
+    return { opId: op.opId, rev: newRev, status: 'applied', mergedPayload: null };
   }
 
   const outcome = mergeRecord(baseSnapshot, payload, existing.record, changedFields);
@@ -155,6 +176,7 @@ router.post('/push', requireAuth, requireRole('member'), async (req: Request, re
             rev: current?.rev ?? 0,
             status: 'duplicate',
             mergedPayload: current && !current.deleted ? current.record : null,
+            deleted: current?.deleted ?? false,
           });
           continue;
         }
@@ -170,7 +192,11 @@ router.post('/push', requireAuth, requireRole('member'), async (req: Request, re
         results.push(result);
       } catch (error) {
         await single.query('ROLLBACK').catch(() => undefined);
-        throw error;
+        // Isolation par opération : une écriture invalide ne doit pas faire
+        // échouer tout le lot ni bloquer les opérations suivantes du client.
+        // Le détail reste dans les journaux serveur (pas de fuite SQL au client).
+        console.error('[sync/push]', op.opId, error);
+        results.push({ opId: op.opId, rev: 0, status: 'failed', mergedPayload: null });
       } finally {
         single.release();
       }
@@ -179,9 +205,11 @@ router.post('/push', requireAuth, requireRole('member'), async (req: Request, re
       results: results.map((result) => ({
         opId: result.opId,
         rev: result.rev,
-        status: result.status === 'duplicate' ? 'duplicate' : result.status,
+        status: result.status,
         mergedPayload: result.mergedPayload,
         conflicts: result.conflicts,
+        ...(result.deleted ? { deleted: true } : {}),
+        ...(result.status === 'failed' ? { error: 'operation-failed' } : {}),
       })),
       serverTime: Date.now(),
     });
@@ -215,6 +243,9 @@ router.get('/pull', requireAuth, async (req: Request, res: Response) => {
     );
     const changes = rows.rows.map((row) => ({
       entity: row.entity,
+      // `record` est null pour un tombstone : le client a besoin de
+      // `recordId` pour savoir quelle ligne locale supprimer.
+      recordId: row.record_id,
       record: row.record,
       deleted: row.deleted,
       rev: Number(row.rev),

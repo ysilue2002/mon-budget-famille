@@ -10,7 +10,7 @@ import { z } from 'zod';
 const responseSchema = z.object({
   base_code: z.string(),
   time_last_update_unix: z.number().optional(),
-  rates: z.record(z.number().positive()),
+  rates: z.record(z.string(), z.number().positive()),
 });
 
 const RATES_API_URL = process.env.RATES_API_URL || 'https://open.er-api.com/v6/latest/USD';

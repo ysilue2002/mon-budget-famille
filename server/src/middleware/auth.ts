@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../db/pool';
+import { JWT_SECRET } from '../config';
 import type { Role } from '../validation';
 
 export interface AuthRequest extends Request {
@@ -11,8 +12,6 @@ export interface AuthRequest extends Request {
   };
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'changez-moi-en-production';
-
 /** Extrait le JWT Bearer, vérifie la signature et résout foyer + rôle. */
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const [bearer, token] = (req.headers.authorization ?? '').split(' ');
@@ -22,10 +21,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
+    // Un compte peut appartenir à plusieurs foyers via `memberships` : la
+    // plus récente adhésion l'emporte (celle à laquelle l'utilisateur vient
+    // de se rattacher, par exemple via une invitation).
     const rows = await query<{ user_id: string; family_id: string; role: Role }>(
       `SELECT m.user_id, m.family_id, m.role
        FROM memberships m
        WHERE m.user_id = $1
+       ORDER BY m.created_at DESC
        LIMIT 1`,
       [payload.sub],
     );
