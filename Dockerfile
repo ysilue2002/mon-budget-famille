@@ -9,10 +9,12 @@ ENV NODE_ENV=production
 # Dépendances serveur complètes (compilation), lockfile respecté.
 FROM base AS build
 COPY server/package.json server/package-lock.json ./
-RUN npm ci
+# NODE_ENV=production (hérité) ferait npm ci sauter les devDependencies dont la
+# compilation a besoin : --include=dev les force, puis élagage après le tsc.
+RUN npm ci --include=dev
 COPY server/ .
 # Si la compilation ou le typecheck échoue, l'image n'est pas construite.
-RUN npx tsc -p tsconfig.json && rm -rf node_modules && npm ci --omit=dev
+RUN npx tsc -p tsconfig.json && npm prune --omit=dev
 
 # Image finale : dist/ + dépendances de production + fichiers SQL de migration
 # (migrate.ts lit src/db/migrations relativement au répertoire courant).
