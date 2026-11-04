@@ -15,3 +15,7 @@ coverage
 src/**/*.js
 vite.config.js
 vite.preview.config.mjs
+
+# Données binaires PostgreSQL locales (base brute + installation locale), hors git.
+server/.pgdata/
+server/.pgsql/
