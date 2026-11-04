@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { Pool, type QueryResult, type QueryResultRow } from 'pg';
+import { Pool, type PoolConfig, type QueryResult, type QueryResultRow } from 'pg';
 
 /**
  * Chargement minimal de .env (sans dépendance dotenv) :
@@ -30,7 +30,26 @@ if (!connectionString) {
   throw new Error('DATABASE_URL manquant : copier server/.env.example vers server/.env');
 }
 
-export const pool = new Pool({ connectionString, max: 10 });
+/**
+ * SSL pour les bases PostgreSQL hébergées (Supabase, etc.) :
+ * actif quand l'hôte est un pooler Supabase ou quand DB_SSL=true.
+ * `rejectUnauthorized: false` : le pooler Supabase présente un certificat
+ * signé mais dont la chaîne ne valide pas toujours côté Node ; la connexion
+ * reste chiffrée (TLS) même vérification laissée de côté.
+ */
+let ssl: PoolConfig['ssl'];
+const dbHost = (() => {
+  try {
+    return new URL(connectionString).hostname;
+  } catch {
+    return '';
+  }
+})();
+if (process.env.DB_SSL === 'true' || dbHost.includes('supabase')) {
+  ssl = { rejectUnauthorized: false };
+}
+
+export const pool = new Pool({ connectionString, max: 10, ssl });
 
 /** Exécute une requête paramétrée. */
 export function query<T extends QueryResultRow = QueryResultRow>(

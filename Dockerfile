@@ -25,4 +25,7 @@ COPY --from=build /app/dist ./dist
 COPY server/src/db/migrations ./src/db/migrations
 EXPOSE 4000
 USER node
-CMD ["node", "dist/index.js"]
+# Démarrage : migrations idempotentes (schema_migrations) puis API.
+# Un hébergement (Render) ne change pas la commande ; le conteneur
+# s'auto-charge de mettre la base a jour a chaque deploiement.
+CMD ["sh", "-c", "node dist/db/migrate.js && node dist/index.js"]
