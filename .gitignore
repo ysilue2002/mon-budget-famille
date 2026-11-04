@@ -19,3 +19,7 @@ vite.preview.config.mjs
 # Données binaires PostgreSQL locales (base brute + installation locale), hors git.
 server/.pgdata/
 server/.pgsql/
+
+# Cache de build TypeScript incrémental.
+tsconfig.tsbuildinfo
+server/tsconfig.tsbuildinfo
