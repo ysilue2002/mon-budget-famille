@@ -39,7 +39,8 @@
     "suppliers": "suppliers",
     "advances": "Advances",
     "profile": "Profile",
-    "expenses": "Expenses"
+    "expenses": "Expenses",
+    "balances": "Statements"
   },
   "common": {
     "save": "Save",
@@ -757,5 +758,51 @@
     "amountRequired": "Enter an amount greater than zero.",
     "noBusiness": "Create your business in My profile first.",
     "hint": "An expense reduces your available money and your earnings, whether paid or on credit."
+  },
+  "balances": {
+    "title": "Statements",
+    "kind": {
+      "month": "Month",
+      "quarter": "Quarter",
+      "year": "Year"
+    },
+    "previousPeriod": "Previous period",
+    "nextPeriod": "Next period",
+    "business": "Business",
+    "range": "From {{from}} to {{to}}",
+    "sales": "Sales",
+    "salesHint": "{{count}} sale(s) invoiced",
+    "purchases": "Purchases",
+    "purchasesHint": "{{count}} goods purchase(s)",
+    "otherExpenses": "Other expenses",
+    "otherExpensesHint": "Rent, transport, wages…",
+    "result": "Estimated profit",
+    "marginHint": "Margin {{value}} %",
+    "cashIn": "Money received",
+    "cashInHint": "Cash actually received",
+    "cashOut": "Money paid",
+    "cashOutHint": "Cash actually paid out",
+    "cashAvailable": "Money available",
+    "cashAvailableHint": "Cash + bank + mobile money",
+    "stockValue": "Stock value",
+    "stockHint": "At purchase price, today",
+    "customerCredit": "Customer credit",
+    "customerCreditHint": "Still to collect",
+    "supplierCredit": "Supplier credit",
+    "supplierCreditHint": "Still to pay",
+    "advancesReceived": "Advances received",
+    "advancesReceivedHint": "In the period, not a sale",
+    "advancesOpen": "Open advances",
+    "advancesOpenHint": "Orders not delivered",
+    "resultVsCash": "Profit is what you earned; money available is what you actually hold. An unpaid invoice raises profit without raising available money.",
+    "comparison": "Compared with the previous period",
+    "delta": "Change",
+    "expensesTotal": "Total costs",
+    "chartTitle": "Sales and costs, month by month",
+    "chartHint": "Year {{year}}",
+    "chartSales": "Sales",
+    "chartExpenses": "Costs",
+    "noBusiness": "No business yet",
+    "noBusinessHint": "Create your business in My profile to see your statements."
   }
 }

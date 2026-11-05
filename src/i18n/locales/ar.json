@@ -39,7 +39,8 @@
     "suppliers": "الموردون",
     "advances": "السلف",
     "profile": "الملف الشخصي",
-    "expenses": "المصروفات"
+    "expenses": "المصروفات",
+    "balances": "الميزانيات"
   },
   "common": {
     "save": "حفظ",
@@ -757,5 +758,51 @@
     "amountRequired": "أدخل مبلغًا أكبر من صفر.",
     "noBusiness": "أنشئ نشاطك أولًا في ملفي الشخصي.",
     "hint": "المصروف ينقص أموالك المتاحة وأرباحك، سواء كان مدفوعًا أو بالأجل."
+  },
+  "balances": {
+    "title": "الميزانيات",
+    "kind": {
+      "month": "شهر",
+      "quarter": "ربع سنة",
+      "year": "سنة"
+    },
+    "previousPeriod": "الفترة السابقة",
+    "nextPeriod": "الفترة التالية",
+    "business": "النشاط",
+    "range": "من {{from}} إلى {{to}}",
+    "sales": "المبيعات",
+    "salesHint": "{{count}} عملية بيع مفوترة",
+    "purchases": "المشتريات",
+    "purchasesHint": "{{count}} عملية شراء بضائع",
+    "otherExpenses": "مصروفات أخرى",
+    "otherExpensesHint": "الإيجار، النقل، الأجور…",
+    "result": "الربح التقديري",
+    "marginHint": "الهامش {{value}} %",
+    "cashIn": "المقبوضات",
+    "cashInHint": "الأموال المستلمة فعليًا",
+    "cashOut": "المدفوعات",
+    "cashOutHint": "الأموال المدفوعة فعليًا",
+    "cashAvailable": "الأموال المتاحة",
+    "cashAvailableHint": "الصندوق + البنك + المحفظة",
+    "stockValue": "قيمة المخزون",
+    "stockHint": "بسعر الشراء، اليوم",
+    "customerCredit": "ديون العملاء",
+    "customerCreditHint": "المتبقي للتحصيل",
+    "supplierCredit": "ديون الموردين",
+    "supplierCreditHint": "المتبقي للدفع",
+    "advancesReceived": "السلف المستلمة",
+    "advancesReceivedHint": "خلال الفترة، وليست بيعًا",
+    "advancesOpen": "السلف الجارية",
+    "advancesOpenHint": "طلبات لم تُسلّم",
+    "resultVsCash": "الربح هو ما كسبته، والأموال المتاحة هي ما تملكه فعليًا في حساباتك. الفاتورة غير المدفوعة تزيد الربح دون أن تزيد الأموال المتاحة.",
+    "comparison": "مقارنة بالفترة السابقة",
+    "delta": "الفرق",
+    "expensesTotal": "إجمالي التكاليف",
+    "chartTitle": "المبيعات والتكاليف شهرًا بشهر",
+    "chartHint": "سنة {{year}}",
+    "chartSales": "المبيعات",
+    "chartExpenses": "التكاليف",
+    "noBusiness": "لا يوجد نشاط",
+    "noBusinessHint": "أنشئ نشاطك في ملفي الشخصي لعرض ميزانياتك."
   }
 }

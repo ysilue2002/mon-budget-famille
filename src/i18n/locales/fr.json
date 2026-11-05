@@ -39,7 +39,8 @@
     "suppliers": "fournisseurs",
     "advances": "Avances",
     "profile": "Profil",
-    "expenses": "Dépenses"
+    "expenses": "Dépenses",
+    "balances": "Bilans"
   },
   "common": {
     "save": "Enregistrer",
@@ -757,5 +758,51 @@
     "amountRequired": "Saisissez un montant supérieur à zéro.",
     "noBusiness": "Créez d'abord votre activité dans Mon profil.",
     "hint": "Une dépense diminue votre argent disponible et vos gains, qu'elle soit payée ou à crédit."
+  },
+  "balances": {
+    "title": "Bilans",
+    "kind": {
+      "month": "Mois",
+      "quarter": "Trimestre",
+      "year": "Année"
+    },
+    "previousPeriod": "Période précédente",
+    "nextPeriod": "Période suivante",
+    "business": "Activité",
+    "range": "Du {{from}} au {{to}}",
+    "sales": "Ventes",
+    "salesHint": "{{count}} vente(s) facturée(s)",
+    "purchases": "Achats",
+    "purchasesHint": "{{count}} achat(s) de marchandises",
+    "otherExpenses": "Autres dépenses",
+    "otherExpensesHint": "Loyer, transport, salaires…",
+    "result": "Bénéfice estimé",
+    "marginHint": "Marge {{value}} %",
+    "cashIn": "Encaissements",
+    "cashInHint": "Argent réellement reçu",
+    "cashOut": "Paiements",
+    "cashOutHint": "Argent réellement payé",
+    "cashAvailable": "Argent disponible",
+    "cashAvailableHint": "Caisse + banque + mobile money",
+    "stockValue": "Valeur du stock",
+    "stockHint": "Au prix d’achat, aujourd’hui",
+    "customerCredit": "Crédits clients",
+    "customerCreditHint": "Reste à encaisser",
+    "supplierCredit": "Crédits fournisseurs",
+    "supplierCreditHint": "Reste à payer",
+    "advancesReceived": "Avances reçues",
+    "advancesReceivedHint": "Sur la période, hors vente",
+    "advancesOpen": "Avances en cours",
+    "advancesOpenHint": "Commandes non livrées",
+    "resultVsCash": "Le bénéfice est ce que vous avez gagné ; l’argent disponible est ce que vous avez réellement sur vos comptes. Une facture impayée augmente le bénéfice sans augmenter l’argent disponible.",
+    "comparison": "Comparaison avec la période précédente",
+    "delta": "Écart",
+    "expensesTotal": "Charges totales",
+    "chartTitle": "Ventes et charges, mois par mois",
+    "chartHint": "Année {{year}}",
+    "chartSales": "Ventes",
+    "chartExpenses": "Charges",
+    "noBusiness": "Aucune activité",
+    "noBusinessHint": "Créez votre activité dans Mon profil pour voir vos bilans."
   }
 }
