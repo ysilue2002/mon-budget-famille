@@ -38,7 +38,8 @@
     "clients": "clients",
     "suppliers": "fournisseurs",
     "advances": "Avances",
-    "profile": "Profil"
+    "profile": "Profil",
+    "expenses": "Dépenses"
   },
   "common": {
     "save": "Enregistrer",
@@ -730,5 +731,31 @@
       "en": "English",
       "ar": "العربية"
     }
+  },
+  "expenses": {
+    "title": "Mes dépenses",
+    "new": "Nouvelle dépense",
+    "amount": "Montant",
+    "category": "Catégorie",
+    "date": "Date",
+    "account": "Compte",
+    "business": "Activité",
+    "note": "Note (facultatif)",
+    "paid": "Payée",
+    "credit": "À crédit",
+    "status": "État",
+    "onCredit": "Achetée à crédit (pas encore payée)",
+    "saved": "Dépense enregistrée.",
+    "thisMonth": "Ce mois-ci",
+    "monthTotal": "Dépenses du mois",
+    "unpaid": "Reste à payer",
+    "unpaidHint": "Dépenses à crédit",
+    "count": "{{count}} dépense(s)",
+    "empty": "Aucune dépense enregistrée",
+    "emptyHint": "Ajoutez vos achats et frais : ils se déduisent automatiquement de vos gains.",
+    "deleteConfirm": "Supprimer cette dépense ?",
+    "amountRequired": "Saisissez un montant supérieur à zéro.",
+    "noBusiness": "Créez d'abord votre activité dans Mon profil.",
+    "hint": "Une dépense diminue votre argent disponible et vos gains, qu'elle soit payée ou à crédit."
   }
 }

@@ -38,7 +38,8 @@
     "clients": "customers",
     "suppliers": "suppliers",
     "advances": "Advances",
-    "profile": "Profile"
+    "profile": "Profile",
+    "expenses": "Expenses"
   },
   "common": {
     "save": "Save",
@@ -730,5 +731,31 @@
       "en": "English",
       "ar": "العربية"
     }
+  },
+  "expenses": {
+    "title": "My expenses",
+    "new": "New expense",
+    "amount": "Amount",
+    "category": "Category",
+    "date": "Date",
+    "account": "Account",
+    "business": "Business",
+    "note": "Note (optional)",
+    "paid": "Paid",
+    "credit": "On credit",
+    "status": "Status",
+    "onCredit": "Bought on credit (not paid yet)",
+    "saved": "Expense saved.",
+    "thisMonth": "This month",
+    "monthTotal": "Expenses this month",
+    "unpaid": "Still to pay",
+    "unpaidHint": "Expenses on credit",
+    "count": "{{count}} expense(s)",
+    "empty": "No expenses yet",
+    "emptyHint": "Add your purchases and costs: they are automatically deducted from your earnings.",
+    "deleteConfirm": "Delete this expense?",
+    "amountRequired": "Enter an amount greater than zero.",
+    "noBusiness": "Create your business in My profile first.",
+    "hint": "An expense reduces your available money and your earnings, whether paid or on credit."
   }
 }
