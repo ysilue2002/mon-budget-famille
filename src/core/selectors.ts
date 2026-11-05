@@ -21,14 +21,23 @@ export function computeAccountBalance(
     toAmount?: number;
     /** Facture d'activité non encaissée (créance) : pas encore de l'argent. */
     settled?: boolean;
+    /** Part déjà encaissée d'une facture non soldée. */
+    settledAmount?: number;
   })[],
 ): number {
   let total = account.initialBalance;
   for (const tx of transactions) {
-    // Une vente à crédit (settled === false) entre au résultat mais pas dans
-    // le solde du compte : l'argent n'a pas encore été reçu. Les opérations du
-    // foyer n'ont pas ce champ et restent comptées normalement.
-    if (tx.settled === false) continue;
+    // Une facture non soldée entre au résultat pour son montant total, mais
+    // seul ce qui a déjà été encaissé entre dans le solde du compte. Les
+    // opérations du foyer n'ont pas ce champ et restent comptées normalement.
+    if (tx.settled === false) {
+      const received = Math.max(0, Math.round(tx.settledAmount ?? 0));
+      if (tx.accountId === account.id) {
+        if (tx.type === 'income') total += received;
+        else if (tx.type === 'expense') total -= received;
+      }
+      continue;
+    }
     if (tx.accountId === account.id) {
       switch (tx.type) {
         case 'income':

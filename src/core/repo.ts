@@ -9,6 +9,7 @@ import { getAuth } from '@/lib/api';
 import { convertMinor } from '@/core/money';
 import { uuid } from '@/lib/id';
 import { boundPaid, buildLines, stockDeltaMap, stockMovements, tradeDue, tradeTotal } from '@/core/trade';
+import { allocatePayment } from '@/core/payments';
 import { todayISO } from '@/lib/date';
 import { firstRecurringDue } from '@/lib/recurrence';
 import type {
@@ -21,6 +22,7 @@ import type {
   Family,
   FinancialAccount,
   HouseholdMember,
+  Party,
   PaymentMethod,
   Product,
   RecurrenceFrequency,
@@ -50,7 +52,8 @@ type SyncedEntity =
   | 'business'
   | 'product'
   | 'sale'
-  | 'purchase';
+  | 'purchase'
+  | 'party';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -79,6 +82,8 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.sales;
       case 'purchase':
         return db.purchases;
+      case 'party':
+        return db.parties;
     }
   })();
   const row = await table.get(id);
@@ -184,6 +189,8 @@ export interface TransactionInput {
   businessId?: string;
   /** Facture professionnelle non encore encaissée / payée. */
   settled?: boolean;
+  /** Part déjà réglée d'une facture non soldée. */
+  settledAmount?: number;
   date: string;
   note?: string;
 }
@@ -230,6 +237,7 @@ export async function createTransaction(input: TransactionInput, id?: string): P
     member: memberName,
     businessId,
     settled,
+    settledAmount: businessId ? input.settledAmount : undefined,
     date: input.date,
     note: input.note,
     ...newSyncFields(),
@@ -665,6 +673,8 @@ export interface TradeLineInput {
 export interface TradeInput {
   businessId: string;
   date: string;
+  /** Fiche client/fournisseur rattachée (facultatif). */
+  partyId?: string;
   partyName?: string;
   lines: TradeLineInput[];
   /** Montant déjà reçu (vente) ou payé (achat), en sous-unités. */
@@ -709,6 +719,7 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
     businessId: input.businessId,
     kind,
     date: input.date,
+    partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
     lines: documentLines,
     total,
@@ -733,6 +744,7 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
       categoryId: kind === 'sale' ? 'cat-activite' : 'cat-autres',
       businessId: input.businessId,
       settled: due === 0,
+      settledAmount: paid,
       date: input.date,
       note: `${kind === 'sale' ? 'Vente' : 'Achat'}${input.partyName ? ` — ${input.partyName.trim()}` : ''}`,
     },
@@ -761,6 +773,7 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
     ...current,
     businessId: input.businessId,
     date: input.date,
+    partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
     lines: documentLines,
     total,
@@ -793,6 +806,7 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
       categoryId: kind === 'sale' ? 'cat-activite' : 'cat-autres',
       businessId: input.businessId,
       settled: due === 0,
+      settledAmount: paid,
       date: input.date,
       note: `${kind === 'sale' ? 'Vente' : 'Achat'}${input.partyName ? ` — ${input.partyName.trim()}` : ''}`,
     });
@@ -815,6 +829,113 @@ export async function deleteTrade(kind: 'sale' | 'purchase', id: string): Promis
 /** Marque une opération professionnelle comme réglée (ou en attente). */
 export async function setTransactionSettled(id: string, settled: boolean): Promise<void> {
   await patchTransaction(id, { settled });
+}
+
+// ----------------------------------------------------------------------------- clients & fournisseurs
+
+export interface PartyInput {
+  kind: Party['kind'];
+  name: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+}
+
+export async function createParty(input: PartyInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const party: Party = {
+    id: uuid(),
+    familyId: family.id,
+    kind: input.kind,
+    name: input.name.trim(),
+    phone: input.phone?.trim() || undefined,
+    address: input.address?.trim() || undefined,
+    notes: input.notes?.trim() || undefined,
+    archived: false,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db.parties.put(party);
+  await enqueue('party', party.id, 'upsert', recordOf(party));
+  return party.id;
+}
+
+export async function updateParty(id: string, patch: Partial<PartyInput>): Promise<void> {
+  const base = await baseSnapshotOf('party', id);
+  const current = await db.parties.get(id);
+  if (!current) throw new Error('not-found');
+  const updated: Party = {
+    ...current,
+    ...patch,
+    ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+    ...(updatedSyncFields(current) as object),
+  };
+  await db.parties.put(updated);
+  await enqueueUpsert('party', id, recordOf(updated), current.rev, base);
+}
+
+/** Archive une fiche : elle quitte les listes, son historique reste lisible. */
+export async function archiveParty(id: string): Promise<void> {
+  const base = await baseSnapshotOf('party', id);
+  const current = await db.parties.get(id);
+  if (!current) return;
+  const updated: Party = { ...current, archived: true, ...(updatedSyncFields(current) as object) };
+  await db.parties.put(updated);
+  await enqueueUpsert('party', id, recordOf(updated), current.rev, base);
+}
+
+/** Documents rattachés à une fiche (ventes pour un client, achats sinon). */
+export async function partyDocuments(partyId: string): Promise<TradeDocument[]> {
+  const party = await db.parties.get(partyId);
+  if (!party) return [];
+  const rows = await (party.kind === 'client' ? db.sales : db.purchases).toArray();
+  return rows.filter(
+    (doc) =>
+      doc.partyId === partyId ||
+      (!doc.partyId && doc.partyName && doc.partyName.toLowerCase() === party.name.toLowerCase()),
+  );
+}
+
+/**
+ * Encaissement (client) ou paiement (fournisseur) sur une fiche : imputé aux
+ * documents encore dus, du plus ancien au plus récent. Seul le montant
+ * réellement imputé est renvoyé — le surplus n'est pas enregistré.
+ */
+export async function recordPartyPayment(partyId: string, amountMinor: number): Promise<number> {
+  const party = await db.parties.get(partyId);
+  if (!party) return 0;
+  const documents = await partyDocuments(partyId);
+  const owed = documents.filter((doc) => doc.due > 0);
+  const allocations = allocatePayment(
+    owed.map((doc) => ({ id: doc.id, due: doc.due, date: doc.date })),
+    amountMinor,
+  );
+  const kind = party.kind === 'client' ? ('sale' as const) : ('purchase' as const);
+  const table = kind === 'sale' ? db.sales : db.purchases;
+  let applied = 0;
+
+  for (const allocation of allocations) {
+    const document = owed.find((doc) => doc.id === allocation.id);
+    if (!document) continue;
+    const base = await baseSnapshotOf(kind, document.id);
+    const paid = Math.min(document.total, document.paid + allocation.amount);
+    const due = Math.max(0, document.total - paid);
+    const updated: TradeDocument = { ...document, paid, due, ...(updatedSyncFields(document) as object) };
+    await table.put(updated);
+    await enqueueUpsert(kind, document.id, recordOf(updated), document.rev, base);
+
+    const transaction = await db.transactions.get(`${kind}-${document.id}`);
+    if (transaction) {
+      const received = Math.min(transaction.amountOriginal, Math.max(0, (transaction.settledAmount ?? 0) + allocation.amount));
+      await patchTransaction(transaction.id, {
+        settledAmount: received,
+        settled: received >= transaction.amountOriginal,
+      });
+    }
+    applied += allocation.amount;
+  }
+  return applied;
 }
 
 // ----------------------------------------------------------------------------- membres
@@ -1034,6 +1155,8 @@ export async function resolveConflict(conflictId: string, keep: 'local' | 'remot
         return db.sales;
       case 'purchase':
         return db.purchases;
+      case 'party':
+        return db.parties;
       default:
         return null;
     }

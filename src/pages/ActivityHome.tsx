@@ -44,12 +44,13 @@ export default function ActivityHome() {
 
   const sales = inMonth.filter((tx) => tx.type === 'income').reduce((sum, tx) => sum + tx.amountInPrimary, 0);
   const expenses = inMonth.filter((tx) => tx.type === 'expense').reduce((sum, tx) => sum + tx.amountInPrimary, 0);
+  // Crédit restant = montant facturé − part déjà encaissée (paiements partiels).
   const customerCredit = tagged
     .filter((tx) => tx.type === 'income' && tx.settled === false)
-    .reduce((sum, tx) => sum + tx.amountInPrimary, 0);
+    .reduce((sum, tx) => sum + Math.max(0, tx.amountInPrimary - (tx.settledAmount ?? 0)), 0);
   const supplierCredit = tagged
     .filter((tx) => tx.type === 'expense' && tx.settled === false)
-    .reduce((sum, tx) => sum + tx.amountInPrimary, 0);
+    .reduce((sum, tx) => sum + Math.max(0, tx.amountInPrimary - (tx.settledAmount ?? 0)), 0);
 
   const moneyAvailable = (accounts ?? []).reduce((sum, account) => {
     const related = (transactions ?? []).filter(

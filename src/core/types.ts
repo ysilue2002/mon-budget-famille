@@ -118,6 +118,11 @@ export interface Transaction extends SyncFields {
    * encaissée (créance) ou facture reçue non payée (dette). Absent = réglée.
    */
   settled?: boolean;
+  /**
+   * Part déjà réglée d'une opération professionnelle non soldée (paiements
+   * partiels). Seul ce montant entre dans l'argent disponible.
+   */
+  settledAmount?: number;
   /** ISO date (YYYY-MM-DD). */
   date: string;
   note?: string;
@@ -167,6 +172,22 @@ export interface Product extends SyncFields {
 /** Moyens de paiement proposés à la saisie (indépendants des comptes). */
 export type PaymentMethod = 'cash' | 'wave' | 'orange' | 'mtn' | 'moov' | 'bank' | 'other';
 
+/**
+ * Fiche client ou fournisseur. Le nom est repris (copié) dans chaque document
+ * au moment de la saisie : renommer une fiche ne réécrit pas l'historique.
+ */
+export interface Party extends SyncFields {
+  id: string;
+  familyId: string;
+  kind: 'client' | 'supplier';
+  name: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  archived: boolean;
+  createdAt: number;
+}
+
 /** Ligne d'une vente ou d'un achat. Montants en sous-unités du foyer. */
 export interface TradeLine {
   id: string;
@@ -194,7 +215,9 @@ export interface TradeDocument extends SyncFields {
   /** Vente = entrée d'argent, achat = sortie. */
   kind: 'sale' | 'purchase';
   date: string;
-  /** Client (vente) ou fournisseur (achat), texte libre à ce stade. */
+  /** Fiche client/fournisseur rattachée (facultatif). */
+  partyId?: string;
+  /** Nom du client ou fournisseur, recopié à la saisie. */
   partyName?: string;
   lines: TradeLine[];
   total: number;
@@ -332,7 +355,8 @@ export type SyncEntity =
   | 'business'
   | 'product'
   | 'sale'
-  | 'purchase';
+  | 'purchase'
+  | 'party';
 
 export interface OutboxOperation {
   id: string;

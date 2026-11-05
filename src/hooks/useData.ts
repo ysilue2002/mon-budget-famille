@@ -68,6 +68,14 @@ export function usePurchases() {
   return useLiveQuery(() => db.purchases.orderBy('date').reverse().toArray(), []);
 }
 
+/** Fiches clients et fournisseurs, actives d'abord, triées par nom. */
+export function useParties() {
+  return useLiveQuery(async () => {
+    const rows = await db.parties.toArray();
+    return rows.sort((a, b) => Number(a.archived) - Number(b.archived) || a.name.localeCompare(b.name));
+  }, []);
+}
+
 /** Marchandises : les actives d'abord, triées par nom. */
 export function useProducts() {
   return useLiveQuery(async () => {

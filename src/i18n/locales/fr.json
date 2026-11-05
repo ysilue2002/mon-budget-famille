@@ -34,7 +34,9 @@
     "home": "Accueil",
     "products": "Marchandises",
     "sales": "ventes",
-    "purchases": "achats"
+    "purchases": "achats",
+    "clients": "clients",
+    "suppliers": "fournisseurs"
   },
   "common": {
     "save": "Enregistrer",
@@ -647,5 +649,31 @@
       "bank": "Virement bancaire",
       "other": "Autre"
     }
+  },
+  "parties": {
+    "clients": "Mes clients",
+    "suppliers": "Mes fournisseurs",
+    "newClient": "Nouveau client",
+    "newSupplier": "Nouveau fournisseur",
+    "empty": "Aucun client enregistré",
+    "emptySuppliers": "Aucun fournisseur enregistré",
+    "phone": "Téléphone",
+    "address": "Adresse (facultatif)",
+    "notes": "Notes",
+    "totalDue": "Total dû",
+    "count": "{{count}} fiche(s)",
+    "detail": "Fiche",
+    "amount": "Montant",
+    "account": "Compte",
+    "date": "Date",
+    "collect": "Encaisser",
+    "pay": "Payer",
+    "recorded": "Paiement enregistré : {{amount}}",
+    "exceeds": "Le montant dépasse le total dû.",
+    "nameRequired": "Indiquez le nom.",
+    "deleteConfirm": "Archiver cette fiche ? L’historique est conservé.",
+    "documents": "Documents",
+    "noDocuments": "Aucun document pour cette fiche.",
+    "historyHint": "Les règlements s’imputent aux documents dus, du plus ancien au plus récent."
   }
 }

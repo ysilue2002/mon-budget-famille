@@ -8,6 +8,7 @@ import type {
   Family,
   FinancialAccount,
   HouseholdMember,
+  Party,
   Product,
   TradeDocument,
   OutboxOperation,
@@ -32,6 +33,7 @@ export class BudgetFamilyDB extends Dexie {
   products!: Table<Product, string>;
   sales!: Table<TradeDocument, string>;
   purchases!: Table<TradeDocument, string>;
+  parties!: Table<Party, string>;
   categories!: Table<Category, string>;
   transactions!: Table<Transaction, string>;
   budgets!: Table<Budget, string>;
@@ -105,6 +107,10 @@ export class BudgetFamilyDB extends Dexie {
     this.version(8).stores({
       sales: 'id, familyId, businessId, date, syncStatus',
       purchases: 'id, familyId, businessId, date, syncStatus',
+    });
+    // v9 : fiches clients et fournisseurs.
+    this.version(9).stores({
+      parties: 'id, familyId, kind, name, syncStatus',
     });
   }
 }

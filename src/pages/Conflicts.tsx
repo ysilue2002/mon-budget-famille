@@ -18,6 +18,7 @@ const ENTITY_ICONS: Record<SyncConflict['entity'], string> = {
   product: 'Marchandise',
   sale: 'Vente',
   purchase: 'Achat',
+  party: 'Fiche client/fournisseur',
 };
 
 function preview(value: unknown): string {

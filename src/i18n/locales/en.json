@@ -34,7 +34,9 @@
     "home": "Home",
     "products": "Goods",
     "sales": "sales",
-    "purchases": "purchases"
+    "purchases": "purchases",
+    "clients": "customers",
+    "suppliers": "suppliers"
   },
   "common": {
     "save": "Save",
@@ -647,5 +649,31 @@
       "bank": "Bank transfer",
       "other": "Other"
     }
+  },
+  "parties": {
+    "clients": "My customers",
+    "suppliers": "My suppliers",
+    "newClient": "New customer",
+    "newSupplier": "New supplier",
+    "empty": "No customers recorded",
+    "emptySuppliers": "No suppliers recorded",
+    "phone": "Phone",
+    "address": "Address (optional)",
+    "notes": "Notes",
+    "totalDue": "Total owed",
+    "count": "{{count}} record(s)",
+    "detail": "Record",
+    "amount": "Amount",
+    "account": "Account",
+    "date": "Date",
+    "collect": "Collect",
+    "pay": "Pay",
+    "recorded": "Payment recorded: {{amount}}",
+    "exceeds": "The amount exceeds the total owed.",
+    "nameRequired": "Enter the name.",
+    "deleteConfirm": "Archive this record? History is kept.",
+    "documents": "Documents",
+    "noDocuments": "No document for this record.",
+    "historyHint": "Payments are applied to unpaid documents, oldest first."
   }
 }

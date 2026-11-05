@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   useAccounts,
   useBusinesses,
+  useParties,
   usePrimaryCurrency,
   useProducts,
   usePurchases,
@@ -70,6 +71,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
   const businesses = useBusinesses();
   const accounts = useAccounts();
   const products = useProducts();
+  const parties = useParties();
   const primaryCode = usePrimaryCurrency();
   const primary = primaryCode ?? 'XOF';
 
@@ -81,6 +83,9 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
   const activeBusinesses = (businesses ?? []).filter((business) => !business.archived);
   const activeProducts = (products ?? []).filter((product) => !product.archived);
   const accountList = (accounts ?? []).filter((account) => !account.archived);
+  const partyOptions = (parties ?? []).filter(
+    (party) => !party.archived && party.kind === (kind === 'sale' ? 'client' : 'supplier'),
+  );
 
   const fmt = (minor: number) => formatAmount(minor, primary, i18n.language);
 
@@ -175,9 +180,13 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
       setError(t('validation.noAccounts'));
       return;
     }
+    const matchedParty = partyOptions.find(
+      (party) => party.name.trim().toLowerCase() === form.partyName.trim().toLowerCase(),
+    );
     const input = {
       businessId: form.businessId,
       date: form.date,
+      partyId: matchedParty?.id,
       partyName: form.partyName,
       lines: cleanLines,
       paid: boundPaid(paidMinor, total),
@@ -301,7 +310,13 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                   value={form.partyName}
                   onChange={(event) => setForm({ ...form, partyName: event.target.value })}
                   maxLength={80}
+                  list="trade-parties"
                 />
+                <datalist id="trade-parties">
+                  {partyOptions.map((party) => (
+                    <option key={party.id} value={party.name} />
+                  ))}
+                </datalist>
               </Field>
             </div>
 
