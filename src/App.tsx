@@ -138,7 +138,7 @@ function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-4 flex items-center justify-between">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
           <SyncBadge />
           <LangSwitcher />
         </div>
@@ -166,7 +166,7 @@ function Layout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Entête mobile */}
-        <header className="app-chrome flex items-center justify-between gap-2 border-b border-forest-100 bg-white px-4 py-2 lg:hidden">
+        <header className="app-chrome flex flex-wrap items-center justify-between gap-2 border-b border-forest-100 bg-white px-4 py-2 lg:hidden">
           <div className="flex items-center gap-2">
             <img src="/icon.svg" alt="" className="h-8 w-8 rounded-lg" />
             <span className="text-sm font-bold text-forest-950">{spaceLabel}</span>
