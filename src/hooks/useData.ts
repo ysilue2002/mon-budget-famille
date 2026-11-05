@@ -58,6 +58,16 @@ export function useBusinesses() {
   }, []);
 }
 
+/** Ventes, les plus récentes d'abord. */
+export function useSales() {
+  return useLiveQuery(() => db.sales.orderBy('date').reverse().toArray(), []);
+}
+
+/** Achats, les plus récents d'abord. */
+export function usePurchases() {
+  return useLiveQuery(() => db.purchases.orderBy('date').reverse().toArray(), []);
+}
+
 /** Marchandises : les actives d'abord, triées par nom. */
 export function useProducts() {
   return useLiveQuery(async () => {

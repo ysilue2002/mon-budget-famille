@@ -32,7 +32,9 @@
     "recurring": "Récurrents",
     "business": "Activité pro",
     "home": "Accueil",
-    "products": "Marchandises"
+    "products": "Marchandises",
+    "sales": "ventes",
+    "purchases": "achats"
   },
   "common": {
     "save": "Enregistrer",
@@ -599,5 +601,51 @@
     "searchPlaceholder": "Rechercher une marchandise…",
     "totalUnits": "Quantité totale",
     "hint": "La valeur du stock est calculée au prix d’achat."
+  },
+  "trade": {
+    "salesTitle": "Mes ventes",
+    "purchasesTitle": "Mes achats",
+    "newSale": "Nouvelle vente",
+    "newPurchase": "Nouvel achat",
+    "client": "Client (facultatif)",
+    "supplier": "Fournisseur (facultatif)",
+    "date": "Date",
+    "lines": "Marchandises vendues",
+    "addLine": "Ajouter une ligne",
+    "product": "Marchandise",
+    "freeLine": "Ligne libre (sans stock)",
+    "qty": "Quantité",
+    "unitPrice": "Prix unitaire",
+    "lineTotal": "Total",
+    "total": "Montant total",
+    "paid": "Montant reçu",
+    "due": "Reste à payer",
+    "paymentMethod": "Mode de paiement",
+    "account": "Compte",
+    "note": "Note (facultatif)",
+    "statusPaid": "Payé",
+    "statusPartial": "Partiel",
+    "statusCredit": "À crédit",
+    "emptySales": "Aucune vente enregistrée",
+    "emptyPurchases": "Aucun achat enregistré",
+    "deleteConfirm": "Supprimer ce document ? Le stock sera rétabli.",
+    "hintSales": "Le stock est déduit automatiquement. Un reste à payer devient un crédit client.",
+    "hintPurchases": "Le stock est augmenté automatiquement. Un reste à payer devient un crédit fournisseur.",
+    "totalMonth": "Total du mois",
+    "received": "Déjà reçu",
+    "unpaid": "Reste dû",
+    "linesRequired": "Ajoutez au moins une ligne avec une quantité.",
+    "business": "Activité",
+    "noBusiness": "Créez d’abord votre activité.",
+    "count": "{{count}} document(s)",
+    "paymentMethods": {
+      "cash": "Espèces",
+      "wave": "Wave",
+      "orange": "Orange Money",
+      "mtn": "MTN Money",
+      "moov": "Moov Money",
+      "bank": "Virement bancaire",
+      "other": "Autre"
+    }
   }
 }

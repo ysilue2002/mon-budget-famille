@@ -164,6 +164,49 @@ export interface Product extends SyncFields {
   createdAt: number;
 }
 
+/** Moyens de paiement proposés à la saisie (indépendants des comptes). */
+export type PaymentMethod = 'cash' | 'wave' | 'orange' | 'mtn' | 'moov' | 'bank' | 'other';
+
+/** Ligne d'une vente ou d'un achat. Montants en sous-unités du foyer. */
+export interface TradeLine {
+  id: string;
+  /** Marchandise concernée (facultatif : ligne libre).
+
+   *  Renseigné, il déclenche le mouvement de stock.
+   */
+  productId?: string;
+  label: string;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+/**
+ * Vente (ou achat) : document à lignes qui alimente le journal de l'activité
+ * et déplace le stock. Une seule opération de trésorerie est créée par
+ * document (identifiant déterministe `sale-<id>` / `purchase-<id>`), marquée
+ * non réglée tant que le reste à payer n'est pas nul (crédit client/fournisseur).
+ */
+export interface TradeDocument extends SyncFields {
+  id: string;
+  familyId: string;
+  businessId: string;
+  /** Vente = entrée d'argent, achat = sortie. */
+  kind: 'sale' | 'purchase';
+  date: string;
+  /** Client (vente) ou fournisseur (achat), texte libre à ce stade. */
+  partyName?: string;
+  lines: TradeLine[];
+  total: number;
+  paid: number;
+  due: number;
+  paymentMethod: PaymentMethod;
+  /** Compte où l'argent entre (vente) ou sort (achat). */
+  accountId: string;
+  note?: string;
+  createdAt: number;
+}
+
 export interface Budget extends SyncFields {
   id: string;
   familyId: string;
@@ -287,7 +330,9 @@ export type SyncEntity =
   | 'recurring'
   | 'wealth'
   | 'business'
-  | 'product';
+  | 'product'
+  | 'sale'
+  | 'purchase';
 
 export interface OutboxOperation {
   id: string;

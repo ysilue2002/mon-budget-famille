@@ -63,8 +63,8 @@ export default function ActivityHome() {
   const earnings = sales - expenses;
 
   const shortcuts = [
-    { to: '/transactions', icon: '🛒', label: t('activity.newSale'), tone: 'primary' as const },
-    { to: '/transactions', icon: '📥', label: t('activity.newPurchase'), tone: 'ghost' as const },
+    { to: '/sales', icon: '🛒', label: t('activity.newSale'), tone: 'primary' as const },
+    { to: '/purchases', icon: '📥', label: t('activity.newPurchase'), tone: 'ghost' as const },
     { to: '/transactions', icon: '🧾', label: t('activity.newExpense'), tone: 'ghost' as const },
     { to: '/products', icon: '📦', label: t('activity.openProducts'), tone: 'ghost' as const },
     { to: '/business', icon: '📊', label: t('activity.openStatements'), tone: 'ghost' as const },

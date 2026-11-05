@@ -32,7 +32,9 @@
     "recurring": "Recurring",
     "business": "Business",
     "home": "Home",
-    "products": "Goods"
+    "products": "Goods",
+    "sales": "sales",
+    "purchases": "purchases"
   },
   "common": {
     "save": "Save",
@@ -599,5 +601,51 @@
     "searchPlaceholder": "Search for an item…",
     "totalUnits": "Total quantity",
     "hint": "Stock value is computed at purchase price."
+  },
+  "trade": {
+    "salesTitle": "My sales",
+    "purchasesTitle": "My purchases",
+    "newSale": "New sale",
+    "newPurchase": "New purchase",
+    "client": "Customer (optional)",
+    "supplier": "Supplier (optional)",
+    "date": "Date",
+    "lines": "Goods sold",
+    "addLine": "Add a line",
+    "product": "Item",
+    "freeLine": "Free line (no stock)",
+    "qty": "Quantity",
+    "unitPrice": "Unit price",
+    "lineTotal": "Total",
+    "total": "Total amount",
+    "paid": "Amount received",
+    "due": "Still to pay",
+    "paymentMethod": "Payment method",
+    "account": "Account",
+    "note": "Note (optional)",
+    "statusPaid": "Paid",
+    "statusPartial": "Partial",
+    "statusCredit": "On credit",
+    "emptySales": "No sales recorded",
+    "emptyPurchases": "No purchases recorded",
+    "deleteConfirm": "Delete this document? Stock will be restored.",
+    "hintSales": "Stock is deducted automatically. Any amount still to pay becomes customer credit.",
+    "hintPurchases": "Stock is increased automatically. Any amount still to pay becomes supplier credit.",
+    "totalMonth": "This month total",
+    "received": "Received so far",
+    "unpaid": "Outstanding",
+    "linesRequired": "Add at least one line with a quantity.",
+    "business": "Business",
+    "noBusiness": "Create your business first.",
+    "count": "{{count}} document(s)",
+    "paymentMethods": {
+      "cash": "Cash",
+      "wave": "Wave",
+      "orange": "Orange Money",
+      "mtn": "MTN Money",
+      "moov": "Moov Money",
+      "bank": "Bank transfer",
+      "other": "Other"
+    }
   }
 }

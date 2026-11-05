@@ -24,6 +24,7 @@ import Statements from '@/pages/Statements';
 import BusinessPage from '@/pages/Business';
 import ActivityHome from '@/pages/ActivityHome';
 import Products from '@/pages/Products';
+import Trades from '@/pages/Trades';
 import Settings from '@/pages/Settings';
 import Conflicts from '@/pages/Conflicts';
 import Login from '@/pages/Login';
@@ -50,6 +51,8 @@ const NAV_FAMILY = [
 /** Navigation de l'assistant « activité » : accueil, stock, ventes, bilans, documents. */
 const NAV_BUSINESS = [
   { to: '/', key: 'nav.home', icon: '🏠' },
+  { to: '/sales', key: 'nav.sales', icon: '🛒' },
+  { to: '/purchases', key: 'nav.purchases', icon: '📥' },
   { to: '/products', key: 'nav.products', icon: '📦' },
   { to: '/transactions', key: 'nav.transactions', icon: '🧾' },
   { to: '/business', key: 'nav.business', icon: '📊' },
@@ -168,6 +171,8 @@ function Layout() {
             <Routes>
               <Route path="/" element={business ? <ActivityHome /> : <Dashboard />} />
               <Route path="/products" element={<Products />} />
+              <Route path="/sales" element={<Trades kind="sale" />} />
+              <Route path="/purchases" element={<Trades kind="purchase" />} />
               <Route path="/login" element={<Login />} />
               <Route path="/join" element={<Join />} />
               <Route path="/reset" element={<Reset />} />

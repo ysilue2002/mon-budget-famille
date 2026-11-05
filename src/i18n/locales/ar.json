@@ -32,7 +32,9 @@
     "recurring": "العمليات المتكررة",
     "business": "النشاط المهني",
     "home": "الرئيسية",
-    "products": "البضائع"
+    "products": "البضائع",
+    "sales": "المبيعات",
+    "purchases": "المشتريات"
   },
   "common": {
     "save": "حفظ",
@@ -599,5 +601,51 @@
     "searchPlaceholder": "ابحث عن بضاعة…",
     "totalUnits": "الكمية الإجمالية",
     "hint": "تُحسب قيمة المخزون بسعر الشراء."
+  },
+  "trade": {
+    "salesTitle": "مبيعاتي",
+    "purchasesTitle": "مشترياتي",
+    "newSale": "بيع جديد",
+    "newPurchase": "شراء جديد",
+    "client": "العميل (اختياري)",
+    "supplier": "المورد (اختياري)",
+    "date": "التاريخ",
+    "lines": "البضائع المبيعة",
+    "addLine": "إضافة سطر",
+    "product": "البضاعة",
+    "freeLine": "سطر حر (بدون مخزون)",
+    "qty": "الكمية",
+    "unitPrice": "سعر الوحدة",
+    "lineTotal": "الإجمالي",
+    "total": "المبلغ الإجمالي",
+    "paid": "المبلغ المستلم",
+    "due": "المتبقي للدفع",
+    "paymentMethod": "طريقة الدفع",
+    "account": "الحساب",
+    "note": "ملاحظة (اختياري)",
+    "statusPaid": "مدفوع",
+    "statusPartial": "جزئي",
+    "statusCredit": "بالأجل",
+    "emptySales": "لا توجد مبيعات مسجلة",
+    "emptyPurchases": "لا توجد مشتريات مسجلة",
+    "deleteConfirm": "حذف هذا المستند؟ سيُعاد المخزون.",
+    "hintSales": "يُخصم المخزون تلقائيًا. المبلغ المتبقي يصبح دينًا على العميل.",
+    "hintPurchases": "يُضاف إلى المخزون تلقائيًا. المبلغ المتبقي يصبح دينًا للمورد.",
+    "totalMonth": "إجمالي الشهر",
+    "received": "المستلم",
+    "unpaid": "المتبقي",
+    "linesRequired": "أضف سطرًا واحدًا على الأقل بكمية.",
+    "business": "النشاط",
+    "noBusiness": "أنشئ نشاطك أولًا.",
+    "count": "{{count}} مستند",
+    "paymentMethods": {
+      "cash": "نقدًا",
+      "wave": "Wave",
+      "orange": "Orange Money",
+      "mtn": "MTN Money",
+      "moov": "Moov Money",
+      "bank": "تحويل بنكي",
+      "other": "أخرى"
+    }
   }
 }

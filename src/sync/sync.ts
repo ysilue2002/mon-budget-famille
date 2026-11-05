@@ -28,6 +28,10 @@ function tableFor(entity: SyncEntity): Table<unknown, string> | null {
       return db.businesses;
     case 'product':
       return db.products;
+    case 'sale':
+      return db.sales;
+    case 'purchase':
+      return db.purchases;
     default:
       return null;
   }

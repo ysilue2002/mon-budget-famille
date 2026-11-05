@@ -17,10 +17,18 @@ export function sumByType(transactions: WithAmountPrimary[], type: Transaction['
 /** Solde d'un compte : solde initial + revenus + transferts reçus − dépenses − transferts envoyés. */
 export function computeAccountBalance(
   account: Pick<FinancialAccount, 'id' | 'initialBalance'>,
-  transactions: (Pick<Transaction, 'accountId' | 'toAccountId' | 'type' | 'amountOriginal'> & { toAmount?: number })[],
+  transactions: (Pick<Transaction, 'accountId' | 'toAccountId' | 'type' | 'amountOriginal'> & {
+    toAmount?: number;
+    /** Facture d'activité non encaissée (créance) : pas encore de l'argent. */
+    settled?: boolean;
+  })[],
 ): number {
   let total = account.initialBalance;
   for (const tx of transactions) {
+    // Une vente à crédit (settled === false) entre au résultat mais pas dans
+    // le solde du compte : l'argent n'a pas encore été reçu. Les opérations du
+    // foyer n'ont pas ce champ et restent comptées normalement.
+    if (tx.settled === false) continue;
     if (tx.accountId === account.id) {
       switch (tx.type) {
         case 'income':

@@ -16,6 +16,8 @@ const ENTITY_ICONS: Record<SyncConflict['entity'], string> = {
   wealth: '📑',
   business: '💼',
   product: 'Marchandise',
+  sale: 'Vente',
+  purchase: 'Achat',
 };
 
 function preview(value: unknown): string {

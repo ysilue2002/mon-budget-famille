@@ -8,6 +8,7 @@ import { defaultMemberFor } from '@/core/members';
 import { getAuth } from '@/lib/api';
 import { convertMinor } from '@/core/money';
 import { uuid } from '@/lib/id';
+import { boundPaid, buildLines, stockDeltaMap, stockMovements, tradeDue, tradeTotal } from '@/core/trade';
 import { todayISO } from '@/lib/date';
 import { firstRecurringDue } from '@/lib/recurrence';
 import type {
@@ -20,8 +21,10 @@ import type {
   Family,
   FinancialAccount,
   HouseholdMember,
+  PaymentMethod,
   Product,
   RecurrenceFrequency,
+  TradeDocument,
   RecurringRule,
   SavingsGoal,
   SyncFields,
@@ -45,7 +48,9 @@ type SyncedEntity =
   | 'recurring'
   | 'wealth'
   | 'business'
-  | 'product';
+  | 'product'
+  | 'sale'
+  | 'purchase';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -70,6 +75,10 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.businesses;
       case 'product':
         return db.products;
+      case 'sale':
+        return db.sales;
+      case 'purchase':
+        return db.purchases;
     }
   })();
   const row = await table.get(id);
@@ -644,6 +653,165 @@ export async function deleteProduct(id: string): Promise<void> {
   await enqueue('product', id, 'delete', null);
 }
 
+// ----------------------------------------------------------------------------- ventes & achats
+
+export interface TradeLineInput {
+  productId?: string;
+  label: string;
+  qty: number;
+  unitPrice: number;
+}
+
+export interface TradeInput {
+  businessId: string;
+  date: string;
+  partyName?: string;
+  lines: TradeLineInput[];
+  /** Montant déjà reçu (vente) ou payé (achat), en sous-unités. */
+  paid: number;
+  paymentMethod: PaymentMethod;
+  accountId: string;
+  note?: string;
+}
+
+/**
+ * Applique un mouvement de stock, en ignorant les marchandises disparues
+ * (supprimées entre-temps) : un stock absent ne doit pas bloquer la saisie.
+ */
+async function applyMovements(movements: { productId: string; qty: number }[]): Promise<void> {
+  for (const movement of stockDeltaMap(movements)) {
+    const [productId, qty] = movement;
+    if (qty === 0) continue;
+    await adjustProductStock(productId, qty);
+  }
+}
+
+function tradeMovements(lines: TradeLineInput[], kind: 'sale' | 'purchase'): { productId: string; qty: number }[] {
+  return stockMovements(lines, kind);
+}
+
+/**
+ * Crée une vente (ou un achat) : document à lignes, opération de journal du
+ * montant total (non réglée tant qu'il reste à payer) et mouvement de stock.
+ */
+export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const drafts = input.lines.map((line) => ({ ...line, id: uuid() }));
+  const documentLines = buildLines(drafts);
+  const total = tradeTotal(documentLines);
+  const paid = boundPaid(input.paid, total);
+  const due = tradeDue(total, paid);
+  const id = uuid();
+  const document: TradeDocument = {
+    id,
+    familyId: family.id,
+    businessId: input.businessId,
+    kind,
+    date: input.date,
+    partyName: input.partyName?.trim() || undefined,
+    lines: documentLines,
+    total,
+    paid,
+    due,
+    paymentMethod: input.paymentMethod,
+    accountId: input.accountId,
+    note: input.note?.trim() || undefined,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db[kind === 'sale' ? 'sales' : 'purchases'].put(document);
+  await enqueue(kind, id, 'upsert', recordOf(document));
+
+  // Opération de journal : montant total, réglée seulement si tout est payé.
+  await createTransaction(
+    {
+      type: kind === 'sale' ? 'income' : 'expense',
+      accountId: input.accountId,
+      amountOriginal: total,
+      currencyOriginal: family.primaryCurrency,
+      categoryId: kind === 'sale' ? 'cat-activite' : 'cat-autres',
+      businessId: input.businessId,
+      settled: due === 0,
+      date: input.date,
+      note: `${kind === 'sale' ? 'Vente' : 'Achat'}${input.partyName ? ` — ${input.partyName.trim()}` : ''}`,
+    },
+    `${kind === 'sale' ? 'sale' : 'purchase'}-${id}`,
+  );
+
+  await applyMovements(tradeMovements(input.lines, kind));
+  return id;
+}
+
+/**
+ * Modifie un document : le stock est recalculé par différence (ancien
+ * mouvement annulé, nouveau appliqué) et l'opération de journal est réécrite.
+ */
+export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: TradeInput): Promise<void> {
+  const table = kind === 'sale' ? db.sales : db.purchases;
+  const current = await table.get(id);
+  if (!current) throw new Error('not-found');
+  const base = await baseSnapshotOf(kind, id);
+  const drafts = input.lines.map((line) => ({ ...line, id: uuid() }));
+  const documentLines = buildLines(drafts);
+  const total = tradeTotal(documentLines);
+  const paid = boundPaid(input.paid, total);
+  const due = tradeDue(total, paid);
+  const updated: TradeDocument = {
+    ...current,
+    businessId: input.businessId,
+    date: input.date,
+    partyName: input.partyName?.trim() || undefined,
+    lines: documentLines,
+    total,
+    paid,
+    due,
+    paymentMethod: input.paymentMethod,
+    accountId: input.accountId,
+    note: input.note?.trim() || undefined,
+    ...(updatedSyncFields(current) as object),
+  };
+  await table.put(updated);
+  await enqueueUpsert(kind, id, recordOf(updated), current.rev, base);
+
+  // Stock : on annule l'ancien mouvement puis on applique le nouveau.
+  const reverse = stockMovements(
+    current.lines.map((line) => ({ productId: line.productId, qty: line.qty, unitPrice: line.unitPrice })),
+    kind === 'sale' ? 'purchase' : 'sale',
+  );
+  await applyMovements(reverse);
+  await applyMovements(tradeMovements(input.lines, kind));
+
+  const txId = `${kind === 'sale' ? 'sale' : 'purchase'}-${id}`;
+  const existingTx = await db.transactions.get(txId);
+  if (existingTx) {
+    await updateTransaction(txId, {
+      type: kind === 'sale' ? 'income' : 'expense',
+      accountId: input.accountId,
+      amountOriginal: total,
+      currencyOriginal: existingTx.currencyOriginal,
+      categoryId: kind === 'sale' ? 'cat-activite' : 'cat-autres',
+      businessId: input.businessId,
+      settled: due === 0,
+      date: input.date,
+      note: `${kind === 'sale' ? 'Vente' : 'Achat'}${input.partyName ? ` — ${input.partyName.trim()}` : ''}`,
+    });
+  }
+}
+
+/** Supprime un document, son opération de journal et rétablit le stock. */
+export async function deleteTrade(kind: 'sale' | 'purchase', id: string): Promise<void> {
+  const table = kind === 'sale' ? db.sales : db.purchases;
+  const current = await table.get(id);
+  if (!current) return;
+  const restore = current.lines.map((line) => ({ productId: line.productId, qty: line.qty, unitPrice: line.unitPrice }));
+  await table.delete(id);
+  await enqueue(kind, id, 'delete', null);
+  const txId = `${kind === 'sale' ? 'sale' : 'purchase'}-${id}`;
+  if (await db.transactions.get(txId)) await deleteTransaction(txId);
+  await applyMovements(stockMovements(restore, kind === 'sale' ? 'purchase' : 'sale'));
+}
+
 /** Marque une opération professionnelle comme réglée (ou en attente). */
 export async function setTransactionSettled(id: string, settled: boolean): Promise<void> {
   await patchTransaction(id, { settled });
@@ -862,6 +1030,10 @@ export async function resolveConflict(conflictId: string, keep: 'local' | 'remot
         return db.businesses;
       case 'product':
         return db.products;
+      case 'sale':
+        return db.sales;
+      case 'purchase':
+        return db.purchases;
       default:
         return null;
     }
