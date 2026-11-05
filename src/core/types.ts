@@ -230,6 +230,29 @@ export interface TradeDocument extends SyncFields {
   createdAt: number;
 }
 
+/**
+ * Avance reçue d'un client avant livraison d'un produit ou d'un service.
+ * Ce n'est **pas** une vente : elle est suivie à part jusqu'à la livraison
+ * (ou le remboursement) et n'entre pas dans le chiffre d'affaires.
+ */
+export interface Advance extends SyncFields {
+  id: string;
+  familyId: string;
+  partyId?: string;
+  partyName?: string;
+  /** Objet de l'avance (commande, prestation…). */
+  subject: string;
+  /** Montant effectivement reçu, en sous-unités du foyer. */
+  amount: number;
+  /** Montant total attendu (facultatif) : le reste à recevoir en découle. */
+  expected?: number;
+  /** Date de réception (YYYY-MM-DD). */
+  receivedOn: string;
+  status: 'open' | 'delivered' | 'refunded';
+  note?: string;
+  createdAt: number;
+}
+
 export interface Budget extends SyncFields {
   id: string;
   familyId: string;
@@ -356,7 +379,8 @@ export type SyncEntity =
   | 'product'
   | 'sale'
   | 'purchase'
-  | 'party';
+  | 'party'
+  | 'advance';
 
 export interface OutboxOperation {
   id: string;

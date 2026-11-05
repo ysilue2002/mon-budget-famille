@@ -36,7 +36,8 @@
     "sales": "sales",
     "purchases": "purchases",
     "clients": "customers",
-    "suppliers": "suppliers"
+    "suppliers": "suppliers",
+    "advances": "Advances"
   },
   "common": {
     "save": "Save",
@@ -675,5 +676,28 @@
     "documents": "Documents",
     "noDocuments": "No document for this record.",
     "historyHint": "Payments are applied to unpaid documents, oldest first."
+  },
+  "advances": {
+    "title": "Advances received",
+    "new": "New advance",
+    "client": "Customer",
+    "subject": "What the advance is for",
+    "amount": "Amount received",
+    "expected": "Total expected",
+    "remaining": "Still to receive",
+    "date": "Date received",
+    "status": "Status",
+    "statusOpen": "In progress",
+    "statusDelivered": "Delivered",
+    "statusRefunded": "Refunded",
+    "note": "Note (optional)",
+    "empty": "No advances received",
+    "emptyHint": "An advance is not a sale: it is tracked separately until delivery.",
+    "totalOpen": "Open advances",
+    "totalRemaining": "Still expected",
+    "count": "{{count}} advance(s)",
+    "deleteConfirm": "Delete this advance?",
+    "required": "Please enter what the advance is for.",
+    "hint": "An advance received is not counted as a sale until the order is delivered."
   }
 }

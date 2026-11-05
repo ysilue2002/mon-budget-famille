@@ -68,6 +68,11 @@ export function usePurchases() {
   return useLiveQuery(() => db.purchases.orderBy('date').reverse().toArray(), []);
 }
 
+/** Avances reçues, les plus récentes d'abord. */
+export function useAdvances() {
+  return useLiveQuery(() => db.advances.orderBy('receivedOn').reverse().toArray(), []);
+}
+
 /** Fiches clients et fournisseurs, actives d'abord, triées par nom. */
 export function useParties() {
   return useLiveQuery(async () => {

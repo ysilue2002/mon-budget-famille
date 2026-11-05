@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type {
+  Advance,
   AppMeta,
   Budget,
   Business,
@@ -34,6 +35,7 @@ export class BudgetFamilyDB extends Dexie {
   sales!: Table<TradeDocument, string>;
   purchases!: Table<TradeDocument, string>;
   parties!: Table<Party, string>;
+  advances!: Table<Advance, string>;
   categories!: Table<Category, string>;
   transactions!: Table<Transaction, string>;
   budgets!: Table<Budget, string>;
@@ -111,6 +113,10 @@ export class BudgetFamilyDB extends Dexie {
     // v9 : fiches clients et fournisseurs.
     this.version(9).stores({
       parties: 'id, familyId, kind, name, syncStatus',
+    });
+    // v10 : avances reçues, suivies séparément des ventes.
+    this.version(10).stores({
+      advances: 'id, familyId, receivedOn, syncStatus',
     });
   }
 }

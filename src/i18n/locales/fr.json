@@ -36,7 +36,8 @@
     "sales": "ventes",
     "purchases": "achats",
     "clients": "clients",
-    "suppliers": "fournisseurs"
+    "suppliers": "fournisseurs",
+    "advances": "Avances"
   },
   "common": {
     "save": "Enregistrer",
@@ -675,5 +676,28 @@
     "documents": "Documents",
     "noDocuments": "Aucun document pour cette fiche.",
     "historyHint": "Les règlements s’imputent aux documents dus, du plus ancien au plus récent."
+  },
+  "advances": {
+    "title": "Avances reçues",
+    "new": "Nouvelle avance",
+    "client": "Client",
+    "subject": "Objet de l'avance",
+    "amount": "Montant reçu",
+    "expected": "Montant total attendu",
+    "remaining": "Restant à recevoir",
+    "date": "Date de réception",
+    "status": "État",
+    "statusOpen": "En cours",
+    "statusDelivered": "Livrée",
+    "statusRefunded": "Remboursée",
+    "note": "Note (facultatif)",
+    "empty": "Aucune avance reçue",
+    "emptyHint": "Une avance n'est pas une vente : elle est suivie séparément jusqu'à la livraison.",
+    "totalOpen": "Avances en cours",
+    "totalRemaining": "Restant attendu",
+    "count": "{{count}} avance(s)",
+    "deleteConfirm": "Supprimer cette avance ?",
+    "required": "Indiquez au moins l'objet de l'avance.",
+    "hint": "Une avance reçue n'est pas comptée comme une vente tant que la commande n'est pas livrée."
   }
 }

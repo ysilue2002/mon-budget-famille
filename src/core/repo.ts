@@ -22,6 +22,7 @@ import type {
   Family,
   FinancialAccount,
   HouseholdMember,
+  Advance,
   Party,
   PaymentMethod,
   Product,
@@ -53,7 +54,8 @@ type SyncedEntity =
   | 'product'
   | 'sale'
   | 'purchase'
-  | 'party';
+  | 'party'
+  | 'advance';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -84,6 +86,8 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.purchases;
       case 'party':
         return db.parties;
+      case 'advance':
+        return db.advances;
     }
   })();
   const row = await table.get(id);
@@ -938,6 +942,62 @@ export async function recordPartyPayment(partyId: string, amountMinor: number): 
   return applied;
 }
 
+// ----------------------------------------------------------------------------- avances reçues
+
+export interface AdvanceInput {
+  partyId?: string;
+  partyName?: string;
+  subject: string;
+  amount: number;
+  expected?: number;
+  receivedOn: string;
+  status: Advance['status'];
+  note?: string;
+}
+
+export async function createAdvance(input: AdvanceInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const advance: Advance = {
+    id: uuid(),
+    familyId: family.id,
+    partyId: input.partyId,
+    partyName: input.partyName?.trim() || undefined,
+    subject: input.subject.trim(),
+    amount: Math.max(0, Math.round(input.amount)),
+    expected: input.expected && input.expected > 0 ? Math.round(input.expected) : undefined,
+    receivedOn: input.receivedOn,
+    status: input.status,
+    note: input.note?.trim() || undefined,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db.advances.put(advance);
+  await enqueue('advance', advance.id, 'upsert', recordOf(advance));
+  return advance.id;
+}
+
+export async function updateAdvance(id: string, patch: Partial<AdvanceInput>): Promise<void> {
+  const base = await baseSnapshotOf('advance', id);
+  const current = await db.advances.get(id);
+  if (!current) throw new Error('not-found');
+  const updated: Advance = {
+    ...current,
+    ...patch,
+    ...(patch.subject !== undefined ? { subject: patch.subject.trim() } : {}),
+    ...(patch.partyName !== undefined ? { partyName: patch.partyName.trim() || undefined } : {}),
+    ...(patch.amount !== undefined ? { amount: Math.max(0, Math.round(patch.amount)) } : {}),
+    ...(updatedSyncFields(current) as object),
+  };
+  await db.advances.put(updated);
+  await enqueueUpsert('advance', id, recordOf(updated), current.rev, base);
+}
+
+export async function deleteAdvance(id: string): Promise<void> {
+  await db.advances.delete(id);
+  await enqueue('advance', id, 'delete', null);
+}
+
 // ----------------------------------------------------------------------------- membres
 
 /**
@@ -1157,6 +1217,8 @@ export async function resolveConflict(conflictId: string, keep: 'local' | 'remot
         return db.purchases;
       case 'party':
         return db.parties;
+      case 'advance':
+        return db.advances;
       default:
         return null;
     }
