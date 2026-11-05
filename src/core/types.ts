@@ -141,6 +141,29 @@ export interface Business extends SyncFields {
   createdAt: number;
 }
 
+/**
+ * Marchandise suivie en stock (boutique, atelier, prestation).
+ * Les prix sont en sous-unités de la devise du foyer ; les quantités peuvent
+ * être décimales (kg, litre) — c'est le seul champ non entier du modèle.
+ */
+export interface Product extends SyncFields {
+  id: string;
+  familyId: string;
+  name: string;
+  /** Unité de vente : pièce, kg, litre, service… */
+  unit: string;
+  /** Prix d'achat unitaire en sous-unités de la devise du foyer. */
+  buyPrice: number;
+  /** Prix de vente unitaire en sous-unités de la devise du foyer. */
+  sellPrice: number;
+  /** Quantité disponible en stock. */
+  stockQty: number;
+  /** Seuil d'alerte « presque épuisé » (0 = pas d'alerte). */
+  alertQty: number;
+  archived: boolean;
+  createdAt: number;
+}
+
 export interface Budget extends SyncFields {
   id: string;
   familyId: string;
@@ -263,7 +286,8 @@ export type SyncEntity =
   | 'category'
   | 'recurring'
   | 'wealth'
-  | 'business';
+  | 'business'
+  | 'product';
 
 export interface OutboxOperation {
   id: string;

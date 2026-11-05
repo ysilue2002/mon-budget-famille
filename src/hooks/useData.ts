@@ -58,6 +58,14 @@ export function useBusinesses() {
   }, []);
 }
 
+/** Marchandises : les actives d'abord, triées par nom. */
+export function useProducts() {
+  return useLiveQuery(async () => {
+    const rows = await db.products.toArray();
+    return rows.sort((a, b) => Number(a.archived) - Number(b.archived) || a.name.localeCompare(b.name));
+  }, []);
+}
+
 export function useCategories() {
   return useLiveQuery(() => db.categories.toArray(), []);
 }

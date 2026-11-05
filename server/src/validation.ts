@@ -69,6 +69,7 @@ export const syncEntitySchema = z.enum([
   'recurring',
   'wealth',
   'business',
+  'product',
 ]);
 
 export const pushOpSchema = z.object({

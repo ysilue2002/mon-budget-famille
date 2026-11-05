@@ -20,6 +20,7 @@ import type {
   Family,
   FinancialAccount,
   HouseholdMember,
+  Product,
   RecurrenceFrequency,
   RecurringRule,
   SavingsGoal,
@@ -43,7 +44,8 @@ type SyncedEntity =
   | 'category'
   | 'recurring'
   | 'wealth'
-  | 'business';
+  | 'business'
+  | 'product';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -66,6 +68,8 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.wealth;
       case 'business':
         return db.businesses;
+      case 'product':
+        return db.products;
     }
   })();
   const row = await table.get(id);
@@ -576,6 +580,70 @@ export async function archiveBusiness(id: string): Promise<void> {
   await enqueueUpsert('business', id, recordOf(updated), current.rev, base);
 }
 
+// ----------------------------------------------------------------------------- marchandises
+
+export interface ProductInput {
+  name: string;
+  unit: string;
+  /** Prix en sous-unités de la devise du foyer. */
+  buyPrice: number;
+  sellPrice: number;
+  stockQty: number;
+  alertQty: number;
+}
+
+export async function createProduct(input: ProductInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const product: Product = {
+    id: uuid(),
+    familyId: family.id,
+    name: input.name.trim(),
+    unit: input.unit.trim() || 'pcs',
+    buyPrice: Math.max(0, Math.round(input.buyPrice)),
+    sellPrice: Math.max(0, Math.round(input.sellPrice)),
+    stockQty: Math.max(0, input.stockQty),
+    alertQty: Math.max(0, input.alertQty),
+    archived: false,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db.products.put(product);
+  await enqueue('product', product.id, 'upsert', recordOf(product));
+  return product.id;
+}
+
+export async function updateProduct(id: string, patch: Partial<ProductInput>): Promise<void> {
+  const base = await baseSnapshotOf('product', id);
+  const current = await db.products.get(id);
+  if (!current) throw new Error('not-found');
+  const updated: Product = {
+    ...current,
+    ...patch,
+    ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+    ...(patch.stockQty !== undefined ? { stockQty: Math.max(0, patch.stockQty) } : {}),
+    ...(updatedSyncFields(current) as object),
+  };
+  await db.products.put(updated);
+  await enqueueUpsert('product', id, recordOf(updated), current.rev, base);
+}
+
+/**
+ * Mouvement de stock (entrée positive, sortie négative), borné à zéro :
+ * une vente ne peut pas rendre la quantité négative (donnée de départ fausse
+ * plutôt qu'un stock impossible à afficher).
+ */
+export async function adjustProductStock(id: string, delta: number): Promise<void> {
+  const current = await db.products.get(id);
+  if (!current) return;
+  await updateProduct(id, { stockQty: Math.max(0, current.stockQty + delta) });
+}
+
+export async function deleteProduct(id: string): Promise<void> {
+  await db.products.delete(id);
+  await enqueue('product', id, 'delete', null);
+}
+
 /** Marque une opération professionnelle comme réglée (ou en attente). */
 export async function setTransactionSettled(id: string, settled: boolean): Promise<void> {
   await patchTransaction(id, { settled });
@@ -792,6 +860,8 @@ export async function resolveConflict(conflictId: string, keep: 'local' | 'remot
         return db.recurring;
       case 'business':
         return db.businesses;
+      case 'product':
+        return db.products;
       default:
         return null;
     }

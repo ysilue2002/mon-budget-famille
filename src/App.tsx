@@ -22,6 +22,8 @@ import Converter from '@/pages/Converter';
 import Reports from '@/pages/Reports';
 import Statements from '@/pages/Statements';
 import BusinessPage from '@/pages/Business';
+import ActivityHome from '@/pages/ActivityHome';
+import Products from '@/pages/Products';
 import Settings from '@/pages/Settings';
 import Conflicts from '@/pages/Conflicts';
 import Login from '@/pages/Login';
@@ -45,10 +47,13 @@ const NAV_FAMILY = [
   { to: '/settings', key: 'nav.settings', icon: '⚙️' },
 ] as const;
 
-/** Navigation de l'assistant « activité » (recettes, charges, états). */
+/** Navigation de l'assistant « activité » : accueil, stock, ventes, bilans, documents. */
 const NAV_BUSINESS = [
-  { to: '/', key: 'nav.business', icon: '💼' },
+  { to: '/', key: 'nav.home', icon: '🏠' },
+  { to: '/products', key: 'nav.products', icon: '📦' },
   { to: '/transactions', key: 'nav.transactions', icon: '🧾' },
+  { to: '/business', key: 'nav.business', icon: '📊' },
+  { to: '/reports', key: 'nav.reports', icon: '📄' },
   { to: '/converter', key: 'nav.converter', icon: '💱' },
   { to: '/settings', key: 'nav.settings', icon: '⚙️' },
 ] as const;
@@ -161,7 +166,8 @@ function Layout() {
         <main className="app-main flex-1 overflow-y-auto sidebar-nav pb-24 lg:pb-6">
           <ErrorBoundary>
             <Routes>
-              <Route path="/" element={business ? <BusinessPage /> : <Dashboard />} />
+              <Route path="/" element={business ? <ActivityHome /> : <Dashboard />} />
+              <Route path="/products" element={<Products />} />
               <Route path="/login" element={<Login />} />
               <Route path="/join" element={<Join />} />
               <Route path="/reset" element={<Reset />} />
@@ -178,7 +184,7 @@ function Layout() {
               <Route path="/business" element={<BusinessPage />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/conflicts" element={<Conflicts />} />
-              <Route path="*" element={business ? <BusinessPage /> : <Dashboard />} />
+              <Route path="*" element={business ? <ActivityHome /> : <Dashboard />} />
             </Routes>
           </ErrorBoundary>
         </main>

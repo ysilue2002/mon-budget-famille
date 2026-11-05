@@ -26,6 +26,8 @@ function tableFor(entity: SyncEntity): Table<unknown, string> | null {
       return db.wealth;
     case 'business':
       return db.businesses;
+    case 'product':
+      return db.products;
     default:
       return null;
   }

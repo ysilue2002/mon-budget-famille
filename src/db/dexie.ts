@@ -8,6 +8,7 @@ import type {
   Family,
   FinancialAccount,
   HouseholdMember,
+  Product,
   OutboxOperation,
   RateSnapshot,
   RecurringRule,
@@ -27,6 +28,7 @@ export class BudgetFamilyDB extends Dexie {
   members!: Table<HouseholdMember, string>;
   accounts!: Table<FinancialAccount, string>;
   businesses!: Table<Business, string>;
+  products!: Table<Product, string>;
   categories!: Table<Category, string>;
   transactions!: Table<Transaction, string>;
   budgets!: Table<Budget, string>;
@@ -91,6 +93,10 @@ export class BudgetFamilyDB extends Dexie {
       businesses: 'id, familyId, name, syncStatus',
       transactions:
         'id, familyId, accountId, toAccountId, date, type, categoryId, businessId, syncStatus, updatedAt, [familyId+date], [familyId+type]',
+    });
+    // v7 : marchandises et stock (assistant Activité).
+    this.version(7).stores({
+      products: 'id, familyId, name, syncStatus',
     });
   }
 }
