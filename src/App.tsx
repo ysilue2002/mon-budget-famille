@@ -138,7 +138,7 @@ function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-4 flex flex-col gap-2">
           <SyncBadge />
           <LangSwitcher />
         </div>
