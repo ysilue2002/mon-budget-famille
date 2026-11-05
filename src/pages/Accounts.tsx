@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { useAccounts, usePrimaryCurrency, useTransactions } from '@/hooks/useData';
 import { computeAccountBalance } from '@/core/selectors';
 import { createAccount, deleteAccount, updateAccount } from '@/core/repo';
-import { formatAmount } from '@/core/currencies';
+import { SUPPORTED_CURRENCIES, formatAmount } from '@/core/currencies';
 import type { AccountType, CurrencyCode, FinancialAccount, MobileProvider } from '@/core/types';
 import {
   Card,
@@ -156,7 +156,7 @@ function Accounts() {
               label={t('common.currency')}
               value={form.currency}
               onChange={(v) => setForm({ ...form, currency: v as AccountForm['currency'] })}
-              options={['XOF', 'XAF', 'USD', 'NGN', 'GBP', 'EUR', 'CHF'].map((c) => ({ value: c, label: c }))}
+              options={SUPPORTED_CURRENCIES.map((c) => ({ value: c, label: c }))}
             />
             <MoneyInput
               label={t('accounts.initialBalance')}

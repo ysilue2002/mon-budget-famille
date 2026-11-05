@@ -2,11 +2,24 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { CurrencyCode } from './types';
 import { FALLBACK_RATES, fetchRates, normalizeSnapshot } from './exchange';
 
-const SUPPORTED: CurrencyCode[] = ['XOF', 'XAF', 'USD', 'NGN', 'GBP', 'EUR', 'CHF'];
+const SUPPORTED: CurrencyCode[] = ['XOF', 'XAF', 'USD', 'NGN', 'GBP', 'EUR', 'CHF', 'EGP', 'MAD', 'AED'];
 
 describe('exchange — normalisation des taux', () => {
   it('ne conserve que les devises prises en charge', () => {
-    const raw = { XOF: 600, XAF: 605, USD: 1, NGN: 1500, GBP: 0.78, EUR: 0.92, CHF: 0.88, KRW: 12.34, GBP_old: 0.7 };
+    const raw = {
+      XOF: 600,
+      XAF: 605,
+      USD: 1,
+      NGN: 1500,
+      GBP: 0.78,
+      EUR: 0.92,
+      CHF: 0.88,
+      EGP: 48,
+      MAD: 10,
+      AED: 3.67,
+      KRW: 12.34,
+      GBP_old: 0.7,
+    };
     const snapshot = normalizeSnapshot(raw, 42);
     expect(Object.keys(JSON.parse(JSON.stringify(snapshot.rates))).sort()).toEqual([...SUPPORTED].sort());
     expect(snapshot.fetchedAt).toBe(42);

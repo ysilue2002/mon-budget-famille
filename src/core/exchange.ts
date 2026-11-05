@@ -37,6 +37,9 @@ export const FALLBACK_RATES: Record<CurrencyCode, number> = {
   GBP: 0.78,
   EUR: 0.92,
   CHF: 0.88,
+  EGP: 48,
+  MAD: 10,
+  AED: 3.67,
 };
 
 function pickSupported(rates: Record<string, number>): Record<string, number> {

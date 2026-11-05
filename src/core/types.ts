@@ -2,10 +2,21 @@
  * Types métier partagés — Mon Budget Famille / My Family Budget.
  *
  * Tous les montants monétaires sont des **entiers en sous-unités** :
- * cents pour USD/EUR/GBP/CHF, unités entières pour XOF/XAF/NGN.
+ * cents pour USD/EUR/GBP/CHF/EGP/MAD/AED, unités entières pour XOF/XAF/NGN.
  */
 
-export const CURRENCY_CODES = ['XOF', 'XAF', 'USD', 'NGN', 'GBP', 'EUR', 'CHF'] as const;
+export const CURRENCY_CODES = [
+  'XOF',
+  'XAF',
+  'USD',
+  'NGN',
+  'GBP',
+  'EUR',
+  'CHF',
+  'EGP',
+  'MAD',
+  'AED',
+] as const;
 export type CurrencyCode = (typeof CURRENCY_CODES)[number];
 
 export type Role = 'admin' | 'manager' | 'member' | 'readonly';

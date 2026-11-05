@@ -1,7 +1,21 @@
 {
   "app": {
     "title": "My Family Budget",
-    "subtitle": "Your household finances, offline and multi-currency"
+    "subtitle": "Your household finances, offline and multi-currency",
+    "meta": "{{languages}} languages · {{currencies}} currencies"
+  },
+  "spaces": {
+    "headline": "What would you like to manage?",
+    "intro": "Two assistants, one account: same login and password, same currencies.",
+    "familyTitle": "Household budget assistant",
+    "familyHint": "Household accounts, transactions, budgets, savings, debts and financial statements.",
+    "businessTitle": "Activity assistant",
+    "businessHint": "Your activity’s revenue, expenses, income statement, cash flow and journal.",
+    "familyShort": "Household budget",
+    "businessShort": "Activity",
+    "open": "Open",
+    "switch": "Switch workspace",
+    "sameAccount": "One login for both assistants."
   },
   "nav": {
     "dashboard": "Dashboard",

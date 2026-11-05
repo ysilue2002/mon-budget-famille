@@ -1,7 +1,21 @@
 {
   "app": {
     "title": "Mon Budget Famille",
-    "subtitle": "La gestion financière de votre foyer, hors ligne et multidevise"
+    "subtitle": "La gestion financière de votre foyer, hors ligne et multidevise",
+    "meta": "{{languages}} langues · {{currencies}} devises"
+  },
+  "spaces": {
+    "headline": "Que souhaitez-vous gérer ?",
+    "intro": "Deux assistants, un seul compte : mêmes identifiant et mot de passe, mêmes devises.",
+    "familyTitle": "Assistant Gestion budget familial",
+    "familyHint": "Comptes, opérations, budgets, épargne, dettes et états financiers du foyer.",
+    "businessTitle": "Assistant Gestion Activité",
+    "businessHint": "Recettes, charges, compte de résultat, trésorerie et journal de votre activité.",
+    "familyShort": "Budget familial",
+    "businessShort": "Activité",
+    "open": "Ouvrir",
+    "switch": "Changer d’espace",
+    "sameAccount": "Une seule connexion pour les deux assistants."
   },
   "nav": {
     "dashboard": "Tableau de bord",

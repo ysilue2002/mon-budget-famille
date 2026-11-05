@@ -14,7 +14,7 @@ import {
   parseBackup,
   restoreBackup,
 } from '@/core/backup';
-import { setLanguage, LANGUAGES, type Language } from '@/i18n';
+import { setLanguage, LANGUAGES, LANGUAGE_LABELS, type Language } from '@/i18n';
 import { currencyLabel } from '@/core/currencies';
 import { RATES_API_URL } from '@/core/exchange';
 import type { CurrencyCode } from '@/core/types';
@@ -334,7 +334,7 @@ function Settings() {
                 }`}
                 aria-pressed={i18n.language.startsWith(lng)}
               >
-                {lng === 'fr' ? '🇫🇷 Français' : '🇬🇧 English'}
+                {LANGUAGE_LABELS[lng]}
               </button>
             ))}
           </div>
