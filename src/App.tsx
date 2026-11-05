@@ -27,6 +27,7 @@ import Products from '@/pages/Products';
 import Trades from '@/pages/Trades';
 import Parties from '@/pages/Parties';
 import Advances from '@/pages/Advances';
+import ProfilePage from '@/pages/Profile';
 import Settings from '@/pages/Settings';
 import Conflicts from '@/pages/Conflicts';
 import Login from '@/pages/Login';
@@ -56,6 +57,7 @@ const NAV_BUSINESS = [
   { to: '/sales', key: 'nav.sales', icon: '🛒' },
   { to: '/purchases', key: 'nav.purchases', icon: '📥' },
   { to: '/advances', key: 'nav.advances', icon: '💵' },
+  { to: '/profile', key: 'nav.profile', icon: '🧑‍💼' },
   { to: '/clients', key: 'nav.clients', icon: '👤' },
   { to: '/suppliers', key: 'nav.suppliers', icon: '🏭' },
   { to: '/products', key: 'nav.products', icon: '📦' },
@@ -179,6 +181,7 @@ function Layout() {
               <Route path="/sales" element={<Trades kind="sale" />} />
               <Route path="/purchases" element={<Trades kind="purchase" />} />
               <Route path="/advances" element={<Advances />} />
+              <Route path="/profile" element={<ProfilePage />} />
               <Route path="/clients" element={<Parties kind="client" />} />
               <Route path="/suppliers" element={<Parties kind="supplier" />} />
               <Route path="/login" element={<Login />} />

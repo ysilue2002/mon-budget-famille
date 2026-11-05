@@ -13,12 +13,15 @@ export default defineConfig({
         name: 'Mon Budget Famille',
         short_name: 'Budget Famille',
         description:
-          'Gestion financière familiale offline-first, multidevise et bilingue FR/EN.',
+          'Budget familial et gestion d’activité hors ligne, multidevise, en français, anglais et arabe.',
         theme_color: '#14532d',
         background_color: '#f6fdf9',
         display: 'standalone',
+        orientation: 'portrait-primary',
         start_url: '/',
         lang: 'fr',
+        dir: 'ltr',
+        categories: ['finance', 'business', 'productivity'],
         icons: [
           { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
           { src: 'icon-maskable.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },

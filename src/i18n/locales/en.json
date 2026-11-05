@@ -37,7 +37,8 @@
     "purchases": "purchases",
     "clients": "customers",
     "suppliers": "suppliers",
-    "advances": "Advances"
+    "advances": "Advances",
+    "profile": "Profile"
   },
   "common": {
     "save": "Save",
@@ -699,5 +700,35 @@
     "deleteConfirm": "Delete this advance?",
     "required": "Please enter what the advance is for.",
     "hint": "An advance received is not counted as a sale until the order is delivered."
+  },
+  "profile": {
+    "title": "My profile",
+    "edit": "Edit",
+    "create": "Create my profile",
+    "empty": "No entrepreneur profile yet",
+    "emptyHint": "Add your business name and contact details so they identify your company.",
+    "name": "Business name",
+    "ownerName": "Owner name",
+    "activity": "Activity",
+    "phone": "Phone",
+    "email": "Business email",
+    "address": "Address",
+    "taxId": "Tax ID",
+    "notes": "Notes",
+    "currency": "Currency",
+    "currencyHint": "The currency is set in the household settings.",
+    "nameRequired": "Please enter your business name.",
+    "noOwner": "Owner name not set",
+    "noActivity": "Activity not set",
+    "account": "My account",
+    "space": "Space",
+    "language": "Language",
+    "activities": "Activities",
+    "identityHint": "This information stays on your devices and syncs with your account.",
+    "languages": {
+      "fr": "Français",
+      "en": "English",
+      "ar": "العربية"
+    }
   }
 }

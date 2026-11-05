@@ -555,9 +555,24 @@ export async function updateFamilyProfile(input: { name?: string; primaryCurrenc
 
 export interface BusinessInput {
   name: string;
+  ownerName?: string;
   activity: string;
+  phone?: string;
+  email?: string;
+  address?: string;
   taxId?: string;
   notes?: string;
+}
+
+/** Champs du profil nettoyés : les textes vides deviennent `undefined`. */
+function cleanBusinessFields(input: Partial<BusinessInput>): Partial<Business> {
+  const out: Partial<Business> = {};
+  if (input.name !== undefined) out.name = input.name.trim();
+  if (input.activity !== undefined) out.activity = input.activity.trim();
+  for (const key of ['ownerName', 'phone', 'email', 'address', 'taxId', 'notes'] as const) {
+    if (input[key] !== undefined) out[key] = input[key]?.trim() || undefined;
+  }
+  return out;
 }
 
 export async function createBusiness(input: BusinessInput): Promise<string> {
@@ -566,10 +581,7 @@ export async function createBusiness(input: BusinessInput): Promise<string> {
   const business: Business = {
     id: uuid(),
     familyId: family.id,
-    name: input.name.trim(),
-    activity: input.activity.trim(),
-    taxId: input.taxId?.trim() || undefined,
-    notes: input.notes?.trim() || undefined,
+    ...(cleanBusinessFields(input) as Pick<Business, 'name' | 'activity'>),
     archived: false,
     createdAt: Date.now(),
     ...newSyncFields(),
@@ -583,7 +595,7 @@ export async function updateBusiness(id: string, patch: Partial<BusinessInput>):
   const base = await baseSnapshotOf('business', id);
   const current = await db.businesses.get(id);
   if (!current) throw new Error('not-found');
-  const updated: Business = { ...current, ...patch, ...(updatedSyncFields(current) as object) };
+  const updated: Business = { ...current, ...cleanBusinessFields(patch), ...(updatedSyncFields(current) as object) };
   await db.businesses.put(updated);
   await enqueueUpsert('business', id, recordOf(updated), current.rev, base);
 }

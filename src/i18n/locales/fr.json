@@ -37,7 +37,8 @@
     "purchases": "achats",
     "clients": "clients",
     "suppliers": "fournisseurs",
-    "advances": "Avances"
+    "advances": "Avances",
+    "profile": "Profil"
   },
   "common": {
     "save": "Enregistrer",
@@ -699,5 +700,35 @@
     "deleteConfirm": "Supprimer cette avance ?",
     "required": "Indiquez au moins l'objet de l'avance.",
     "hint": "Une avance reçue n'est pas comptée comme une vente tant que la commande n'est pas livrée."
+  },
+  "profile": {
+    "title": "Mon profil",
+    "edit": "Modifier",
+    "create": "Créer mon profil",
+    "empty": "Aucun profil d'entrepreneur",
+    "emptyHint": "Renseignez le nom de votre activité et vos coordonnées : elles identifient votre entreprise.",
+    "name": "Nom de l'activité",
+    "ownerName": "Nom de l'entrepreneur",
+    "activity": "Activité exercée",
+    "phone": "Téléphone",
+    "email": "E-mail professionnel",
+    "address": "Adresse",
+    "taxId": "Identifiant fiscal",
+    "notes": "Notes",
+    "currency": "Devise",
+    "currencyHint": "La devise se règle dans les réglages du foyer.",
+    "nameRequired": "Indiquez le nom de votre activité.",
+    "noOwner": "Nom de l’entrepreneur non renseigné",
+    "noActivity": "Activité non renseignée",
+    "account": "Mon compte",
+    "space": "Espace",
+    "language": "Langue",
+    "activities": "Activités",
+    "identityHint": "Ces informations restent sur vos appareils et se synchronisent avec votre compte.",
+    "languages": {
+      "fr": "Français",
+      "en": "English",
+      "ar": "العربية"
+    }
   }
 }

@@ -137,8 +137,16 @@ export interface Business extends SyncFields {
   id: string;
   familyId: string;
   name: string;
+  /** Nom de l'entrepreneur (profil affiché sur les documents). */
+  ownerName?: string;
   /** Activité exercée (texte libre : vente, prestation, élevage…). */
   activity: string;
+  /** Téléphone professionnel. */
+  phone?: string;
+  /** Adresse e-mail professionnelle. */
+  email?: string;
+  /** Adresse postale de l'activité. */
+  address?: string;
   /** Identifiant fiscal / RCCM (facultatif). */
   taxId?: string;
   notes?: string;
