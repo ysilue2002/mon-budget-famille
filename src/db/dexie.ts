@@ -11,6 +11,7 @@ import type {
   HouseholdMember,
   Party,
   Product,
+  Quote,
   Settlement,
   TradeDocument,
   OutboxOperation,
@@ -38,6 +39,7 @@ export class BudgetFamilyDB extends Dexie {
   parties!: Table<Party, string>;
   advances!: Table<Advance, string>;
   settlements!: Table<Settlement, string>;
+  quotes!: Table<Quote, string>;
   categories!: Table<Category, string>;
   transactions!: Table<Transaction, string>;
   budgets!: Table<Budget, string>;
@@ -124,6 +126,10 @@ export class BudgetFamilyDB extends Dexie {
     // fournisseurs).
     this.version(11).stores({
       settlements: 'id, familyId, date, partyId, documentId, syncStatus',
+    });
+    // v12 : devis (documents commerciaux, hors chiffre d'affaires).
+    this.version(12).stores({
+      quotes: 'id, familyId, businessId, date, number, syncStatus',
     });
   }
 }

@@ -38,6 +38,8 @@ function tableFor(entity: SyncEntity): Table<unknown, string> | null {
       return db.advances;
     case 'settlement':
       return db.settlements;
+    case 'quote':
+      return db.quotes;
     default:
       return null;
   }

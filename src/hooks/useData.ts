@@ -89,6 +89,11 @@ export function useProducts() {
   }, []);
 }
 
+/** Devis, les plus récents d'abord. */
+export function useQuotes() {
+  return useLiveQuery(() => db.quotes.orderBy('date').reverse().toArray(), []);
+}
+
 /** Historique des règlements, les plus récents d'abord. */
 export function useSettlements() {
   return useLiveQuery(() => db.settlements.orderBy('date').reverse().toArray(), []);

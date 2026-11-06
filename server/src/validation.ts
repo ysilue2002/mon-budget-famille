@@ -75,6 +75,7 @@ export const syncEntitySchema = z.enum([
   'party',
   'advance',
   'settlement',
+  'quote',
 ]);
 
 export const pushOpSchema = z.object({

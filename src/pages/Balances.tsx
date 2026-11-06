@@ -21,7 +21,8 @@ import {
 } from '@/core/reports';
 import { formatAmount } from '@/core/currencies';
 import { todayISO } from '@/lib/date';
-import { Card, EmptyState, Page, StatCard, btnGhost } from '@/components/common';
+import { downloadPdf, pdfFileName, pdfSupportsLanguage } from '@/core/pdf';
+import { Card, EmptyState, Page, StatCard, btnGhost, btnPrimary } from '@/components/common';
 
 const KINDS: PeriodKind[] = ['month', 'quarter', 'year'];
 
@@ -108,6 +109,36 @@ export default function Balances() {
     });
   };
 
+  const exportPdf = () => {
+    if (!pdfSupportsLanguage(i18n.language)) {
+      window.print();
+      return;
+    }
+    downloadPdf({
+      fileName: pdfFileName(`bilan-${kind}`, range.from),
+      title: `${t('balances.title')} — ${label(kind, anchor, range.from)}`,
+      business: selected,
+      reference: `${range.from} → ${range.to}`,
+      meta: [[t('balances.range', { from: range.from, to: range.to }), label(kind, anchor, range.from)]],
+      head: [t('balances.comparison'), label(kind, anchor, range.from), label(kind, previousAnchor(kind, anchor), previous.from)],
+      body: [
+        [t('balances.sales'), fmt(report.sales), fmt(before.sales)],
+        [t('balances.purchases'), fmt(report.purchases), fmt(before.purchases)],
+        [t('balances.otherExpenses'), fmt(report.otherExpenses), fmt(before.otherExpenses)],
+        [t('balances.result'), fmt(report.result), fmt(before.result)],
+        [t('balances.cashIn'), fmt(report.cashIn), fmt(before.cashIn)],
+        [t('balances.cashOut'), fmt(report.cashOut), fmt(before.cashOut)],
+        [t('balances.customerCredit'), fmt(report.customerCredit), fmt(before.customerCredit)],
+        [t('balances.supplierCredit'), fmt(report.supplierCredit), fmt(before.supplierCredit)],
+      ],
+      totals: [
+        [t('balances.result'), fmt(report.result)],
+        [t('balances.cashAvailable'), fmt(report.cashAvailable)],
+      ],
+      footer: t('documents.footer'),
+    });
+  };
+
   const maxBar = Math.max(
     1,
     ...report.monthly.map((point) => Math.max(point.sales, point.expenses)),
@@ -134,6 +165,14 @@ export default function Balances() {
 
   return (
     <Page title={t('balances.title')}>
+      <div className="no-print mb-3 flex flex-wrap gap-2">
+        <button type="button" className={btnPrimary} onClick={() => window.print()}>
+          🖨 {t('documents.print')}
+        </button>
+        <button type="button" className={btnGhost} onClick={exportPdf}>
+          ⬇ {t('documents.pdf')}
+        </button>
+      </div>
       <Card className="mb-4">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex overflow-hidden rounded-lg border border-forest-200">

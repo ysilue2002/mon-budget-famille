@@ -31,6 +31,9 @@ import ProfilePage from '@/pages/Profile';
 import Expenses from '@/pages/Expenses';
 import Balances from '@/pages/Balances';
 import Treasury from '@/pages/Treasury';
+import Quotes from '@/pages/Quotes';
+import Invoices from '@/pages/Invoices';
+import ActivityDocs from '@/pages/ActivityDocs';
 import Settings from '@/pages/Settings';
 import Conflicts from '@/pages/Conflicts';
 import Login from '@/pages/Login';
@@ -62,6 +65,9 @@ const NAV_BUSINESS = [
   { to: '/expenses', key: 'nav.expenses', icon: '🧾' },
   { to: '/balances', key: 'nav.balances', icon: '📈' },
   { to: '/treasury', key: 'nav.treasury', icon: '💧' },
+  { to: '/quotes', key: 'nav.quotes', icon: '📝' },
+  { to: '/invoices', key: 'nav.invoices', icon: '🧾' },
+  { to: '/states', key: 'nav.states', icon: '📋' },
   { to: '/advances', key: 'nav.advances', icon: '💵' },
   { to: '/profile', key: 'nav.profile', icon: '🧑‍💼' },
   { to: '/clients', key: 'nav.clients', icon: '👤' },
@@ -189,6 +195,9 @@ function Layout() {
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/balances" element={<Balances />} />
               <Route path="/treasury" element={<Treasury />} />
+              <Route path="/quotes" element={<Quotes />} />
+              <Route path="/invoices" element={<Invoices />} />
+              <Route path="/states" element={<ActivityDocs />} />
               <Route path="/advances" element={<Advances />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/clients" element={<Parties kind="client" />} />

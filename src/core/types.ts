@@ -228,6 +228,10 @@ export interface TradeDocument extends SyncFields {
   /** Nom du client ou fournisseur, recopié à la saisie. */
   partyName?: string;
   lines: TradeLine[];
+  /** Numéro du document : FAC-2026-0001 pour une vente, ACH-… pour un achat. */
+  number?: string;
+  /** Échéance de paiement (factures à crédit). */
+  dueDate?: string;
   total: number;
   paid: number;
   due: number;
@@ -285,6 +289,31 @@ export interface Settlement extends SyncFields {
   /** Date du règlement (YYYY-MM-DD). */
   date: string;
   note?: string;
+  createdAt: number;
+}
+
+/**
+ * Devis : proposition de prix envoyée à un client. Ce n'est **pas** une vente :
+ * aucun chiffre d'affaires, aucun mouvement de stock. Un devis accepté peut
+ * être transformé en vente, qui devient alors le seul document compté.
+ */
+export interface Quote extends SyncFields {
+  id: string;
+  familyId: string;
+  businessId: string;
+  /** Numéro du devis : DEV-2026-0001. */
+  number: string;
+  date: string;
+  /** Date de validité de l'offre (facultative). */
+  validUntil?: string;
+  partyId?: string;
+  partyName?: string;
+  lines: TradeLine[];
+  total: number;
+  status: 'draft' | 'sent' | 'accepted' | 'refused' | 'converted';
+  note?: string;
+  /** Vente issue de la transformation (le devis n'est alors plus modifiable). */
+  convertedSaleId?: string;
   createdAt: number;
 }
 
@@ -416,7 +445,8 @@ export type SyncEntity =
   | 'purchase'
   | 'party'
   | 'advance'
-  | 'settlement';
+  | 'settlement'
+  | 'quote';
 
 export interface OutboxOperation {
   id: string;

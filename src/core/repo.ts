@@ -10,6 +10,7 @@ import { convertMinor } from '@/core/money';
 import { uuid } from '@/lib/id';
 import { boundPaid, buildLines, stockDeltaMap, stockMovements, tradeDue, tradeTotal } from '@/core/trade';
 import { allocatePayment } from '@/core/payments';
+import { nextDocumentNumber, quoteCanConvert, quoteIsEditable, quoteTotal, yearOf } from '@/core/documents';
 import { todayISO } from '@/lib/date';
 import { firstRecurringDue } from '@/lib/recurrence';
 import type {
@@ -26,6 +27,7 @@ import type {
   Party,
   PaymentMethod,
   Product,
+  Quote,
   RecurrenceFrequency,
   TradeDocument,
   RecurringRule,
@@ -57,7 +59,8 @@ type SyncedEntity =
   | 'purchase'
   | 'party'
   | 'advance'
-  | 'settlement';
+  | 'settlement'
+  | 'quote';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -92,6 +95,8 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.advances;
       case 'settlement':
         return db.settlements;
+      case 'quote':
+        return db.quotes;
     }
   })();
   const row = await table.get(id);
@@ -693,6 +698,10 @@ export interface TradeLineInput {
 export interface TradeInput {
   businessId: string;
   date: string;
+  /** Numéro du document (attribué automatiquement s'il est absent). */
+  number?: string;
+  /** Échéance de paiement (factures à crédit). */
+  dueDate?: string;
   /** Fiche client/fournisseur rattachée (facultatif). */
   partyId?: string;
   partyName?: string;
@@ -733,11 +742,14 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
   const paid = boundPaid(input.paid, total);
   const due = tradeDue(total, paid);
   const id = uuid();
+  const number = input.number ?? (await nextTradeNumber(kind, input.date));
   const document: TradeDocument = {
     id,
     familyId: family.id,
     businessId: input.businessId,
     kind,
+    number,
+    dueDate: input.dueDate,
     date: input.date,
     partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
@@ -792,6 +804,8 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
   const updated: TradeDocument = {
     ...current,
     businessId: input.businessId,
+    number: input.number ?? current.number,
+    dueDate: input.dueDate ?? current.dueDate,
     date: input.date,
     partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
@@ -991,6 +1005,151 @@ export async function recordPartyPayment(
     applied += allocation.amount;
   }
   return applied;
+}
+
+/** Numéro de la prochaine vente (FAC-) ou du prochain achat (ACH-). */
+async function nextTradeNumber(kind: 'sale' | 'purchase', date: string): Promise<string> {
+  const rows = await (kind === 'sale' ? db.sales : db.purchases).toArray();
+  return nextDocumentNumber(kind, yearOf(date), rows.map((row) => row.number));
+}
+
+// ----------------------------------------------------------------------------- devis
+
+export interface QuoteLineInput {
+  productId?: string;
+  label: string;
+  qty: number;
+  unitPrice: number;
+}
+
+export interface QuoteInput {
+  businessId: string;
+  date: string;
+  validUntil?: string;
+  partyId?: string;
+  partyName?: string;
+  lines: QuoteLineInput[];
+  status: Quote['status'];
+  note?: string;
+}
+
+/** Numéro du prochain devis (DEV-). */
+async function nextQuoteNumber(date: string): Promise<string> {
+  const rows = await db.quotes.toArray();
+  return nextDocumentNumber('quote', yearOf(date), rows.map((row) => row.number));
+}
+
+function quoteFields(input: QuoteInput) {
+  const drafts = input.lines.map((line) => ({ ...line, id: uuid() }));
+  const lines = buildLines(drafts);
+  return {
+    lines,
+    total: quoteTotal(lines),
+    validUntil: input.validUntil || undefined,
+    partyId: input.partyId,
+    partyName: input.partyName?.trim() || undefined,
+    note: input.note?.trim() || undefined,
+    status: input.status,
+  };
+}
+
+/**
+ * Crée un devis : un prix proposé, sans aucune conséquence comptable ni sur le
+ * stock. Il n'apparaît ni dans les ventes, ni dans les crédits clients.
+ */
+export async function createQuote(input: QuoteInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const quote: Quote = {
+    id: uuid(),
+    familyId: family.id,
+    businessId: input.businessId,
+    number: await nextQuoteNumber(input.date),
+    date: input.date,
+    createdAt: Date.now(),
+    ...quoteFields(input),
+    ...newSyncFields(),
+  };
+  await db.quotes.put(quote);
+  await enqueue('quote', quote.id, 'upsert', recordOf(quote));
+  return quote.id;
+}
+
+/** Modifie un devis encore ouvert. Un devis transformé en vente est figé. */
+export async function updateQuote(id: string, input: QuoteInput): Promise<void> {
+  const current = await db.quotes.get(id);
+  if (!current) throw new Error('not-found');
+  if (!quoteIsEditable(current)) throw new Error('quote-locked');
+  const base = await baseSnapshotOf('quote', id);
+  const updated: Quote = {
+    ...current,
+    businessId: input.businessId,
+    date: input.date,
+    ...quoteFields(input),
+    ...(updatedSyncFields(current) as object),
+  };
+  await db.quotes.put(updated);
+  await enqueueUpsert('quote', id, recordOf(updated), current.rev, base);
+}
+
+/** Change le statut d'un devis (envoyé, accepté, refusé). */
+export async function setQuoteStatus(id: string, status: Quote['status']): Promise<void> {
+  const current = await db.quotes.get(id);
+  if (!current) throw new Error('not-found');
+  const base = await baseSnapshotOf('quote', id);
+  const updated: Quote = { ...current, status, ...(updatedSyncFields(current) as object) };
+  await db.quotes.put(updated);
+  await enqueueUpsert('quote', id, recordOf(updated), current.rev, base);
+}
+
+export async function deleteQuote(id: string): Promise<void> {
+  await db.quotes.delete(id);
+  await enqueue('quote', id, 'delete', null);
+}
+
+export interface QuoteConversionInput {
+  accountId: string;
+  paymentMethod: PaymentMethod;
+  /** Montant déjà reçu à la commande (0 = tout à crédit). */
+  paid?: number;
+  date?: string;
+}
+
+/**
+ * Transforme un devis accepté en vente : la vente est le seul document compté
+ * (ventes, stock, crédit client). Le devis garde son numéro et devient
+ * « transformé », avec un lien vers la vente créée.
+ */
+export async function convertQuoteToSale(id: string, options: QuoteConversionInput): Promise<string> {
+  const quote = await db.quotes.get(id);
+  if (!quote) throw new Error('not-found');
+  if (!quoteCanConvert(quote)) throw new Error('quote-not-convertible');
+  const saleId = await createTrade('sale', {
+    businessId: quote.businessId,
+    date: options.date ?? todayISO(),
+    partyId: quote.partyId,
+    partyName: quote.partyName,
+    lines: quote.lines.map((line) => ({
+      productId: line.productId,
+      label: line.label,
+      qty: line.qty,
+      unitPrice: line.unitPrice,
+    })),
+    paid: options.paid ?? 0,
+    paymentMethod: options.paymentMethod,
+    accountId: options.accountId,
+    note: `Devis ${quote.number}`,
+  });
+  const base = await baseSnapshotOf('quote', id);
+  const updated: Quote = {
+    ...quote,
+    status: 'converted',
+    convertedSaleId: saleId,
+    ...(updatedSyncFields(quote) as object),
+  };
+  await db.quotes.put(updated);
+  await enqueueUpsert('quote', id, recordOf(updated), quote.rev, base);
+  return saleId;
 }
 
 // ----------------------------------------------------------------------------- avances reçues
