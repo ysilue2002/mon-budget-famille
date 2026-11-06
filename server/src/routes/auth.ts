@@ -111,7 +111,10 @@ export function invitationStatus(invite: InviteRow | null): 'unknown' | 'expired
  * immédiatement tous les jetons déjà émis pour ce compte.
  */
 function signToken(userId: string, tokenVersion = 1): string {
-  return jwt.sign({ sub: userId, tv: tokenVersion }, JWT_SECRET, {
+  // Une version absente ou illisible retombe sur 1 : le jeton reste utilisable
+  // au lieu de naître invalide.
+  const version = Number.isFinite(tokenVersion) && tokenVersion > 0 ? tokenVersion : 1;
+  return jwt.sign({ sub: userId, tv: version }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'],
   });
 }
@@ -302,7 +305,7 @@ router.post('/login', loginIpLimiter, loginAccountLimiter, async (req: Request, 
     token_version: number;
   }>(
     // Plus récente adhésion d'abord : cohérent avec requireAuth (middleware/auth.ts).
-    `SELECT u.id, u.email, u.password_hash, f.id AS family_id, f.name AS family_name, f.primary_currency, m.role
+    `SELECT u.id, u.email, u.password_hash, f.id AS family_id, f.name AS family_name, f.primary_currency, m.role, u.token_version
      FROM users u
      JOIN memberships m ON m.user_id = u.id
      JOIN families f ON f.id = m.family_id

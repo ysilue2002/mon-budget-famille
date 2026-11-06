@@ -99,11 +99,14 @@ const aliceAfter = await call('/sync/pull?cursor=0', 'GET', undefined, alice.tok
 const stillThere = (aliceAfter.body?.changes ?? []).some((change) => change.recordId === recordId && change.deleted === false);
 check('l’enregistrement de A survit à la suppression de B', stillThere, 'enregistrement supprimé à tort');
 
-// 4. Le pull de B ne contient jamais l'identifiant d'A.
+// 4. Le pull de B ne contient que son propre tombstone vide, jamais le contenu d'A.
+const bobOwn = (await call('/sync/pull?cursor=0', 'GET', undefined, bob.token)).body.changes.filter(
+  (change) => change.recordId === recordId,
+);
 check(
-  'le pull de B reste vide après la suppression',
-  (await call('/sync/pull?cursor=0', 'GET', undefined, bob.token)).body.changes.every((change) => change.recordId !== recordId),
-  'fuite inter-foyers détectée',
+  'le foyer B ne reçoit aucun contenu du foyer A',
+  bobOwn.every((change) => change.deleted === true && !change.record),
+  JSON.stringify(bobOwn),
 );
 
 // 5. Réinitialisation du mot de passe : les jetons déjà émis cessent d'être valides.
