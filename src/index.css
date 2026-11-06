@@ -1,4 +1,15 @@
 @tailwind base;
+
+/* Barre de navigation mobile : le défilement horizontal reste possible mais
+   sans barre visible, qui coupait le bas de l'écran. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 @tailwind components;
 @tailwind utilities;
 

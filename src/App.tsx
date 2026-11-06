@@ -215,7 +215,7 @@ function Layout() {
         </main>
 
         {/* Barre de navigation — mobile */}
-        <nav className="app-chrome fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 overflow-x-auto border-t border-forest-100 bg-white/95 px-1 pb-[max(env(safe-area-inset-bottom),0.3rem)] pt-1 backdrop-blur lg:hidden">
+        <nav className="app-chrome no-scrollbar fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 overflow-x-auto border-t border-forest-100 bg-white/95 px-1 pb-[max(env(safe-area-inset-bottom),0.3rem)] pt-1 backdrop-blur lg:hidden">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
