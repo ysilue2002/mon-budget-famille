@@ -27,6 +27,8 @@ export interface PdfInput {
   footer?: string;
   /** Numéro affiché en pied de page. */
   reference?: string;
+  /** Bloc client (nom, adresse, téléphone) imprimé en face de l'entreprise. */
+  party?: { label: string; name?: string; address?: string; phone?: string };
 }
 
 /** jsPDF sait-il écrire cette langue sans déformer les lettres ? */
@@ -65,6 +67,27 @@ export function downloadPdf(input: PdfInput): void {
     if (contact) doc.text(contact, margin, y + 20);
     if (input.business.taxId) doc.text(`N° fiscal : ${input.business.taxId}`, margin, y + 32);
     y += 44;
+  }
+
+  if (input.party) {
+    let partyY = margin + 6;
+    doc.setFontSize(8);
+    doc.setTextColor(120, 128, 120);
+    doc.text(input.party.label.toUpperCase(), width - margin, partyY, { align: 'right' });
+    partyY += 13;
+    doc.setFontSize(10);
+    doc.setTextColor(20, 40, 25);
+    doc.text(input.party.name ?? '—', width - margin, partyY, { align: 'right' });
+    doc.setFontSize(8);
+    doc.setTextColor(90, 100, 90);
+    if (input.party.address) {
+      partyY += 11;
+      doc.text(input.party.address, width - margin, partyY, { align: 'right' });
+    }
+    if (input.party.phone) {
+      partyY += 11;
+      doc.text(input.party.phone, width - margin, partyY, { align: 'right' });
+    }
   }
 
   doc.setTextColor(0, 0, 0);

@@ -232,6 +232,11 @@ export interface TradeDocument extends SyncFields {
   number?: string;
   /** Échéance de paiement (factures à crédit). */
   dueDate?: string;
+  /**
+   * Taux de TVA en pourcentage (0 ou absent = aucune taxe). Les prix des
+   * lignes sont hors taxe ; `total` est le montant TTC facturé et compté.
+   */
+  taxRate?: number;
   total: number;
   paid: number;
   due: number;
@@ -309,6 +314,8 @@ export interface Quote extends SyncFields {
   partyId?: string;
   partyName?: string;
   lines: TradeLine[];
+  /** Taux de TVA du devis (prix HT, total TTC). */
+  taxRate?: number;
   total: number;
   status: 'draft' | 'sent' | 'accepted' | 'refused' | 'converted';
   note?: string;

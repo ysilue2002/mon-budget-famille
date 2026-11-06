@@ -833,7 +833,18 @@
     "close": "Fermer",
     "footer": "Document généré par Mon Budget Famille · Gestion Pro",
     "businessFallback": "Mon activité",
-    "arabicUsesPrint": "En arabe, utilisez Imprimer puis « Enregistrer au format PDF » : la calligraphie est rendue par le navigateur."
+    "arabicUsesPrint": "En arabe, utilisez Imprimer puis « Enregistrer au format PDF » : la calligraphie est rendue par le navigateur.",
+    "number": "Numéro",
+    "unitPriceHt": "Prix unitaire HT",
+    "lineTotalHt": "Total HT",
+    "subtotal": "Total HT",
+    "tax": "TVA ({{rate}} %)",
+    "totalTtc": "Total TTC",
+    "taxRate": "TVA (%)",
+    "taxRateHint": "0 si aucune taxe. Les prix saisis sont hors taxe.",
+    "businessBlock": "Entreprise",
+    "thanks": "Merci d’indiquer le numéro du document lors du règlement.",
+    "paymentTerms": "En cas de non-paiement, des frais de recouvrement peuvent être exigés."
   },
   "quotes": {
     "title": "Devis",

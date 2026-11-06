@@ -11,9 +11,9 @@ import {
 import { convertQuoteToSale, createQuote, deleteQuote, setQuoteStatus, updateQuote } from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
 import { parseAmountInput, toMajor } from '@/core/money';
-import { QUOTE_STATUS_KEY, quoteCanConvert, quoteIsEditable, quoteTotal } from '@/core/documents';
+import { QUOTE_STATUS_KEY, quoteCanConvert, quoteIsEditable } from '@/core/documents';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/core/pdf';
-import { lineTotal } from '@/core/trade';
+import { lineTotal, taxBreakdown } from '@/core/trade';
 import { uuid } from '@/lib/id';
 import { todayISO } from '@/lib/date';
 import DocumentSheet from '@/components/DocumentSheet';
@@ -38,6 +38,26 @@ import {
 const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'wave', 'orange', 'mtn', 'moov', 'bank', 'other'];
 const STATUSES: Quote['status'][] = ['draft', 'sent', 'accepted', 'refused'];
 
+type Translator = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * Lignes de totaux d'un devis : hors taxe, TVA (si un taux est défini) et
+ * total TTC. À 0 %, une seule ligne « Total », comme avant.
+ */
+function quoteTotals(
+  quote: Pick<Quote, 'lines' | 'taxRate' | 'total'>,
+  t: Translator,
+  fmt: (minor: number) => string,
+): [string, string][] {
+  const tax = taxBreakdown(quote.lines, quote.taxRate);
+  if (tax.rate === 0) return [[t('documents.total'), fmt(quote.total)]];
+  return [
+    [t('documents.subtotal'), fmt(tax.subtotal)],
+    [t('documents.tax', { rate: tax.rate }), fmt(tax.tax)],
+    [t('documents.totalTtc'), fmt(quote.total)],
+  ];
+}
+
 interface LineForm {
   key: string;
   productId: string;
@@ -54,6 +74,8 @@ interface QuoteForm {
   partyName: string;
   status: Quote['status'];
   note: string;
+  /** Taux de TVA saisi (pourcentage, texte libre). */
+  taxRate: string;
   lines: LineForm[];
 }
 
@@ -115,7 +137,11 @@ export default function Quotes() {
     }));
   }, [form, activeProducts, primary]);
 
-  const total = quoteTotal(parsedLines);
+  const formTax = taxBreakdown(
+    parsedLines.map((line) => ({ lineTotal: lineTotal(line.qty, line.unitPrice) })),
+    Number((form?.taxRate ?? '').replace(',', '.')) || 0,
+  );
+  const total = formTax.total;
   const preview = rows.find((quote) => quote.id === previewId) ?? null;
   const converting = rows.find((quote) => quote.id === convertId) ?? null;
 
@@ -131,6 +157,7 @@ export default function Quotes() {
       partyName: '',
       status: 'draft',
       note: '',
+      taxRate: '',
       lines: [newLine()],
     });
     setError(null);
@@ -147,6 +174,7 @@ export default function Quotes() {
       partyName: quote.partyName ?? '',
       status: quote.status,
       note: quote.note ?? '',
+      taxRate: quote.taxRate ? String(quote.taxRate) : '',
       lines: quote.lines.map((line) => ({
         key: line.id,
         productId: line.productId ?? '',
@@ -195,6 +223,7 @@ export default function Quotes() {
       lines: cleanLines,
       status: form.status,
       note: form.note,
+      taxRate: formTax.rate,
     };
     if (form.id) await updateQuote(form.id, input);
     else await createQuote(input);
@@ -246,9 +275,15 @@ export default function Quotes() {
         [t('quotes.validUntil'), quote.validUntil ?? '—'],
         [t('quotes.client'), quote.partyName ?? '—'],
       ],
-      head: [t('documents.designation'), t('documents.qty'), t('documents.unitPrice'), t('documents.lineTotal')],
+      party: {
+        label: t('quotes.client'),
+        name: quote.partyName,
+        address: (parties ?? []).find((party) => party.id === quote.partyId)?.address,
+        phone: (parties ?? []).find((party) => party.id === quote.partyId)?.phone,
+      },
+      head: [t('documents.designation'), t('documents.qty'), t('documents.unitPriceHt'), t('documents.lineTotalHt')],
       body: quote.lines.map((line) => [line.label, String(line.qty), fmt(line.unitPrice), fmt(line.lineTotal)]),
-      totals: [[t('documents.total'), fmt(quote.total)]],
+      totals: quoteTotals(quote, t, fmt),
       footer: t('documents.footer'),
     });
   };
@@ -361,8 +396,11 @@ export default function Quotes() {
             business={activeBusinesses.find((row) => row.id === preview.businessId) ?? business}
             partyLabel={t('quotes.client')}
             partyName={preview.partyName}
+            party={(parties ?? []).find(
+              (party) => party.id === preview.partyId || (!preview.partyId && party.name === preview.partyName),
+            )}
             lines={preview.lines}
-            totals={[[t('documents.total'), fmt(preview.total)]]}
+            totals={quoteTotals(preview, t, fmt)}
             note={preview.note}
             statusLabel={t(QUOTE_STATUS_KEY[preview.status])}
             footer={t('documents.footer')}
@@ -482,9 +520,33 @@ export default function Quotes() {
               </button>
             </div>
 
-            <div className="flex justify-between rounded-lg border border-forest-200 bg-white p-3 text-sm">
-              <span>{t('documents.total')}</span>
-              <span className="font-bold">{fmt(total)}</span>
+            <Field label={t('documents.taxRate')}>
+              <TextInput
+                inputMode="decimal"
+                value={form.taxRate}
+                onChange={(event) => setForm({ ...form, taxRate: event.target.value })}
+                placeholder="0"
+              />
+              <p className="mt-1 text-xs text-sage-500">{t('documents.taxRateHint')}</p>
+            </Field>
+
+            <div className="rounded-lg border border-forest-200 bg-white p-3 text-sm">
+              {formTax.rate > 0 && (
+                <>
+                  <div className="flex justify-between text-sage-600">
+                    <span>{t('documents.subtotal')}</span>
+                    <span>{fmt(formTax.subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-sage-600">
+                    <span>{t('documents.tax', { rate: formTax.rate })}</span>
+                    <span>{fmt(formTax.tax)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between font-bold">
+                <span>{formTax.rate > 0 ? t('documents.totalTtc') : t('documents.total')}</span>
+                <span>{fmt(total)}</span>
+              </div>
             </div>
 
             <Field label={t('quotes.status')}>

@@ -8,9 +8,9 @@ import { defaultMemberFor } from '@/core/members';
 import { getAuth } from '@/lib/api';
 import { convertMinor } from '@/core/money';
 import { uuid } from '@/lib/id';
-import { boundPaid, buildLines, stockDeltaMap, stockMovements, tradeDue, tradeTotal } from '@/core/trade';
+import { boundPaid, buildLines, stockDeltaMap, stockMovements, taxBreakdown, tradeDue } from '@/core/trade';
 import { allocatePayment } from '@/core/payments';
-import { nextDocumentNumber, quoteCanConvert, quoteIsEditable, quoteTotal, yearOf } from '@/core/documents';
+import { nextDocumentNumber, quoteCanConvert, quoteIsEditable, yearOf } from '@/core/documents';
 import { todayISO } from '@/lib/date';
 import { firstRecurringDue } from '@/lib/recurrence';
 import type {
@@ -711,6 +711,8 @@ export interface TradeInput {
   paymentMethod: PaymentMethod;
   accountId: string;
   note?: string;
+  /** Taux de TVA en pourcentage (les prix des lignes sont hors taxe). */
+  taxRate?: number;
 }
 
 /**
@@ -738,7 +740,8 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
   if (!family) throw new Error('no-family');
   const drafts = input.lines.map((line) => ({ ...line, id: uuid() }));
   const documentLines = buildLines(drafts);
-  const total = tradeTotal(documentLines);
+  const tax = taxBreakdown(documentLines, input.taxRate);
+  const total = tax.total;
   const paid = boundPaid(input.paid, total);
   const due = tradeDue(total, paid);
   const id = uuid();
@@ -755,6 +758,7 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
     partyName: input.partyName?.trim() || undefined,
     lines: documentLines,
     total,
+    taxRate: tax.rate > 0 ? tax.rate : undefined,
     paid,
     due,
     paymentMethod: input.paymentMethod,
@@ -798,7 +802,8 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
   const base = await baseSnapshotOf(kind, id);
   const drafts = input.lines.map((line) => ({ ...line, id: uuid() }));
   const documentLines = buildLines(drafts);
-  const total = tradeTotal(documentLines);
+  const tax = taxBreakdown(documentLines, input.taxRate);
+  const total = tax.total;
   const paid = boundPaid(input.paid, total);
   const due = tradeDue(total, paid);
   const updated: TradeDocument = {
@@ -811,6 +816,7 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
     partyName: input.partyName?.trim() || undefined,
     lines: documentLines,
     total,
+    taxRate: tax.rate > 0 ? tax.rate : undefined,
     paid,
     due,
     paymentMethod: input.paymentMethod,
@@ -1031,6 +1037,8 @@ export interface QuoteInput {
   lines: QuoteLineInput[];
   status: Quote['status'];
   note?: string;
+  /** Taux de TVA en pourcentage : les prix des lignes sont hors taxe. */
+  taxRate?: number;
 }
 
 /** Numéro du prochain devis (DEV-). */
@@ -1042,9 +1050,11 @@ async function nextQuoteNumber(date: string): Promise<string> {
 function quoteFields(input: QuoteInput) {
   const drafts = input.lines.map((line) => ({ ...line, id: uuid() }));
   const lines = buildLines(drafts);
+  const tax = taxBreakdown(lines, input.taxRate);
   return {
     lines,
-    total: quoteTotal(lines),
+    total: tax.total,
+    taxRate: tax.rate > 0 ? tax.rate : undefined,
     validUntil: input.validUntil || undefined,
     partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
@@ -1138,6 +1148,7 @@ export async function convertQuoteToSale(id: string, options: QuoteConversionInp
     paid: options.paid ?? 0,
     paymentMethod: options.paymentMethod,
     accountId: options.accountId,
+    taxRate: quote.taxRate,
     note: `Devis ${quote.number}`,
   });
   const base = await baseSnapshotOf('quote', id);

@@ -32,6 +32,38 @@ export function tradeTotal(lines: { lineTotal: number }[]): number {
   return lines.reduce((sum, line) => sum + safe(line.lineTotal), 0);
 }
 
+/** Taux de TVA normalisé : entre 0 et 100, arrondi à deux décimales. */
+export function normalizeTaxRate(rate: number | undefined): number {
+  if (!Number.isFinite(rate ?? NaN)) return 0;
+  const value = Math.min(100, Math.max(0, rate as number));
+  return Math.round(value * 100) / 100;
+}
+
+export interface TaxBreakdown {
+  /** Somme des lignes, hors taxe. */
+  subtotal: number;
+  /** Taux appliqué, en pourcentage (0 = aucune taxe). */
+  rate: number;
+  /** Montant de la TVA, arrondi à la sous-unité. */
+  tax: number;
+  /** Total toutes taxes comprises : c'est le montant facturé et compté. */
+  total: number;
+}
+
+/**
+ * Décomposition HT / TVA / TTC d'un document.
+ *
+ * Les prix saisis sont **hors taxe** ; le montant compté (ventes, crédits,
+ * règlements) reste le total TTC. À 0 %, le total égale la somme des lignes :
+ * les documents sans taxe gardent exactement leurs anciens montants.
+ */
+export function taxBreakdown(lines: { lineTotal: number }[], rate?: number): TaxBreakdown {
+  const subtotal = tradeTotal(lines);
+  const normalized = normalizeTaxRate(rate);
+  const tax = Math.round((subtotal * normalized) / 100);
+  return { subtotal, rate: normalized, tax, total: subtotal + tax };
+}
+
 /** Montant payé borné à [0, total]. */
 export function boundPaid(paid: number, total: number): number {
   return Math.min(Math.max(0, Math.round(paid)), Math.max(0, Math.round(total)));

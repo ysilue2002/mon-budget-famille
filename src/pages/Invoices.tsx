@@ -1,14 +1,40 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useBusinesses, usePrimaryCurrency, useSales } from '@/hooks/useData';
+import { useBusinesses, useParties, usePrimaryCurrency, useSales } from '@/hooks/useData';
 import { formatAmount } from '@/core/currencies';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/core/pdf';
 import { isOverdue } from '@/core/documents';
+import { taxBreakdown } from '@/core/trade';
 import { todayISO } from '@/lib/date';
 import DocumentSheet from '@/components/DocumentSheet';
 import type { TradeDocument } from '@/core/types';
 import { Card, EmptyState, Page, StatCard, Tag, btnGhost, btnPrimary } from '@/components/common';
+
+type Translator = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * Lignes de totaux d'une facture : hors taxe, TVA (si un taux est défini),
+ * total TTC, puis ce qui est encaissé et ce qui reste dû.
+ */
+function invoiceTotals(
+  invoice: Pick<TradeDocument, 'lines' | 'taxRate' | 'total' | 'paid' | 'due'>,
+  t: Translator,
+  fmt: (minor: number) => string,
+): [string, string][] {
+  const tax = taxBreakdown(invoice.lines, invoice.taxRate);
+  const rows: [string, string][] = [];
+  if (tax.rate > 0) {
+    rows.push([t('documents.subtotal'), fmt(tax.subtotal)]);
+    rows.push([t('documents.tax', { rate: tax.rate }), fmt(tax.tax)]);
+    rows.push([t('documents.totalTtc'), fmt(invoice.total)]);
+  } else {
+    rows.push([t('documents.total'), fmt(invoice.total)]);
+  }
+  rows.push([t('invoices.paid'), fmt(invoice.paid)]);
+  rows.push([t('invoices.due'), fmt(invoice.due)]);
+  return rows;
+}
 
 /**
  * Factures : chaque vente est numérotée automatiquement (FAC-année-numéro) et
@@ -20,6 +46,7 @@ export default function Invoices() {
   const { t, i18n } = useTranslation();
   const sales = useSales();
   const businesses = useBusinesses();
+  const parties = useParties();
   const primary = usePrimaryCurrency() ?? 'XOF';
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -45,18 +72,20 @@ export default function Invoices() {
       title: t('invoices.title'),
       business: activeBusinesses.find((business) => business.id === invoice.businessId) ?? activeBusinesses[0] ?? null,
       reference: invoice.number,
+      party: {
+        label: t('invoices.client'),
+        name: invoice.partyName,
+        address: (parties ?? []).find((party) => party.id === invoice.partyId)?.address,
+        phone: (parties ?? []).find((party) => party.id === invoice.partyId)?.phone,
+      },
       meta: [
         [t('documents.date'), invoice.date],
         [t('invoices.dueDate'), invoice.dueDate ?? '—'],
         [t('invoices.client'), invoice.partyName ?? '—'],
       ],
-      head: [t('documents.designation'), t('documents.qty'), t('documents.unitPrice'), t('documents.lineTotal')],
+      head: [t('documents.designation'), t('documents.qty'), t('documents.unitPriceHt'), t('documents.lineTotalHt')],
       body: invoice.lines.map((line) => [line.label, String(line.qty), fmt(line.unitPrice), fmt(line.lineTotal)]),
-      totals: [
-        [t('documents.total'), fmt(invoice.total)],
-        [t('invoices.paid'), fmt(invoice.paid)],
-        [t('invoices.due'), fmt(invoice.due)],
-      ],
+      totals: invoiceTotals(invoice, t, fmt),
       footer: t('documents.footer'),
     });
   };
@@ -169,12 +198,11 @@ export default function Invoices() {
             business={activeBusinesses.find((business) => business.id === preview.businessId) ?? activeBusinesses[0] ?? null}
             partyLabel={t('invoices.client')}
             partyName={preview.partyName}
+            party={(parties ?? []).find(
+              (party) => party.id === preview.partyId || (!preview.partyId && party.name === preview.partyName),
+            )}
             lines={preview.lines}
-            totals={[
-              [t('documents.total'), fmt(preview.total)],
-              [t('invoices.paid'), fmt(preview.paid)],
-              [t('invoices.due'), fmt(preview.due)],
-            ]}
+            totals={invoiceTotals(preview, t, fmt)}
             note={preview.note}
             statusLabel={preview.due === 0 ? t('invoices.statusPaid') : t('invoices.statusPartial')}
             footer={t('documents.footer')}

@@ -152,3 +152,23 @@ describe('transformation en vente', () => {
     expect(await db.sales.get(saleId)).toBeDefined();
   });
 });
+
+describe('TVA d’un devis et de sa vente', () => {
+  it('applique 18 % au devis, puis conserve le montant TTC en vente', async () => {
+    const id = await createQuote(
+      quoteInput({
+        lines: [{ label: 'Prestation', qty: 1, unitPrice: 1_000_000 }],
+        status: 'accepted',
+        taxRate: 18,
+      }),
+    );
+    const quote = await db.quotes.get(id);
+    expect(quote).toMatchObject({ total: 1_180_000, taxRate: 18 });
+
+    const saleId = await convertQuoteToSale(id, { accountId, paymentMethod: 'cash' });
+    const sale = await db.sales.get(saleId);
+    expect(sale).toMatchObject({ total: 1_180_000, taxRate: 18, due: 1_180_000 });
+    // Le journal enregistre le montant facturé (TTC), une seule fois.
+    expect(await db.transactions.get(`sale-${saleId}`)).toMatchObject({ amountInPrimary: 1_180_000 });
+  });
+});

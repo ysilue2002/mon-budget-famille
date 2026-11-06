@@ -12,7 +12,7 @@ import {
 import { createTrade, deleteTrade, updateTrade } from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
 import { parseAmountInput, toMajor } from '@/core/money';
-import { boundPaid, tradeDue, tradeStatus } from '@/core/trade';
+import { boundPaid, taxBreakdown, tradeDue, tradeStatus } from '@/core/trade';
 import { uuid } from '@/lib/id';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import type { PaymentMethod, TradeDocument } from '@/core/types';
@@ -56,6 +56,8 @@ interface TradeForm {
   paymentMethod: PaymentMethod;
   accountId: string;
   note: string;
+  /** Taux de TVA saisi (pourcentage). */
+  taxRate: string;
   lines: LineForm[];
 }
 
@@ -112,7 +114,11 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
     }));
   }, [form, activeProducts, primary]);
 
-  const total = parsedLines.reduce((sum, line) => sum + Math.round(line.qty * line.unitPrice), 0);
+  const tax = taxBreakdown(
+    parsedLines.map((line) => ({ lineTotal: Math.round(line.qty * line.unitPrice) })),
+    Number((form?.taxRate ?? '').replace(',', '.')) || 0,
+  );
+  const total = tax.total;
   const paidMinor = parseAmountInput(form?.paid ?? '', primary) ?? 0;
   const due = tradeDue(total, paidMinor);
   const status = tradeStatus(total, paidMinor);
@@ -130,6 +136,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
         paymentMethod: document.paymentMethod,
         accountId: document.accountId,
         note: document.note ?? '',
+        taxRate: document.taxRate ? String(document.taxRate) : '',
         lines: document.lines.map((line) => ({
           key: line.id,
           productId: line.productId ?? '',
@@ -147,6 +154,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
         paymentMethod: 'cash',
         accountId: firstAccount,
         note: '',
+        taxRate: '',
         lines: [newLine()],
       });
     }
@@ -209,6 +217,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
       paymentMethod: form.paymentMethod,
       accountId: form.accountId,
       note: form.note,
+      taxRate: tax.rate,
     };
     if (form.id) await updateTrade(kind, form.id, input);
     else await createTrade(kind, input);
@@ -430,9 +439,31 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
               </button>
             </div>
 
+            <Field label={t('documents.taxRate')}>
+              <TextInput
+                inputMode="decimal"
+                value={form.taxRate}
+                onChange={(event) => setForm({ ...form, taxRate: event.target.value })}
+                placeholder="0"
+              />
+              <p className="mt-1 text-xs text-sage-500">{t('documents.taxRateHint')}</p>
+            </Field>
+
             <div className="rounded-lg border border-forest-200 bg-white p-3 text-sm">
+              {tax.rate > 0 && (
+                <>
+                  <div className="flex justify-between text-sage-600">
+                    <span>{t('documents.subtotal')}</span>
+                    <span>{fmt(tax.subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-sage-600">
+                    <span>{t('documents.tax', { rate: tax.rate })}</span>
+                    <span>{fmt(tax.tax)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between">
-                <span>{t('trade.total')}</span>
+                <span>{tax.rate > 0 ? t('documents.totalTtc') : t('trade.total')}</span>
                 <span className="font-bold">{fmt(total)}</span>
               </div>
               <div className="mt-1 flex justify-between text-sage-600">
