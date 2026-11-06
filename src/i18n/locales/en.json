@@ -620,6 +620,8 @@
     "addLine": "Add a line",
     "product": "Item",
     "freeLine": "Free line (no stock)",
+    "stockLeft": "Left in stock afterwards: {{qty}} {{unit}}",
+    "stockShort": "more than the stock on hand",
     "qty": "Quantity",
     "unitPrice": "Unit price",
     "lineTotal": "Total",

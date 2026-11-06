@@ -34,6 +34,11 @@ import {
 
 const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'wave', 'orange', 'mtn', 'moov', 'bank', 'other'];
 
+/** Quantité lisible : 2 décimales maximum, séparateur local. */
+function formatQty(value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+}
+
 interface LineForm {
   key: string;
   productId: string;
@@ -163,6 +168,17 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
     }
     const price = kind === 'sale' ? product.sellPrice : product.buyPrice;
     patchLine(key, { productId, label: product.name, price: String(toMajor(price, primary)) });
+  };
+
+  /** Quantité de la marchandise qui restera en stock après cette ligne. */
+  const remainingOf = (line: LineForm): { qty: number; unit: string } | null => {
+    const product = activeProducts.find((row) => row.id === line.productId);
+    if (!product) return null;
+    const qty = Number(line.qty.replace(',', '.')) || 0;
+    return {
+      qty: kind === 'sale' ? product.stockQty - qty : product.stockQty + qty,
+      unit: product.unit,
+    };
   };
 
   const save = async () => {
@@ -390,6 +406,17 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                           </button>
                         </div>
                       </div>
+                      {(() => {
+                        const remaining = remainingOf(line);
+                        if (!remaining) return null;
+                        const short = remaining.qty < 0;
+                        return (
+                          <p className={`mt-1 text-xs ${short ? 'font-semibold text-red-600' : 'text-sage-600'}`}>
+                            {t('trade.stockLeft', { qty: formatQty(remaining.qty), unit: remaining.unit })}
+                            {short ? ` — ${t('trade.stockShort')}` : ''}
+                          </p>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}

@@ -620,6 +620,8 @@
     "addLine": "Ajouter une ligne",
     "product": "Marchandise",
     "freeLine": "Ligne libre (sans stock)",
+    "stockLeft": "Reste en stock après : {{qty}} {{unit}}",
+    "stockShort": "plus que le stock disponible",
     "qty": "Quantité",
     "unitPrice": "Prix unitaire",
     "lineTotal": "Total",
