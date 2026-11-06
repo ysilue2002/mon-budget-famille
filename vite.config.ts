@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Mon Budget Famille',
         short_name: 'Budget Famille',
@@ -17,14 +17,21 @@ export default defineConfig({
         theme_color: '#14532d',
         background_color: '#f6fdf9',
         display: 'standalone',
-        orientation: 'portrait-primary',
+        // Pas de verrou d'orientation : l'application reste utilisable en
+        // paysage sur une tablette ou un ordinateur.
         start_url: '/',
+        scope: '/',
+        id: '/',
         lang: 'fr',
         dir: 'ltr',
         categories: ['finance', 'business', 'productivity'],
+        // Android n'affiche l'invite d'installation qu'avec une icône 192 px et
+        // une 512 px ; iOS ignore les SVG pour l'écran d'accueil.
         icons: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
           { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
-          { src: 'icon-maskable.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
         ],
       },
       workbox: {

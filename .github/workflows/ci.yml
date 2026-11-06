@@ -114,6 +114,16 @@ jobs:
             sleep 1
           done
           node scripts/e2e-reset-delete.mjs
+      - name: E2E isolation et révocation de session
+        run: |+
+          kill -TERM $(pgrep -f 'tsx src/index.ts' | head -1) 2>/dev/null || true
+          sleep 1
+          (cd server && npx tsx src/index.ts > /tmp/api6.log 2>&1 &)
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4400/api/v1/health && break
+            sleep 1
+          done
+          node scripts/e2e-security.mjs
 
   docker:
     name: Docker — build image + démarrage + santé API

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { pool, withTransaction, type TxClient } from '../db/pool';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth';
 import { pushSchema, type PushOpInput } from '../validation';
+import { rateLimit } from '../middleware/rateLimit';
 
 /**
  * Push : file d'opérations idempotentes (opId UUID) + merge à trois
@@ -12,6 +13,14 @@ import { pushSchema, type PushOpInput } from '../validation';
  */
 
 const router = Router();
+
+/**
+ * Garde-fou de débit sur la synchronisation : un client normal envoie quelques
+ * opérations par minute et un pull toutes les cinq minutes. Le plafond large
+ * (300 requêtes / 5 min / IP) arrête un script qui martèle la base sans gêner
+ * un foyer nombreux derrière la même connexion.
+ */
+const syncLimiter = rateLimit({ name: 'sync-ip', windowMs: 5 * 60_000, max: 300 });
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -87,7 +96,14 @@ interface PushResult {
 }
 
 async function applyUpsert(client: TxClient, familyId: string, op: PushOpInput, rev: number): Promise<PushResult> {
-  const payload = isPlainObject(op.payload) ? op.payload : {};
+  // Le foyer et l'identifiant viennent du jeton et de l'URL, jamais de la
+  // charge utile : un client ne peut donc pas estampiller un enregistrement
+  // avec le foyer d'un autre utilisateur.
+  const payload: Record<string, unknown> = {
+    ...(isPlainObject(op.payload) ? op.payload : {}),
+    id: op.entityId,
+    familyId,
+  };
   const existing = await getRecord(client, familyId, op.entity, op.entityId);
   const changedFields = op.changedFields ?? Object.keys(payload);
   const baseSnapshot = isPlainObject(op.baseSnapshot) ? op.baseSnapshot : {};
@@ -150,7 +166,7 @@ async function applyDelete(client: TxClient, familyId: string, op: PushOpInput):
   return { opId: op.opId, rev: newRev, status: 'applied', mergedPayload: null };
 }
 
-router.post('/push', requireAuth, requireRole('member'), async (req: Request, res: Response) => {
+router.post('/push', syncLimiter, requireAuth, requireRole('member'), async (req: Request, res: Response) => {
   const auth = (req as AuthRequest).auth!;
   const parsed = pushSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -221,7 +237,7 @@ router.post('/push', requireAuth, requireRole('member'), async (req: Request, re
 
 const PULL_LIMIT = 500;
 
-router.get('/pull', requireAuth, async (req: Request, res: Response) => {
+router.get('/pull', syncLimiter, requireAuth, async (req: Request, res: Response) => {
   const auth = (req as AuthRequest).auth!;
   const rawCursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
   const cursor = /^\d+$/.test(rawCursor) ? Number(rawCursor) : 0;

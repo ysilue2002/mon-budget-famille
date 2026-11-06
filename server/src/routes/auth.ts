@@ -105,8 +105,15 @@ export function invitationStatus(invite: InviteRow | null): 'unknown' | 'expired
   if (invite.expires_at.getTime() <= Date.now()) return 'expired';
   return 'ok';
 }
-function signToken(userId: string): string {
-  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] });
+/**
+ * Jeton signé, avec la version de session du compte (`tv`) : une
+ * réinitialisation de mot de passe incrémente cette version, ce qui invalide
+ * immédiatement tous les jetons déjà émis pour ce compte.
+ */
+function signToken(userId: string, tokenVersion = 1): string {
+  return jwt.sign({ sub: userId, tv: tokenVersion }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'],
+  });
 }
 
 /** Foyer en attente de récupération : la plus récente fenêtre valide, verrouillée FOR UPDATE. */
@@ -179,7 +186,7 @@ async function revivePendingFamily(
  * La même adresse e-mail peut appartenir à plusieurs foyers via memberships,
  * mais l'inscription simple crée un foyer neuf.
  */
-router.post('/register', registerLimiter, async (req: Request, res: Response) => {
+async function registerHandler(req: Request, res: Response): Promise<void> {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'validation', details: parsed.error.flatten() });
@@ -260,6 +267,21 @@ router.post('/register', registerLimiter, async (req: Request, res: Response) =>
     user: { id: user.id, email: user.email },
     family: { id: familyId, name: familyName, primaryCurrency },
   });
+}
+
+router.post('/register', registerLimiter, async (req: Request, res: Response) => {
+  try {
+    await registerHandler(req, res);
+  } catch (error) {
+    // Deux inscriptions simultanées avec la même adresse : la contrainte
+    // d'unicité tranche, et l'utilisateur reçoit un 409 lisible plutôt qu'un 500.
+    if ((error as { code?: string }).code === '23505') {
+      res.status(409).json({ error: 'duplicate' });
+      return;
+    }
+    console.error('[auth/register]', error);
+    res.status(500).json({ error: 'internal' });
+  }
 });
 
 router.post('/login', loginIpLimiter, loginAccountLimiter, async (req: Request, res: Response) => {
@@ -277,6 +299,7 @@ router.post('/login', loginIpLimiter, loginAccountLimiter, async (req: Request, 
     family_name: string;
     primary_currency: string;
     role: string;
+    token_version: number;
   }>(
     // Plus récente adhésion d'abord : cohérent avec requireAuth (middleware/auth.ts).
     `SELECT u.id, u.email, u.password_hash, f.id AS family_id, f.name AS family_name, f.primary_currency, m.role
@@ -294,7 +317,7 @@ router.post('/login', loginIpLimiter, loginAccountLimiter, async (req: Request, 
     return;
   }
   res.json({
-    token: signToken(row.id),
+    token: signToken(row.id, Number(row.token_version)),
     user: { id: row.id, email: row.email },
     family: { id: row.family_id, name: row.family_name, primaryCurrency: row.primary_currency },
     role: row.role,
@@ -467,7 +490,7 @@ router.post('/reset-confirm', resetLimiter, async (req: Request, res: Response) 
     // Écrase un éventuel ancien code : un seul reset actif par couple code.
     await client.query('UPDATE password_resets SET used_at = now() WHERE code_hash = $1', [codeHash]);
     const hash = await bcrypt.hash(parsed.data.newPassword, 10);
-    await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, user.id]);
+    await client.query('UPDATE users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2', [hash, user.id]);
     return true;
   });
   if (!ok) {
@@ -534,7 +557,7 @@ router.post('/recovery-reset', recoveryIpLimiter, recoveryAccountLimiter, async 
     const phrase = parsed.data.recoveryPhrase;
     if (!(await bcrypt.compare(phrase, user.recovery_phrase_hash))) return false;
     const hash = await bcrypt.hash(parsed.data.newPassword, 10);
-    await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, user.id]);
+    await client.query('UPDATE users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2', [hash, user.id]);
     // Révocation des codes admin en circulation : tout accès en attente saute.
     await client.query('DELETE FROM password_resets WHERE user_id = $1', [user.id]);
     return true;

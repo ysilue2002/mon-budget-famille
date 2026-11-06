@@ -20,20 +20,28 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
+    const payload = jwt.verify(token, JWT_SECRET) as { sub: string; tv?: number };
     // Un compte peut appartenir à plusieurs foyers via `memberships` : la
     // plus récente adhésion l'emporte (celle à laquelle l'utilisateur vient
     // de se rattacher, par exemple via une invitation).
-    const rows = await query<{ user_id: string; family_id: string; role: Role }>(
-      `SELECT m.user_id, m.family_id, m.role
-       FROM memberships m
-       WHERE m.user_id = $1
+    const rows = await query<{ user_id: string; family_id: string; role: Role; token_version: number }>(
+      `SELECT u.id AS user_id, u.token_version, m.family_id, m.role
+       FROM users u
+       JOIN memberships m ON m.user_id = u.id
+       WHERE u.id = $1
        ORDER BY m.created_at DESC
        LIMIT 1`,
       [payload.sub],
     );
     const membership = rows.rows[0];
     if (!membership) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    // Révocation : une réinitialisation de mot de passe incrémente
+    // `token_version`, donc les jetons émis avant cessent d'être acceptés.
+    // Un jeton sans `tv` (émis avant cette évolution) vaut la version 1.
+    if (Number(payload.tv ?? 1) !== Number(membership.token_version)) {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
