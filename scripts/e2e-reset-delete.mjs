@@ -106,7 +106,12 @@ const newLogin = await api('POST', '/auth/login', { email: member, password: NEW
 ok('nouveau mot de passe accepté', newLogin.status === 200 && newLogin.json?.token);
 const newToken = newLogin.json?.token;
 
-// Le compte fonctionne toujours : push d'une transaction avant suppression.
+// La réinitialisation révoque les jetons émis avant : l'ancien jeton du membre
+// ne doit plus ouvrir la moindre route authentifiée.
+const oldTokenAfterReset = await api('GET', '/sync/pull?cursor=0', null, memberToken);
+ok('ancien jeton révoqué par la réinitialisation', oldTokenAfterReset.status === 401);
+
+// Le compte fonctionne toujours avec le nouveau jeton : push avant suppression.
 const push = await api(
   'POST',
   '/sync/push',
@@ -121,7 +126,7 @@ const push = await api(
       },
     ],
   },
-  memberToken || newToken,
+  newToken,
 );
 ok('push accepté avant suppression', push.status === 200);
 
