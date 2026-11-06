@@ -276,7 +276,7 @@ export default function ActivityDocs() {
               <p className="text-xs text-sage-600">{title}</p>
             </div>
             <div className="text-right text-xs text-sage-600">
-              <p>
+              <p dir="ltr">
                 {from} → {to}
               </p>
               <p>{generatedAt}</p>
@@ -292,7 +292,7 @@ export default function ActivityDocs() {
                 <thead>
                   <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
                     {table.head.map((cell) => (
-                      <th key={cell} className="py-1.5">
+                      <th key={cell} className="whitespace-nowrap py-1.5 pe-2">
                         {cell}
                       </th>
                     ))}
@@ -304,7 +304,7 @@ export default function ActivityDocs() {
                       {row.map((cell, cellIndex) => (
                         <td
                           key={`${cell}-${cellIndex}`}
-                          className={`py-1.5 ${cellIndex >= row.length - 2 ? 'text-right' : ''}`}
+                          className={`whitespace-nowrap py-1.5 pe-2 ${cellIndex >= row.length - 2 ? 'text-end' : ''}`}
                         >
                           {cell}
                         </td>

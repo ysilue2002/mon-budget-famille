@@ -90,14 +90,14 @@ export default function Invoices() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
-                <th className="py-1.5">{t('invoices.number')}</th>
-                <th className="py-1.5">{t('documents.date')}</th>
-                <th className="py-1.5">{t('invoices.client')}</th>
-                <th className="py-1.5 text-right">{t('documents.total')}</th>
-                <th className="py-1.5 text-right">{t('invoices.paid')}</th>
-                <th className="py-1.5 text-right">{t('invoices.due')}</th>
-                <th className="py-1.5">{t('invoices.status')}</th>
-                <th className="py-1.5 text-right">{t('common.actions')}</th>
+                <th className="py-1.5 pe-2">{t('invoices.number')}</th>
+                <th className="py-1.5 pe-2">{t('documents.date')}</th>
+                <th className="py-1.5 pe-2">{t('invoices.client')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('documents.total')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('invoices.paid')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('invoices.due')}</th>
+                <th className="py-1.5 pe-2">{t('invoices.status')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -105,11 +105,11 @@ export default function Invoices() {
                 <tr key={invoice.id} className="border-b border-forest-50">
                   <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">{invoice.number}</td>
                   <td className="whitespace-nowrap py-1.5">{invoice.date}</td>
-                  <td className="py-1.5">{invoice.partyName || '—'}</td>
-                  <td className="py-1.5 text-right font-semibold">{fmt(invoice.total)}</td>
-                  <td className="py-1.5 text-right">{fmt(invoice.paid)}</td>
-                  <td className={`py-1.5 text-right ${invoice.due > 0 ? 'font-semibold text-amber-700' : ''}`}>{fmt(invoice.due)}</td>
-                  <td className="py-1.5">
+                  <td className="py-1.5 pe-2">{invoice.partyName || '—'}</td>
+                  <td className="py-1.5 pe-2 text-right font-semibold">{fmt(invoice.total)}</td>
+                  <td className="py-1.5 pe-2 text-right">{fmt(invoice.paid)}</td>
+                  <td className={`py-1.5 pe-2 text-right ${invoice.due > 0 ? 'font-semibold text-amber-700' : ''}`}>{fmt(invoice.due)}</td>
+                  <td className="py-1.5 pe-2">
                     {invoice.due === 0 ? (
                       <Tag tone="green">{t('invoices.statusPaid')}</Tag>
                     ) : invoice.paid > 0 ? (
@@ -121,7 +121,7 @@ export default function Invoices() {
                       <span className="ml-1 text-[11px] font-semibold text-red-600">{t('invoices.overdue')}</span>
                     )}
                   </td>
-                  <td className="py-1.5 text-right">
+                  <td className="py-1.5 pe-2 text-right">
                     <div className="flex justify-end gap-1">
                       <button
                         type="button"

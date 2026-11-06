@@ -283,12 +283,12 @@ export default function Quotes() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
-                <th className="py-1.5">{t('quotes.number')}</th>
-                <th className="py-1.5">{t('documents.date')}</th>
-                <th className="py-1.5">{t('quotes.client')}</th>
-                <th className="py-1.5 text-right">{t('documents.total')}</th>
-                <th className="py-1.5">{t('quotes.status')}</th>
-                <th className="py-1.5 text-right">{t('common.actions')}</th>
+                <th className="py-1.5 pe-2">{t('quotes.number')}</th>
+                <th className="py-1.5 pe-2">{t('documents.date')}</th>
+                <th className="py-1.5 pe-2">{t('quotes.client')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('documents.total')}</th>
+                <th className="py-1.5 pe-2">{t('quotes.status')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -296,12 +296,12 @@ export default function Quotes() {
                 <tr key={quote.id} className="border-b border-forest-50">
                   <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">{quote.number}</td>
                   <td className="whitespace-nowrap py-1.5">{quote.date}</td>
-                  <td className="py-1.5">{quote.partyName || '—'}</td>
-                  <td className="py-1.5 text-right font-semibold">{fmt(quote.total)}</td>
-                  <td className="py-1.5">
+                  <td className="py-1.5 pe-2">{quote.partyName || '—'}</td>
+                  <td className="py-1.5 pe-2 text-right font-semibold">{fmt(quote.total)}</td>
+                  <td className="py-1.5 pe-2">
                     <Tag tone={statusTone(quote.status)}>{t(QUOTE_STATUS_KEY[quote.status])}</Tag>
                   </td>
-                  <td className="py-1.5 text-right">
+                  <td className="py-1.5 pe-2 text-right">
                     <div className="flex flex-wrap justify-end gap-1">
                       <button type="button" className="rounded p-1 text-sm hover:bg-forest-50" onClick={() => setPreviewId(quote.id)} aria-label={t('documents.preview')}>
                         👁
