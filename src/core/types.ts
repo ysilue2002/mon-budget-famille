@@ -261,6 +261,33 @@ export interface Advance extends SyncFields {
   createdAt: number;
 }
 
+/**
+ * Règlement d'un document : trace datée d'un encaissement (client) ou d'un
+ * paiement (fournisseur). C'est un journal, pas un mouvement d'argent
+ * supplémentaire : l'argent est déjà compté par l'opération du document.
+ */
+export interface Settlement extends SyncFields {
+  id: string;
+  familyId: string;
+  /** Fiche concernée (facultatif : vente saisie sans fiche). */
+  partyId?: string;
+  /** Nom recopié au moment du règlement. */
+  partyName?: string;
+  kind: 'client' | 'supplier';
+  /** Document réglé (vente pour un client, achat pour un fournisseur). */
+  documentId?: string;
+  documentKind?: 'sale' | 'purchase';
+  /** Montant imputé, en sous-unités du foyer. */
+  amount: number;
+  method: PaymentMethod;
+  /** Compte qui a reçu (client) ou versé (fournisseur) l'argent. */
+  accountId?: string;
+  /** Date du règlement (YYYY-MM-DD). */
+  date: string;
+  note?: string;
+  createdAt: number;
+}
+
 export interface Budget extends SyncFields {
   id: string;
   familyId: string;
@@ -388,7 +415,8 @@ export type SyncEntity =
   | 'sale'
   | 'purchase'
   | 'party'
-  | 'advance';
+  | 'advance'
+  | 'settlement';
 
 export interface OutboxOperation {
   id: string;

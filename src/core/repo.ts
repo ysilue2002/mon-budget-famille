@@ -30,6 +30,7 @@ import type {
   TradeDocument,
   RecurringRule,
   SavingsGoal,
+  Settlement,
   SyncFields,
   Transaction,
   TransactionType,
@@ -55,7 +56,8 @@ type SyncedEntity =
   | 'sale'
   | 'purchase'
   | 'party'
-  | 'advance';
+  | 'advance'
+  | 'settlement';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -88,6 +90,8 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.parties;
       case 'advance':
         return db.advances;
+      case 'settlement':
+        return db.settlements;
     }
   })();
   const row = await table.get(id);
@@ -913,12 +917,27 @@ export async function partyDocuments(partyId: string): Promise<TradeDocument[]> 
   );
 }
 
+export interface PaymentOptions {
+  /** Moyen utilisé (espèces, Wave, banque…). */
+  method?: PaymentMethod;
+  /** Compte qui reçoit (client) ou qui verse (fournisseur). */
+  accountId?: string;
+  /** Date du règlement (par défaut aujourd'hui). */
+  date?: string;
+  note?: string;
+}
+
 /**
  * Encaissement (client) ou paiement (fournisseur) sur une fiche : imputé aux
- * documents encore dus, du plus ancien au plus récent. Seul le montant
- * réellement imputé est renvoyé — le surplus n'est pas enregistré.
+ * documents encore dus, du plus ancien au plus récent. Chaque imputation laisse
+ * une trace datée dans l'historique des règlements ; seul le montant réellement
+ * imputé est renvoyé — le surplus n'est jamais enregistré.
  */
-export async function recordPartyPayment(partyId: string, amountMinor: number): Promise<number> {
+export async function recordPartyPayment(
+  partyId: string,
+  amountMinor: number,
+  options: PaymentOptions = {},
+): Promise<number> {
   const party = await db.parties.get(partyId);
   if (!party) return 0;
   const documents = await partyDocuments(partyId);
@@ -940,6 +959,26 @@ export async function recordPartyPayment(partyId: string, amountMinor: number): 
     const updated: TradeDocument = { ...document, paid, due, ...(updatedSyncFields(document) as object) };
     await table.put(updated);
     await enqueueUpsert(kind, document.id, recordOf(updated), document.rev, base);
+
+    // Trace du règlement : date, moyen et compte, pour l'historique.
+    const settlement: Settlement = {
+      id: uuid(),
+      familyId: party.familyId,
+      partyId: party.id,
+      partyName: party.name,
+      kind: party.kind,
+      documentId: document.id,
+      documentKind: kind,
+      amount: allocation.amount,
+      method: options.method ?? 'cash',
+      accountId: options.accountId,
+      date: options.date ?? todayISO(),
+      note: options.note?.trim() || undefined,
+      createdAt: Date.now(),
+      ...newSyncFields(),
+    };
+    await db.settlements.put(settlement);
+    await enqueue('settlement', settlement.id, 'upsert', recordOf(settlement));
 
     const transaction = await db.transactions.get(`${kind}-${document.id}`);
     if (transaction) {

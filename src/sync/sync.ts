@@ -36,6 +36,8 @@ function tableFor(entity: SyncEntity): Table<unknown, string> | null {
       return db.parties;
     case 'advance':
       return db.advances;
+    case 'settlement':
+      return db.settlements;
     default:
       return null;
   }

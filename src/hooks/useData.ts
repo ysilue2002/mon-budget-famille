@@ -89,6 +89,11 @@ export function useProducts() {
   }, []);
 }
 
+/** Historique des règlements, les plus récents d'abord. */
+export function useSettlements() {
+  return useLiveQuery(() => db.settlements.orderBy('date').reverse().toArray(), []);
+}
+
 export function useCategories() {
   return useLiveQuery(() => db.categories.toArray(), []);
 }
