@@ -1,6 +1,6 @@
 # Mon Budget Famille / My Family Budget
 
-PWA de gestion financière familiale **offline-first**, bilingue (FR/EN) et multidevise
+PWA de gestion financière familiale **offline-first**, trilingue (FR/EN/AR, avec affichage RTL) et multidevise
 (XOF, XAF, USD, NGN, GBP, EUR, CHF). Adaptée aux comptes Mobile Money
 (Wave, Orange Money, MTN MoMo, Moov Money…), banques et espèces.
 
@@ -12,7 +12,7 @@ mon-budget-famille/
 │   ├── core/               # Métier pur : types, devises, money (entiers), taux, repo, selectors
 │   ├── db/                 # Dexie.js (IndexedDB), amorçage
 │   ├── sync/               # File d'attente idempotente, protocole, conflits, SyncProvider
-│   ├── i18n/               # react-i18next — locales/fr.json + locales/en.json
+│   ├── i18n/               # react-i18next — locales/fr.json + en.json + ar.json (RTL)
 │   ├── pages/              # Dashboard, Opérations, Comptes, Budgets, Épargne, Dettes,
 │   │                       # Membres, Récurrents, Convertisseur, Rapports, États, Réglages,
 │   │                       # Conflits
@@ -330,13 +330,21 @@ Variables attendues (fichier `.env` côté compose, voir ci-dessus) :
 
 `.github/workflows/ci.yml` exécute à chaque push ou PR :
 
-- **Front** : typecheck + Vitest (88 tests) + build PWA.
+- **Front** : typecheck + Vitest (188 tests) + build PWA.
 - **API** : typecheck + migrations + les scripts E2E contre un vrai
   PostgreSQL 17 en service (`e2e-sync`, `e2e-delete`, `e2e-purge`,
   `e2e-invite`, `e2e-reset-delete`, `e2e-recovery-revival`), API relancée
   entre les scripts (`REGISTER_LIMIT_MAX` plafonne en mémoire le débit
   d'inscriptions, ajustable via une variable d'environnement).
 - **Docker** : `docker compose up --build` et sonde HTTP de santé de l'API.
+
+## Icônes et installation
+
+`scripts/make-icons.mjs` génère sans dépendance les icônes PNG de la PWA
+(`icon-192`, `icon-512`, `icon-maskable-512`, `apple-touch-icon`) à partir de la
+géométrie de `public/icon.svg` : Android n'affiche son invite d'installation
+qu'avec ces tailles, iOS ignore les SVG pour l'écran d'accueil. Le manifeste
+déclare `scope`, `id` et n'impose plus d'orientation (tablette et ordinateur).
 
 ## Tests
 
@@ -352,6 +360,12 @@ npm run build       # production (Vite + service worker PWA)
 Les jetons JWT (`server/src/routes/auth.ts`) sont transmis via
 `Authorization: Bearer` par `src/lib/api.ts`. La session est stockée
 côté client uniquement (`localStorage`), jamais dans le code source.
+
+Une **réinitialisation de mot de passe** (code administrateur ou phrase de
+secours) incrémente `users.token_version` (migration `014`) : les jetons émis
+avant cessent immédiatement d'être acceptés, et il faut se reconnecter. Un jeton
+sans `tv` (émis avant cette évolution) reste valable tant que le compte n'a pas
+été réinitialisé.
 
 Le secret est obligatoire (`server/src/config.ts`) : l'API refuse de démarrer
 s'il est absent ou fait moins de 32 caractères. `CORS_ORIGIN` est une liste
