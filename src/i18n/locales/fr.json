@@ -990,7 +990,13 @@
     "reference": "Référence",
     "statementScope": "Tout l’historique",
     "pickClient": "Aucun client enregistré : créez une fiche depuis « Gérer les clients et leurs coordonnées ».",
-    "statementHint": "Documents et règlements du client, du plus ancien au plus récent ; le total indique ce qu’il reste à encaisser."
+    "statementHint": "Documents et règlements du client, du plus ancien au plus récent ; le total indique ce qu’il reste à encaisser.",
+    "supplierStatement": "Relevé fournisseur",
+    "linePurchase": "Achat",
+    "pickSupplier": "Aucun fournisseur enregistré : créez une fiche depuis « Gérer les fournisseurs et leurs coordonnées ».",
+    "supplierStatementHint": "Achats et règlements du fournisseur, du plus ancien au plus récent ; le total indique ce qu’il reste à payer.",
+    "shareWhatsApp": "WhatsApp",
+    "shareEmail": "E-mail"
   },
   "balances": {
     "title": "Bilans",

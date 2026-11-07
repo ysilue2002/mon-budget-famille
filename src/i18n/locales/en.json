@@ -990,7 +990,13 @@
     "reference": "Reference",
     "statementScope": "Full history",
     "pickClient": "No customer yet: create one from “Manage customers and their details”.",
-    "statementHint": "Customer documents and payments, oldest first; the total shows what is still to collect."
+    "statementHint": "Customer documents and payments, oldest first; the total shows what is still to collect.",
+    "supplierStatement": "Supplier statement",
+    "linePurchase": "Purchase",
+    "pickSupplier": "No supplier yet: create one from “Manage suppliers and their details”.",
+    "supplierStatementHint": "Supplier purchases and payments, oldest first; the total shows what is still to pay.",
+    "shareWhatsApp": "WhatsApp",
+    "shareEmail": "Email"
   },
   "balances": {
     "title": "Statements",

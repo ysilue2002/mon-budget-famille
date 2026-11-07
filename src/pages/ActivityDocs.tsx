@@ -29,6 +29,7 @@ type DocKind =
   | 'clients'
   | 'suppliers'
   | 'clientStatement'
+  | 'supplierStatement'
   | 'advances';
 
 const KINDS: DocKind[] = [
@@ -41,6 +42,7 @@ const KINDS: DocKind[] = [
   'clients',
   'suppliers',
   'clientStatement',
+  'supplierStatement',
   'advances',
 ];
 
@@ -55,10 +57,11 @@ interface StatementTable {
 
 /**
  * États imprimables de l'activité : ventes, achats, dépenses, stock, crédits
- * clients et fournisseurs, coordonnées des clients et des fournisseurs, relevé
- * d'un client, avances et acomptes. Chaque état se prévisualise à l'écran
- * (liste empilée sur téléphone, tableau sur grand écran), puis s'imprime en A4
- * ou se télécharge en PDF. Les données viennent d'IndexedDB : la page
+ * clients et fournisseurs, coordonnées des clients et des fournisseurs,
+ * relevés détaillés d'un client ou d'un fournisseur, avances et acomptes.
+ * Chaque état se prévisualise à l'écran (fiches empilées sur téléphone,
+ * tableau sur grand écran), puis s'imprime en A4, se télécharge en PDF ou
+ * s'envoie par WhatsApp / e-mail. Les données viennent d'IndexedDB : la page
  * fonctionne hors connexion.
  */
 export default function ActivityDocs() {
@@ -78,6 +81,7 @@ export default function ActivityDocs() {
   const [from, setFrom] = useState(`${currentMonth()}-01`);
   const [to, setTo] = useState(endOfMonth(currentMonth()));
   const [statementClientId, setStatementClientId] = useState('');
+  const [statementSupplierId, setStatementSupplierId] = useState('');
 
   const lang = i18n.language;
   const fmt = (minor: number) => formatAmount(minor, primary, lang);
@@ -103,8 +107,20 @@ export default function ActivityDocs() {
         .sort((a, b) => a.name.localeCompare(b.name)),
     [parties],
   );
-  const statementId = statementClientId || clientList[0]?.id || '';
-  const statementClient = clientList.find((client) => client.id === statementId) ?? null;
+  const supplierList = useMemo(
+    () =>
+      (parties ?? [])
+        .filter((party) => party.kind === 'supplier' && !party.archived)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [parties],
+  );
+
+  const statementClient = clientList.find((client) => client.id === statementClientId) ?? clientList[0] ?? null;
+  const statementSupplier =
+    supplierList.find((supplier) => supplier.id === statementSupplierId) ?? supplierList[0] ?? null;
+  const statementParty =
+    kind === 'clientStatement' ? statementClient : kind === 'supplierStatement' ? statementSupplier : null;
+  const isStatement = kind === 'clientStatement' || kind === 'supplierStatement';
 
   const table: StatementTable = useMemo(() => {
     if (kind === 'sales' || kind === 'customerCredits') {
@@ -231,7 +247,6 @@ export default function ActivityDocs() {
 
     if (kind === 'suppliers') {
       // Coordonnées des fournisseurs et reste à leur payer.
-      const supplierRows = (parties ?? []).filter((party) => party.kind === 'supplier' && !party.archived);
       const documentsOf = (id: string) => (purchases ?? []).filter((purchase) => purchase.partyId === id);
       const dueOf = (id: string) => documentsOf(id).reduce((sum, purchase) => sum + purchase.due, 0);
       return {
@@ -242,7 +257,7 @@ export default function ActivityDocs() {
           t('parties.documents'),
           t('advances.remainingToPay'),
         ],
-        body: supplierRows.map((party) => [
+        body: supplierList.map((party) => [
           party.name,
           party.phone || '—',
           party.address || '—',
@@ -250,8 +265,8 @@ export default function ActivityDocs() {
           fmt(dueOf(party.id)),
         ]),
         totalLabel: t('advances.remainingToPay'),
-        total: supplierRows.reduce((sum, party) => sum + dueOf(party.id), 0),
-        count: supplierRows.length,
+        total: supplierList.reduce((sum, party) => sum + dueOf(party.id), 0),
+        count: supplierList.length,
       };
     }
 
@@ -304,6 +319,55 @@ export default function ActivityDocs() {
       };
     }
 
+    if (kind === 'supplierStatement') {
+      // Relevé d'un seul fournisseur : ses achats, ses règlements et son reste.
+      const documents = statementSupplier
+        ? (purchases ?? []).filter((purchase) => purchase.partyId === statementSupplier.id)
+        : [];
+      const documentIds = new Set(documents.map((doc) => doc.id));
+      const payments = (settlements ?? []).filter(
+        (settlement) =>
+          settlement.kind === 'supplier' &&
+          ((settlement.documentId && documentIds.has(settlement.documentId)) ||
+            (statementSupplier && settlement.partyId === statementSupplier.id)),
+      );
+      const lines = [
+        ...documents.map((doc) => ({
+          date: doc.date,
+          type: t('states.linePurchase'),
+          reference: doc.number ?? '—',
+          amount: doc.total,
+          due: doc.due,
+        })),
+        ...payments.map((payment) => ({
+          date: payment.date,
+          type: t('states.linePayment'),
+          reference: documents.find((doc) => doc.id === payment.documentId)?.number ?? '—',
+          amount: payment.amount,
+          due: 0,
+        })),
+      ].sort((a, b) => a.date.localeCompare(b.date));
+      return {
+        head: [
+          t('documents.date'),
+          t('states.lineType'),
+          t('states.reference'),
+          t('documents.total'),
+          t('invoices.due'),
+        ],
+        body: lines.map((line) => [
+          line.date,
+          line.type,
+          line.reference,
+          fmt(line.amount),
+          line.due > 0 ? fmt(line.due) : '—',
+        ]),
+        totalLabel: t('advances.remainingToPay'),
+        total: documents.reduce((sum, doc) => sum + doc.due, 0),
+        count: lines.length,
+      };
+    }
+
     const rows = (advances ?? []).filter((advance) => advance.receivedOn >= from && advance.receivedOn <= to);
     return {
       head: [
@@ -338,7 +402,9 @@ export default function ActivityDocs() {
     parties,
     settlements,
     clientList,
+    supplierList,
     statementClient,
+    statementSupplier,
     from,
     to,
     lang,
@@ -350,8 +416,8 @@ export default function ActivityDocs() {
   const locale = lang.startsWith('ar') ? 'ar' : lang.startsWith('fr') ? 'fr-FR' : 'en-US';
   const generatedAt = new Date().toLocaleString(locale);
 
-  const clientDetails = statementClient
-    ? [statementClient.name, statementClient.phone, statementClient.address].filter(Boolean).join(' · ')
+  const partyDetails = statementParty
+    ? [statementParty.name, statementParty.phone, statementParty.address].filter(Boolean).join(' · ')
     : '';
 
   const exportPdf = () => {
@@ -360,12 +426,22 @@ export default function ActivityDocs() {
       return;
     }
     downloadPdf({
-      fileName: pdfFileName(`etat-${kind}`, statementClient ? `${statementClient.name}-${todayISO()}` : `${from}_${to}`),
+      fileName: pdfFileName(
+        `etat-${kind}`,
+        statementParty ? `${statementParty.name}-${todayISO()}` : `${from}_${to}`,
+      ),
       title,
       business,
-      reference: statementClient ? clientDetails : `${from} → ${to}`,
+      reference: statementParty ? partyDetails : `${from} → ${to}`,
       meta: [
-        ...(statementClient ? [[t('advances.client'), clientDetails] as [string, string]] : []),
+        ...(statementParty
+          ? [
+              [
+                kind === 'supplierStatement' ? t('advances.supplier') : t('advances.client'),
+                partyDetails,
+              ] as [string, string],
+            ]
+          : []),
         [t('states.from'), from],
         [t('states.to'), to],
         [t('states.count'), String(table.count)],
@@ -375,6 +451,30 @@ export default function ActivityDocs() {
       totals: [[table.totalLabel, fmt(table.total)]],
       footer: `${t('documents.footer')} · ${generatedAt}`,
     });
+  };
+
+  /** Résumé texte du relevé, pour WhatsApp ou l'e-mail. */
+  const statementText = () => {
+    const lines = [
+      business?.name ?? t('documents.businessFallback'),
+      `${title}${statementParty ? ` — ${statementParty.name}` : ''}`,
+      partyDetails && statementParty?.phone ? '' : undefined,
+      ...table.body.map((row) => row.filter(Boolean).join(' · ')),
+      '',
+      `${table.totalLabel} : ${fmt(table.total)}`,
+    ].filter((line): line is string => line !== undefined);
+    return lines.join('\n');
+  };
+
+  const shareWhatsApp = () => {
+    const digits = statementParty?.phone?.replace(/\D/g, '') ?? '';
+    const url = `https://wa.me/${digits}?text=${encodeURIComponent(statementText())}`;
+    window.open(url, '_blank', 'noopener');
+  };
+
+  const shareEmail = () => {
+    const subject = `${title}${statementParty ? ` — ${statementParty.name}` : ''}`;
+    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(statementText())}`;
   };
 
   return (
@@ -388,6 +488,16 @@ export default function ActivityDocs() {
           <button type="button" className={btnGhost} onClick={exportPdf}>
             ⬇ {t('documents.pdf')}
           </button>
+          {isStatement && (
+            <>
+              <button type="button" className={btnGhost} onClick={shareWhatsApp}>
+                💬 {t('states.shareWhatsApp')}
+              </button>
+              <button type="button" className={btnGhost} onClick={shareEmail}>
+                ✉️ {t('states.shareEmail')}
+              </button>
+            </>
+          )}
         </div>
       }
     >
@@ -409,7 +519,7 @@ export default function ActivityDocs() {
       </div>
 
       <div className="no-print mb-4 flex flex-wrap items-center gap-2 text-sm">
-        {kind !== 'clientStatement' && (
+        {!isStatement && (
           <label className="flex items-center gap-2">
             {t('states.from')}
             <input
@@ -420,7 +530,7 @@ export default function ActivityDocs() {
             />
           </label>
         )}
-        {kind !== 'clientStatement' && (
+        {!isStatement && (
           <label className="flex items-center gap-2">
             {t('states.to')}
             <input
@@ -435,7 +545,7 @@ export default function ActivityDocs() {
           <label className="flex items-center gap-2">
             {t('advances.client')}
             <select
-              value={statementId}
+              value={statementClient?.id ?? ''}
               onChange={(event) => setStatementClientId(event.target.value)}
               className="rounded-lg border border-forest-200 px-2 py-1"
             >
@@ -447,11 +557,30 @@ export default function ActivityDocs() {
             </select>
           </label>
         )}
+        {kind === 'supplierStatement' && supplierList.length > 0 && (
+          <label className="flex items-center gap-2">
+            {t('advances.supplier')}
+            <select
+              value={statementSupplier?.id ?? ''}
+              onChange={(event) => setStatementSupplierId(event.target.value)}
+              className="rounded-lg border border-forest-200 px-2 py-1"
+            >
+              {supplierList.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <span className="text-xs text-sage-500">{t('states.count', { count: table.count })}</span>
       </div>
 
       {kind === 'clientStatement' && clientList.length === 0 && (
         <p className="no-print mb-3 text-sm text-sage-600">{t('states.pickClient')}</p>
+      )}
+      {kind === 'supplierStatement' && supplierList.length === 0 && (
+        <p className="no-print mb-3 text-sm text-sage-600">{t('states.pickSupplier')}</p>
       )}
 
       <Card className="p-0">
@@ -460,12 +589,10 @@ export default function ActivityDocs() {
             <div>
               <h2 className="text-lg font-bold text-forest-950">{business?.name ?? t('documents.businessFallback')}</h2>
               <p className="text-xs text-sage-600">{title}</p>
-              {kind === 'clientStatement' && statementClient && (
-                <p className="mt-1 text-sm font-medium text-forest-900">{clientDetails}</p>
-              )}
+              {statementParty && <p className="mt-1 text-sm font-medium text-forest-900">{partyDetails}</p>}
             </div>
             <div className="text-right text-xs text-sage-600">
-              {kind !== 'clientStatement' ? (
+              {!isStatement ? (
                 <p dir="ltr">
                   {from} → {to}
                 </p>
@@ -562,6 +689,9 @@ export default function ActivityDocs() {
         </p>
       )}
       {kind === 'clientStatement' && <p className="no-print mt-2 text-xs text-sage-500">{t('states.statementHint')}</p>}
+      {kind === 'supplierStatement' && (
+        <p className="no-print mt-2 text-xs text-sage-500">{t('states.supplierStatementHint')}</p>
+      )}
       <p className="no-print mt-2 text-xs text-sage-500">{t('states.hint')}</p>
       <div className="no-print mt-2">
         <Tag tone="sage">{t('states.offlineHint')}</Tag>
