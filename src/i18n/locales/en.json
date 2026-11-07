@@ -960,7 +960,9 @@
     "count": "{{count}} row(s)",
     "empty": "No data in this period.",
     "hint": "Each statement is read line by line: a stock purchase is never counted again as an expense.",
-    "offlineHint": "Works offline"
+    "offlineHint": "Works offline",
+    "clients": "Customers",
+    "manageClients": "Manage customers and their details"
   },
   "balances": {
     "title": "Statements",

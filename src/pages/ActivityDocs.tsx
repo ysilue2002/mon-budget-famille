@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   useAdvances,
   useBusinesses,
   useCategories,
+  useParties,
   usePrimaryCurrency,
   useProducts,
   usePurchases,
@@ -16,9 +18,26 @@ import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import { Card, Page, Tag, btnGhost, btnPrimary } from '@/components/common';
 
-type DocKind = 'sales' | 'purchases' | 'expenses' | 'stock' | 'customerCredits' | 'supplierCredits' | 'advances';
+type DocKind =
+  | 'sales'
+  | 'purchases'
+  | 'expenses'
+  | 'stock'
+  | 'customerCredits'
+  | 'supplierCredits'
+  | 'clients'
+  | 'advances';
 
-const KINDS: DocKind[] = ['sales', 'purchases', 'expenses', 'stock', 'customerCredits', 'supplierCredits', 'advances'];
+const KINDS: DocKind[] = [
+  'sales',
+  'purchases',
+  'expenses',
+  'stock',
+  'customerCredits',
+  'supplierCredits',
+  'clients',
+  'advances',
+];
 
 interface StatementTable {
   head: string[];
@@ -43,6 +62,7 @@ export default function ActivityDocs() {
   const products = useProducts();
   const advances = useAdvances();
   const categories = useCategories();
+  const parties = useParties();
   const businesses = useBusinesses();
   const primary = usePrimaryCurrency() ?? 'XOF';
 
@@ -165,6 +185,32 @@ export default function ActivityDocs() {
       };
     }
 
+    if (kind === 'clients') {
+      // Coordonnées des clients et solde dû, pour un état nominatif imprimable.
+      const clientRows = (parties ?? []).filter((party) => party.kind === 'client' && !party.archived);
+      const documentsOf = (id: string) => (sales ?? []).filter((sale) => sale.partyId === id);
+      const dueOf = (id: string) => documentsOf(id).reduce((sum, sale) => sum + sale.due, 0);
+      return {
+        head: [
+          t('common.name'),
+          t('parties.phone'),
+          t('parties.address'),
+          t('parties.documents'),
+          t('parties.totalDue'),
+        ],
+        body: clientRows.map((party) => [
+          party.name,
+          party.phone || '—',
+          party.address || '—',
+          String(documentsOf(party.id).length),
+          fmt(dueOf(party.id)),
+        ]),
+        totalLabel: t('parties.totalDue'),
+        total: clientRows.reduce((sum, party) => sum + dueOf(party.id), 0),
+        count: clientRows.length,
+      };
+    }
+
     const rows = (advances ?? []).filter((advance) => advance.receivedOn >= from && advance.receivedOn <= to);
     return {
       head: [
@@ -187,7 +233,7 @@ export default function ActivityDocs() {
       total: rows.reduce((sum, advance) => sum + advance.amount, 0),
       count: rows.length,
     };
-  }, [kind, sales, purchases, transactions, products, advances, from, to, lang, primary, categories]);
+  }, [kind, sales, purchases, transactions, products, advances, parties, from, to, lang, primary, categories]);
 
   const title = t(`states.${kind}`);
   const locale = lang.startsWith('ar') ? 'ar' : lang.startsWith('fr') ? 'fr-FR' : 'en-US';
@@ -331,6 +377,13 @@ export default function ActivityDocs() {
         </article>
       </Card>
 
+      {kind === 'clients' && (
+        <p className="no-print mt-2 text-xs text-sage-500">
+          <Link to="/clients" className="underline hover:text-forest-800">
+            {t('states.manageClients')}
+          </Link>
+        </p>
+      )}
       <p className="no-print mt-2 text-xs text-sage-500">{t('states.hint')}</p>
       <div className="no-print mt-2">
         <Tag tone="sage">{t('states.offlineHint')}</Tag>

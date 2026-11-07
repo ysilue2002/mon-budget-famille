@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   useAccounts,
@@ -280,9 +281,16 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
     <Page
       title={title}
       actions={
-        <button type="button" className={btnPrimary} onClick={() => openForm()} disabled={activeBusinesses.length === 0}>
-          ＋ {newLabel}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {kind === 'purchase' && (
+            <Link to="/suppliers" className={btnGhost}>
+              🏭 {t('nav.suppliers')}
+            </Link>
+          )}
+          <button type="button" className={btnPrimary} onClick={() => openForm()} disabled={activeBusinesses.length === 0}>
+            ＋ {newLabel}
+          </button>
+        </div>
       }
     >
       <div className="mb-4 grid gap-3 sm:grid-cols-3">

@@ -72,7 +72,6 @@ const NAV_BUSINESS = [
   { to: '/advances', key: 'nav.advances', icon: '💵' },
   { to: '/profile', key: 'nav.profile', icon: '🧑‍💼' },
   { to: '/clients', key: 'nav.clients', icon: '👤' },
-  { to: '/suppliers', key: 'nav.suppliers', icon: '🏭' },
   { to: '/products', key: 'nav.products', icon: '📦' },
   { to: '/transactions', key: 'nav.transactions', icon: '🧾' },
   { to: '/business', key: 'nav.business', icon: '📊' },

@@ -960,7 +960,9 @@
     "count": "{{count}} ligne(s)",
     "empty": "Aucune donnée sur cette période.",
     "hint": "Chaque état se lit ligne par ligne : un achat de marchandises n'est jamais recompté en dépense.",
-    "offlineHint": "Fonctionne hors connexion"
+    "offlineHint": "Fonctionne hors connexion",
+    "clients": "Clients",
+    "manageClients": "Gérer les clients et leurs coordonnées"
   },
   "balances": {
     "title": "Bilans",
