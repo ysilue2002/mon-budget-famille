@@ -7,6 +7,7 @@ import { businessProfilesFromRegistration } from '@/core/onboarding';
 import { createBusiness, updateFamilyProfile } from '@/core/repo';
 import type { CurrencyCode } from '@/core/types';
 import { runSync } from '@/sync/sync';
+import { clearOfflineMode, setOfflineMode } from '@/lib/session';
 import { useSpace } from '@/spaces/space';
 import { Card, CurrencySelect, Field, Page, TextInput, btnGhost, btnPrimary } from '@/components/common';
 
@@ -139,6 +140,7 @@ export default function Login() {
 
   const logout = () => {
     clearAuth();
+    clearOfflineMode();
     setMode('login');
     setEmail('');
     setPassword('');
@@ -337,7 +339,10 @@ export default function Login() {
           </button>
           <button
             type="button"
-            onClick={() => void navigate('/', { replace: true })}
+            onClick={() => {
+              setOfflineMode();
+              void navigate('/', { replace: true });
+            }}
             className="text-xs text-sage-500 underline hover:text-forest-800"
           >
             {t('login.continueOffline')}

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { SyncProvider, SyncBadge } from '@/sync/SyncProvider';
 import { LANGUAGES } from '@/i18n';
@@ -7,6 +7,7 @@ import { SUPPORTED_CURRENCIES } from '@/core/currencies';
 import { SpaceProvider, useSpace } from '@/spaces/space';
 import { LangSwitcher } from '@/components/LangSwitcher';
 import { clearAuth, getAuth } from '@/lib/api';
+import { clearOfflineMode, isOfflineMode } from '@/lib/session';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { WealthTracker } from '@/components/WealthTracker';
 import { materializeDueRecurrences } from '@/core/recurring';
@@ -107,7 +108,12 @@ function Layout() {
   const { t } = useTranslation();
   const { space, clearSpace } = useSpace();
   const navigate = useNavigate();
+  const location = useLocation();
   const session = getAuth();
+  // Sans session ni choix explicite « sans compte », l'espace choisi impose la
+  // connexion : les écrans de compte restent évidemment accessibles.
+  const publicPaths = ['/login', '/join', '/reset'];
+  const needsLogin = !session && !isOfflineMode() && !publicPaths.includes(location.pathname);
   const business = space === 'business';
   const navItems = business ? NAV_BUSINESS : NAV_FAMILY;
   const spaceLabel = business ? t('spaces.businessShort') : t('spaces.familyShort');
@@ -162,6 +168,8 @@ function Layout() {
           onClick={() => {
             if (session) {
               clearAuth();
+              clearOfflineMode();
+              void navigate('/login', { replace: true });
             } else {
               void navigate('/login');
             }
@@ -186,6 +194,9 @@ function Layout() {
         </header>
 
         <main className="app-main flex-1 overflow-y-auto sidebar-nav pb-24 lg:pb-6">
+          {needsLogin ? (
+            <Login />
+          ) : (
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={business ? <ActivityHome /> : <Dashboard />} />
@@ -221,6 +232,7 @@ function Layout() {
               <Route path="*" element={business ? <ActivityHome /> : <Dashboard />} />
             </Routes>
           </ErrorBoundary>
+          )}
         </main>
 
         {/* Barre de navigation — mobile */}
