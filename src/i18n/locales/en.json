@@ -969,7 +969,7 @@
     "stock": "Stock",
     "customerCredits": "Customer credit",
     "supplierCredits": "Supplier credit",
-    "advances": "Advances received",
+    "advances": "Advances and deposits",
     "from": "From",
     "to": "To",
     "total": "Total",
@@ -978,7 +978,11 @@
     "hint": "Each statement is read line by line: a stock purchase is never counted again as an expense.",
     "offlineHint": "Works offline",
     "clients": "Customers",
-    "manageClients": "Manage customers and their details"
+    "manageClients": "Manage customers and their details",
+    "suppliers": "Suppliers",
+    "manageSuppliers": "Manage suppliers and their details",
+    "manageAdvances": "Manage advances and deposits",
+    "advancesTab": "Advances and deposits"
   },
   "balances": {
     "title": "Statements",

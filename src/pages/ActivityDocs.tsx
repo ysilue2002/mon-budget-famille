@@ -26,6 +26,7 @@ type DocKind =
   | 'customerCredits'
   | 'supplierCredits'
   | 'clients'
+  | 'suppliers'
   | 'advances';
 
 const KINDS: DocKind[] = [
@@ -36,6 +37,7 @@ const KINDS: DocKind[] = [
   'customerCredits',
   'supplierCredits',
   'clients',
+  'suppliers',
   'advances',
 ];
 
@@ -211,6 +213,32 @@ export default function ActivityDocs() {
       };
     }
 
+    if (kind === 'suppliers') {
+      // Coordonnées des fournisseurs et reste à leur payer.
+      const supplierRows = (parties ?? []).filter((party) => party.kind === 'supplier' && !party.archived);
+      const documentsOf = (id: string) => (purchases ?? []).filter((purchase) => purchase.partyId === id);
+      const dueOf = (id: string) => documentsOf(id).reduce((sum, purchase) => sum + purchase.due, 0);
+      return {
+        head: [
+          t('common.name'),
+          t('parties.phone'),
+          t('parties.address'),
+          t('parties.documents'),
+          t('advances.remainingToPay'),
+        ],
+        body: supplierRows.map((party) => [
+          party.name,
+          party.phone || '—',
+          party.address || '—',
+          String(documentsOf(party.id).length),
+          fmt(dueOf(party.id)),
+        ]),
+        totalLabel: t('advances.remainingToPay'),
+        total: supplierRows.reduce((sum, party) => sum + dueOf(party.id), 0),
+        count: supplierRows.length,
+      };
+    }
+
     const rows = (advances ?? []).filter((advance) => advance.receivedOn >= from && advance.receivedOn <= to);
     return {
       head: [
@@ -379,10 +407,17 @@ export default function ActivityDocs() {
         </article>
       </Card>
 
-      {kind === 'clients' && (
+      {(kind === 'clients' || kind === 'suppliers' || kind === 'advances') && (
         <p className="no-print mt-2 text-xs text-sage-500">
-          <Link to="/clients" className="underline hover:text-forest-800">
-            {t('states.manageClients')}
+          <Link
+            to={kind === 'clients' ? '/clients' : kind === 'suppliers' ? '/suppliers' : '/advances'}
+            className="underline hover:text-forest-800"
+          >
+            {kind === 'clients'
+              ? t('states.manageClients')
+              : kind === 'suppliers'
+                ? t('states.manageSuppliers')
+                : t('states.manageAdvances')}
           </Link>
         </p>
       )}
