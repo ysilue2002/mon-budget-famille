@@ -117,37 +117,24 @@ Le bouton **Imprimer** déclenche `window.print()` ; les règles `@media print` 
 **PDF** produit le même état via jsPDF + autoTable, détail des opérations inclus
 si l'option est cochée. Aucune donnée n'est envoyée : tout est calculé localement.
 
-## Activité professionnelle (business)
+## Activité (espace « Activité »)
 
-L'écran **Activité pro** (`src/pages/Business.tsx`) suit les recettes et charges
-d'une ou plusieurs activités, à côté du budget du foyer, et produit ses **états
-financiers** (compte de résultat, bilan simplifié, trésorerie) sur un mois ou une
-année.
+L'espace **Activité** suit les recettes et charges d'une ou plusieurs activités,
+à côté du budget du foyer. L'identité de l'activité (nom, gérant, coordonnées,
+identifiant fiscal) se règle dans **Profil** (`src/pages/Profile.tsx`), où elle
+peut aussi être archivée sans perdre son historique.
 
-- Une **activité** (`Business`) porte un nom, l'activité exercée, un identifiant
-  fiscal facultatif et des notes ; elle s'archive sans perdre son historique.
 - Une opération s'y rattache via `Transaction.businessId` (champ « Activité pro »
   du formulaire d'opération, jamais pour un transfert). Le drapeau
   `Transaction.settled` distingue une facture **réglée** (défaut) d'une facture
   **encaissée/payée plus tard**.
-- Les calculs vivent dans la logique pure `src/core/business.ts` :
-  - **compte de résultat** (engagement) : recettes − charges de la période, marge,
-    détail par catégorie ;
-  - **trésorerie** : ouverture (flux réglés avant la période), encaissements,
-    décaissements, variation, clôture ;
-  - **bilan simplifié** : actif = trésorerie + créances clients, passif = dettes
-    fournisseurs + situation nette (résultat cumulé) — les deux totaux sont égaux
-    par construction, les factures en attente entrant au bilan mais pas en
-    trésorerie ;
-  - **journal** des opérations de la période, avec bascule « Réglée » pour suivre
-    les encaissements.
-- Le bouton **Imprimer** réutilise les règles `@media print` (feuille
-  `.print-sheet`) et **PDF** produit le même état via jsPDF + autoTable.
-
-L'entité `business` se synchronise comme les autres (`records`), d'où la migration
-`server/src/db/migrations/004_business_entity.sql` qui élargit la contrainte CHECK,
-et la version 6 du schéma Dexie (`businesses` + index `businessId`).
-
+- Les états financiers d'une période sont rendus par **Bilans**
+  (`src/pages/Balances.tsx`, calculs dans `src/core/reports.ts`), la trésorerie
+  par **Trésorerie** (`src/core/treasury.ts`) et les documents imprimables par
+  **États** (`src/pages/ActivityDocs.tsx`).
+- Les menus des deux espaces vivent dans `src/navigation.ts` et sont verrouillés
+  par `src/navigation.test.ts` (pas de doublon, douze entrées au plus, libellés
+  traduits dans les trois langues).
 ## Membres du foyer
 
 L'écran **Membres** gère la liste utilisée pour attribuer les opérations et pour
