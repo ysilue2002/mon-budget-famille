@@ -68,8 +68,8 @@ export default function ActivityHome() {
     { to: '/purchases', icon: '📥', label: t('activity.newPurchase'), tone: 'ghost' as const },
     { to: '/transactions', icon: '🧾', label: t('activity.newExpense'), tone: 'ghost' as const },
     { to: '/products', icon: '📦', label: t('activity.openProducts'), tone: 'ghost' as const },
-    { to: '/business', icon: '📊', label: t('activity.openStatements'), tone: 'ghost' as const },
-    { to: '/reports', icon: '📄', label: t('activity.openDocuments'), tone: 'ghost' as const },
+    { to: '/balances', icon: '📈', label: t('activity.openStatements'), tone: 'ghost' as const },
+    { to: '/states', icon: '📄', label: t('activity.openDocuments'), tone: 'ghost' as const },
     { to: '/settings', icon: '⚙️', label: t('activity.openSettings'), tone: 'ghost' as const },
   ];
 
@@ -81,7 +81,7 @@ export default function ActivityHome() {
       {activeBusinesses.length === 0 && (
         <Card className="mb-4 border-amber-200 bg-amber-50/60">
           <p className="text-sm text-amber-900">{t('activity.noBusiness')}</p>
-          <Link to="/business" className={`${btnPrimary} mt-3`}>
+          <Link to="/profile" className={`${btnPrimary} mt-3`}>
             ＋ {t('activity.createBusiness')}
           </Link>
         </Card>

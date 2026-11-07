@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useBusinesses, useFamily } from '@/hooks/useData';
-import { createBusiness, updateBusiness } from '@/core/repo';
+import { archiveBusiness, createBusiness, updateBusiness } from '@/core/repo';
 import { currencyLabel } from '@/core/currencies';
 import {
   Card,
+  ConfirmButton,
   EmptyState,
   Field,
   Page,
@@ -319,6 +320,15 @@ export default function ProfilePage() {
                 </div>
               </dl>
               <p className="mt-4 text-xs text-sage-500">{t('profile.identityHint')}</p>
+              <div className="no-print mt-4 border-t border-forest-100 pt-3">
+                <ConfirmButton
+                  label={t('profile.archive')}
+                  confirmLabel={t('profile.archiveConfirm')}
+                  cancelLabel={t('common.cancel')}
+                  onConfirm={() => void archiveBusiness(selected.id)}
+                  danger
+                />
+              </div>
             </Card>
           </div>
         )

@@ -22,7 +22,7 @@ import Recurring from '@/pages/Recurring';
 import Converter from '@/pages/Converter';
 import Reports from '@/pages/Reports';
 import Statements from '@/pages/Statements';
-import BusinessPage from '@/pages/Business';
+import { NAV_BUSINESS, NAV_FAMILY, type NavItem } from '@/navigation';
 import ActivityHome from '@/pages/ActivityHome';
 import Products from '@/pages/Products';
 import Trades from '@/pages/Trades';
@@ -42,41 +42,6 @@ import Join from '@/pages/Join';
 import Reset from '@/pages/Reset';
 import SpaceSelect from '@/pages/SpaceSelect';
 
-/** Navigation de l'assistant « budget familial ». */
-const NAV_FAMILY = [
-  { to: '/', key: 'nav.dashboard', icon: '📊' },
-  { to: '/transactions', key: 'nav.transactions', icon: '🧾' },
-  { to: '/accounts', key: 'nav.accounts', icon: '🏦' },
-  { to: '/members', key: 'nav.members', icon: '👥' },
-  { to: '/budgets', key: 'nav.budgets', icon: '🎯' },
-  { to: '/savings', key: 'nav.savings', icon: '💰' },
-  { to: '/debts', key: 'nav.debts', icon: '🤝' },
-  { to: '/recurring', key: 'nav.recurring', icon: '🔁' },
-  { to: '/converter', key: 'nav.converter', icon: '💱' },
-  { to: '/reports', key: 'nav.reports', icon: '📈' },
-  { to: '/statements', key: 'nav.statements', icon: '📄' },
-  { to: '/settings', key: 'nav.settings', icon: '⚙️' },
-] as const;
-
-/** Navigation de l'assistant « activité » : accueil, stock, ventes, bilans, documents. */
-const NAV_BUSINESS = [
-  { to: '/', key: 'nav.home', icon: '🏠' },
-  { to: '/sales', key: 'nav.sales', icon: '🛒' },
-  { to: '/purchases', key: 'nav.purchases', icon: '📥' },
-  { to: '/expenses', key: 'nav.expenses', icon: '🧾' },
-  { to: '/balances', key: 'nav.balances', icon: '📈' },
-  { to: '/treasury', key: 'nav.treasury', icon: '💧' },
-  { to: '/quotes', key: 'nav.quotes', icon: '📝' },
-  { to: '/invoices', key: 'nav.invoices', icon: '🧾' },
-  { to: '/states', key: 'nav.states', icon: '📋' },
-  { to: '/profile', key: 'nav.profile', icon: '🧑‍💼' },
-  { to: '/products', key: 'nav.products', icon: '📦' },
-  { to: '/transactions', key: 'nav.transactions', icon: '🧾' },
-  { to: '/business', key: 'nav.business', icon: '📊' },
-  { to: '/reports', key: 'nav.reports', icon: '📄' },
-  { to: '/converter', key: 'nav.converter', icon: '💱' },
-  { to: '/settings', key: 'nav.settings', icon: '⚙️' },
-] as const;
 
 /**
  * Génère les échéances récurrentes dues : au montage, chaque minute (échéance
@@ -112,7 +77,7 @@ function Layout() {
   const publicPaths = ['/login', '/join', '/reset'];
   const needsLogin = !session && !isOfflineMode() && !publicPaths.includes(location.pathname);
   const business = space === 'business';
-  const navItems = business ? NAV_BUSINESS : NAV_FAMILY;
+  const navItems: readonly NavItem[] = business ? NAV_BUSINESS : NAV_FAMILY;
   const spaceLabel = business ? t('spaces.businessShort') : t('spaces.familyShort');
   const meta = t('app.meta', { languages: LANGUAGES.length, currencies: SUPPORTED_CURRENCIES.length });
 
@@ -223,7 +188,6 @@ function Layout() {
               <Route path="/converter" element={<Converter />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/statements" element={<Statements />} />
-              <Route path="/business" element={<BusinessPage />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/conflicts" element={<Conflicts />} />
               <Route path="*" element={business ? <ActivityHome /> : <Dashboard />} />
