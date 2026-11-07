@@ -247,8 +247,8 @@ export default function ActivityDocs() {
         t('advances.party'),
         t('advances.subject'),
         t('advances.status'),
-        t('advances.amount'),
-        t('advances.remaining'),
+        t('advances.amountShort'),
+        t('advances.remainingShort'),
       ],
       body: rows.map((advance) => [
         advance.receivedOn,
