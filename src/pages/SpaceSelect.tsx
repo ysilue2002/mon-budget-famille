@@ -1,11 +1,14 @@
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { LangSwitcher } from '@/components/LangSwitcher';
+import { getAuth } from '@/lib/api';
 import { useSpace, type Space } from '@/spaces/space';
 
 /**
  * Écran d'ouverture : choisir l'assistant (budget familial ou activité).
- * Le choix est mémorisé, mais reste changeable depuis la navigation.
+ * Le choix est mémorisé, mais reste changeable depuis la navigation. Sans
+ * session ouverte, l'écran de connexion de l'assistant choisi s'affiche
+ * ensuite ; une fois connecté, l'utilisateur arrive sur sa page de garde.
  */
 export default function SpaceSelect() {
   const { t } = useTranslation();
@@ -19,7 +22,8 @@ export default function SpaceSelect() {
 
   const choose = (space: Space) => {
     setSpace(space);
-    void navigate('/', { replace: true });
+    const signedIn = Boolean(getAuth());
+    void navigate(signedIn ? '/' : '/login', { replace: true });
   };
 
   return (
