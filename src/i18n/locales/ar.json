@@ -685,7 +685,19 @@
       "other": "أخرى"
     },
     "paidPurchase": "المبلغ المدفوع",
-    "receivedPurchase": "المدفوع"
+    "receivedPurchase": "المدفوع",
+    "paymentMode": "الدفع",
+    "paymentModes": {
+      "cash": "نقدًا",
+      "credit": "بالأجل",
+      "installments": "على دفعات"
+    },
+    "paymentModeHintCash": "يُدفع المبلغ كاملًا اليوم.",
+    "paymentModeHintCredit": "لا يُدفع شيء اليوم: يصبح الباقي دَينًا للمورّد.",
+    "paymentModeHintInstallments": "أدخل الدفعة الأولى؛ ويُسدد الباقي من بطاقة المورّد.",
+    "supplierPhone": "هاتف المورّد",
+    "supplierAddress": "عنوان المورّد",
+    "supplierContactHint": "تُحفظ هذه البيانات في بطاقة المورّد."
   },
   "parties": {
     "clients": "عملائي",

@@ -685,7 +685,19 @@
       "other": "Other"
     },
     "paidPurchase": "Amount paid",
-    "receivedPurchase": "Paid so far"
+    "receivedPurchase": "Paid so far",
+    "paymentMode": "Payment",
+    "paymentModes": {
+      "cash": "Paid in full",
+      "credit": "On credit",
+      "installments": "Several instalments"
+    },
+    "paymentModeHintCash": "The full amount is paid today.",
+    "paymentModeHintCredit": "Nothing is paid today: the balance becomes a supplier debt.",
+    "paymentModeHintInstallments": "Enter the first instalment; the rest is settled from the supplier record.",
+    "supplierPhone": "Supplier phone",
+    "supplierAddress": "Supplier address",
+    "supplierContactHint": "These details are saved on the supplier record."
   },
   "parties": {
     "clients": "My customers",

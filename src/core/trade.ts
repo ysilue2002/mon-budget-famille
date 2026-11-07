@@ -74,6 +74,21 @@ export function tradeDue(total: number, paid: number): number {
   return Math.max(0, Math.round(total) - boundPaid(paid, total));
 }
 
+/** Mode de règlement choisi à la création d'un achat. */
+export type PaymentEntryMode = 'cash' | 'credit' | 'installments';
+
+/**
+ * Montant payé à l'enregistrement selon le mode choisi : le comptant solde le
+ * document, le crédit ne paie rien aujourd'hui, les versements retiennent la
+ * somme saisie (bornée au total). Le reste dû se règle ensuite sur la fiche du
+ * fournisseur, qui accepte plusieurs paiements.
+ */
+export function paidForMode(mode: PaymentEntryMode, total: number, entered: number): number {
+  if (mode === 'cash') return boundPaid(total, total);
+  if (mode === 'credit') return 0;
+  return boundPaid(entered, total);
+}
+
 /** Statut lisible d'un document selon ce qui reste dû. */
 export function tradeStatus(total: number, paid: number): TradeStatus {
   const due = tradeDue(total, paid);

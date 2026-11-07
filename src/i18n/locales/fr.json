@@ -685,7 +685,19 @@
       "other": "Autre"
     },
     "paidPurchase": "Montant payé",
-    "receivedPurchase": "Déjà payé"
+    "receivedPurchase": "Déjà payé",
+    "paymentMode": "Règlement",
+    "paymentModes": {
+      "cash": "Comptant",
+      "credit": "À crédit",
+      "installments": "Plusieurs versements"
+    },
+    "paymentModeHintCash": "Le montant total est payé aujourd’hui.",
+    "paymentModeHintCredit": "Rien n’est payé aujourd’hui : le reste devient une dette fournisseur.",
+    "paymentModeHintInstallments": "Saisissez le premier versement ; le reste se règle depuis la fiche fournisseur.",
+    "supplierPhone": "Téléphone du fournisseur",
+    "supplierAddress": "Adresse du fournisseur",
+    "supplierContactHint": "Ces coordonnées sont enregistrées sur la fiche fournisseur."
   },
   "parties": {
     "clients": "Mes clients",

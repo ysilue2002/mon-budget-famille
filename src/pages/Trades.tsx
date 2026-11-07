@@ -9,10 +9,10 @@ import {
   usePurchases,
   useSales,
 } from '@/hooks/useData';
-import { createTrade, deleteTrade, updateTrade } from '@/core/repo';
+import { createParty, createTrade, deleteTrade, updateParty, updateTrade } from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
 import { parseAmountInput, toMajor } from '@/core/money';
-import { boundPaid, taxBreakdown, tradeDue, tradeStatus } from '@/core/trade';
+import { paidForMode, taxBreakdown, tradeDue, tradeStatus, type PaymentEntryMode } from '@/core/trade';
 import { uuid } from '@/lib/id';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import type { PaymentMethod, TradeDocument } from '@/core/types';
@@ -58,6 +58,11 @@ interface TradeForm {
   note: string;
   /** Taux de TVA saisi (pourcentage). */
   taxRate: string;
+  /** Achats : coordonnées du fournisseur, enregistrées sur sa fiche. */
+  partyPhone: string;
+  partyAddress: string;
+  /** Achats : comptant, à crédit ou en plusieurs versements. */
+  paymentMode: PaymentEntryMode;
   lines: LineForm[];
 }
 
@@ -120,18 +125,35 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
   );
   const total = tax.total;
   const paidMinor = parseAmountInput(form?.paid ?? '', primary) ?? 0;
-  const due = tradeDue(total, paidMinor);
-  const status = tradeStatus(total, paidMinor);
+  // Ventes : montant reçu saisi. Achats : le mode de règlement décide — le
+  // comptant solde, le crédit ne paie rien, les versements retiennent la
+  // première somme (le reste se règle depuis la fiche fournisseur).
+  const entryMode: PaymentEntryMode = kind === 'purchase' ? (form?.paymentMode ?? 'cash') : 'installments';
+  const effectivePaid = paidForMode(entryMode, total, paidMinor);
+  const due = tradeDue(total, effectivePaid);
+  const status = tradeStatus(total, effectivePaid);
 
   const openForm = (document?: TradeDocument) => {
     const firstBusiness = activeBusinesses[0]?.id ?? '';
     const firstAccount = accountList[0]?.id ?? '';
+    const savedParty = document?.partyId
+      ? (parties ?? []).find((party) => party.id === document.partyId)
+      : undefined;
+    const savedMode: PaymentEntryMode =
+      !document || document.paid >= document.total
+        ? 'cash'
+        : document.paid <= 0
+          ? 'credit'
+          : 'installments';
     if (document) {
       setForm({
         id: document.id,
         businessId: document.businessId,
         date: document.date,
         partyName: document.partyName ?? '',
+        partyPhone: savedParty?.phone ?? '',
+        partyAddress: savedParty?.address ?? '',
+        paymentMode: savedMode,
         paid: String(toMajor(document.paid, primary)),
         paymentMethod: document.paymentMethod,
         accountId: document.accountId,
@@ -150,6 +172,9 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
         businessId: firstBusiness,
         date: todayISO(),
         partyName: '',
+        partyPhone: '',
+        partyAddress: '',
+        paymentMode: 'cash',
         paid: '',
         paymentMethod: 'cash',
         accountId: firstAccount,
@@ -207,13 +232,29 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
     const matchedParty = partyOptions.find(
       (party) => party.name.trim().toLowerCase() === form.partyName.trim().toLowerCase(),
     );
+    // Achats : le fournisseur saisi devient une fiche, coordonnées comprises.
+    let partyId = matchedParty?.id;
+    if (kind === 'purchase') {
+      const phone = form.partyPhone.trim();
+      const address = form.partyAddress.trim();
+      if (partyId) {
+        if ((phone && phone !== matchedParty?.phone) || (address && address !== matchedParty?.address)) {
+          await updateParty(partyId, {
+            phone: phone || matchedParty?.phone || '',
+            address: address || matchedParty?.address || '',
+          });
+        }
+      } else if (form.partyName.trim()) {
+        partyId = await createParty({ kind: 'supplier', name: form.partyName.trim(), phone, address });
+      }
+    }
     const input = {
       businessId: form.businessId,
       date: form.date,
-      partyId: matchedParty?.id,
+      partyId,
       partyName: form.partyName,
       lines: cleanLines,
-      paid: boundPaid(paidMinor, total),
+      paid: effectivePaid,
       paymentMethod: form.paymentMethod,
       accountId: form.accountId,
       note: form.note,
@@ -351,6 +392,29 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
               </Field>
             </div>
 
+            {kind === 'purchase' && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label={t('trade.supplierPhone')}>
+                    <TextInput
+                      type="tel"
+                      value={form.partyPhone}
+                      onChange={(event) => setForm({ ...form, partyPhone: event.target.value })}
+                      maxLength={30}
+                    />
+                  </Field>
+                  <Field label={t('trade.supplierAddress')}>
+                    <TextInput
+                      value={form.partyAddress}
+                      onChange={(event) => setForm({ ...form, partyAddress: event.target.value })}
+                      maxLength={160}
+                    />
+                  </Field>
+                </div>
+                <p className="-mt-1 text-xs text-sage-500">{t('trade.supplierContactHint')}</p>
+              </>
+            )}
+
             {activeBusinesses.length > 1 && (
               <Field label={t('trade.business')}>
                 <SelectInput
@@ -474,7 +538,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
               </div>
               <div className="mt-1 flex justify-between text-sage-600">
                 <span>{t(kind === 'sale' ? 'trade.paid' : 'trade.paidPurchase')}</span>
-                <span>{fmt(boundPaid(paidMinor, total))}</span>
+                <span>{fmt(effectivePaid)}</span>
               </div>
               <div className="mt-1 flex justify-between font-semibold text-amber-700">
                 <span>{t('trade.due')}</span>
@@ -482,15 +546,46 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field label={t(kind === 'sale' ? 'trade.paid' : 'trade.paidPurchase')}>
-                <TextInput
-                  inputMode="decimal"
-                  value={form.paid}
-                  onChange={(event) => setForm({ ...form, paid: event.target.value })}
-                  placeholder="0"
-                />
+            {kind === 'purchase' && (
+              <Field label={t('trade.paymentMode')}>
+                <div className="flex flex-wrap gap-1">
+                  {(['cash', 'credit', 'installments'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={form.paymentMode === mode}
+                      onClick={() => setForm({ ...form, paymentMode: mode })}
+                      className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+                        form.paymentMode === mode
+                          ? 'border-forest-600 bg-forest-600 text-white'
+                          : 'border-forest-200 bg-white text-forest-800 hover:bg-forest-50'
+                      }`}
+                    >
+                      {t(`trade.paymentModes.${mode}`)}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-sage-500">
+                  {form.paymentMode === 'cash'
+                    ? t('trade.paymentModeHintCash')
+                    : form.paymentMode === 'credit'
+                      ? t('trade.paymentModeHintCredit')
+                      : t('trade.paymentModeHintInstallments')}
+                </p>
               </Field>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              {(kind === 'sale' || form.paymentMode === 'installments') && (
+                <Field label={t(kind === 'sale' ? 'trade.paid' : 'trade.paidPurchase')}>
+                  <TextInput
+                    inputMode="decimal"
+                    value={form.paid}
+                    onChange={(event) => setForm({ ...form, paid: event.target.value })}
+                    placeholder="0"
+                  />
+                </Field>
+              )}
               <Field label={t('trade.paymentMethod')}>
                 <SelectInput
                   value={form.paymentMethod}

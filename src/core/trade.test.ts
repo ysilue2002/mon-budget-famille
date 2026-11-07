@@ -3,12 +3,29 @@ import {
   boundPaid,
   buildLines,
   lineTotal,
+  paidForMode,
   stockDeltaMap,
   stockMovements,
   tradeDue,
   tradeStatus,
   tradeTotal,
 } from './trade';
+
+describe('trade — règlement à l’enregistrement', () => {
+  it('comptant : le document est soldé', () => {
+    expect(paidForMode('cash', 12000, 0)).toBe(12000);
+  });
+
+  it('crédit : rien n’est payé aujourd’hui', () => {
+    expect(paidForMode('credit', 12000, 5000)).toBe(0);
+  });
+
+  it('versements : la somme saisie est retenue, bornée au total', () => {
+    expect(paidForMode('installments', 12000, 4000)).toBe(4000);
+    expect(paidForMode('installments', 12000, 99999)).toBe(12000);
+    expect(paidForMode('installments', 12000, -5)).toBe(0);
+  });
+});
 
 describe('trade — totaux', () => {
   it('total ligne = quantité × prix, arrondi', () => {
