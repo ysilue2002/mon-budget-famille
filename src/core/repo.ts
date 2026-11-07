@@ -1172,6 +1172,8 @@ export interface AdvanceInput {
   amount: number;
   expected?: number;
   receivedOn: string;
+  /** Acompte reçu d'un client (défaut) ou versé à un fournisseur. */
+  direction?: 'received' | 'paid';
   status: Advance['status'];
   note?: string;
 }
@@ -1188,6 +1190,7 @@ export async function createAdvance(input: AdvanceInput): Promise<string> {
     amount: Math.max(0, Math.round(input.amount)),
     expected: input.expected && input.expected > 0 ? Math.round(input.expected) : undefined,
     receivedOn: input.receivedOn,
+    direction: input.direction === 'paid' ? 'paid' : 'received',
     status: input.status,
     note: input.note?.trim() || undefined,
     createdAt: Date.now(),
@@ -1208,6 +1211,9 @@ export async function updateAdvance(id: string, patch: Partial<AdvanceInput>): P
     ...(patch.subject !== undefined ? { subject: patch.subject.trim() } : {}),
     ...(patch.partyName !== undefined ? { partyName: patch.partyName.trim() || undefined } : {}),
     ...(patch.amount !== undefined ? { amount: Math.max(0, Math.round(patch.amount)) } : {}),
+    ...(patch.direction !== undefined
+      ? { direction: patch.direction === 'paid' ? ('paid' as const) : ('received' as const) }
+      : {}),
     ...(updatedSyncFields(current) as object),
   };
   await db.advances.put(updated);

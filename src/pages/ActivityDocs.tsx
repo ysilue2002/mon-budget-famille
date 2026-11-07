@@ -13,7 +13,7 @@ import {
   useTransactions,
 } from '@/hooks/useData';
 import { formatAmount } from '@/core/currencies';
-import { advanceRemaining } from '@/core/advances';
+import { advanceDirection, advanceRemaining } from '@/core/advances';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/core/pdf';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import { Card, Page, Tag, btnGhost, btnPrimary } from '@/components/common';
@@ -215,7 +215,8 @@ export default function ActivityDocs() {
     return {
       head: [
         t('documents.date'),
-        t('advances.client'),
+        t('advances.direction'),
+        t('advances.party'),
         t('advances.subject'),
         t('advances.status'),
         t('advances.amount'),
@@ -223,13 +224,14 @@ export default function ActivityDocs() {
       ],
       body: rows.map((advance) => [
         advance.receivedOn,
+        advanceDirection(advance) === 'paid' ? t('advances.directionPaid') : t('advances.directionReceived'),
         advance.partyName ?? '—',
         advance.subject,
         statusLabel(advance.status),
         fmt(advance.amount),
         fmt(advanceRemaining(advance)),
       ]),
-      totalLabel: t('advances.totalOpen'),
+      totalLabel: t('advances.totalLabel'),
       total: rows.reduce((sum, advance) => sum + advance.amount, 0),
       count: rows.length,
     };

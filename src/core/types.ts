@@ -263,8 +263,13 @@ export interface Advance extends SyncFields {
   amount: number;
   /** Montant total attendu (facultatif) : le reste à recevoir en découle. */
   expected?: number;
-  /** Date de réception (YYYY-MM-DD). */
+  /** Date de réception ou du versement (YYYY-MM-DD). */
   receivedOn: string;
+  /**
+   * Sens de l'acompte : reçu d'un client (`received`, par défaut) ou versé à
+   * un fournisseur (`paid`). Les avances anciennes n'ont pas ce champ.
+   */
+  direction?: 'received' | 'paid';
   status: 'open' | 'delivered' | 'refunded';
   note?: string;
   createdAt: number;

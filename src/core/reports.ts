@@ -10,6 +10,7 @@
  * Une avance reçue n'est pas une vente : elle est comptée à part. Un transfert
  * entre moyens de paiement n'est ni une recette ni une dépense.
  */
+import { advanceDirection } from './advances';
 import { computeAccountBalance } from './selectors';
 import type { Advance, FinancialAccount, Product, TradeDocument, Transaction } from './types';
 
@@ -194,11 +195,22 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
     0,
   );
 
+  // Seuls les acomptes reçus des clients sont de l'argent entré : un acompte
+  // versé à un fournisseur est une sortie et ne doit pas gonfler les recettes.
   const advancesReceived = advances
-    .filter((advance) => advance.status !== 'refunded' && advance.receivedOn >= from && advance.receivedOn <= to)
+    .filter(
+      (advance) =>
+        advanceDirection(advance) === 'received' &&
+        advance.status !== 'refunded' &&
+        advance.receivedOn >= from &&
+        advance.receivedOn <= to,
+    )
     .reduce((total, advance) => total + Math.max(0, advance.amount), 0);
   const advancesOpen = advances
-    .filter((advance) => advance.status === 'open' && advance.receivedOn <= to)
+    .filter(
+      (advance) =>
+        advanceDirection(advance) === 'received' && advance.status === 'open' && advance.receivedOn <= to,
+    )
     .reduce((total, advance) => total + Math.max(0, advance.amount), 0);
 
   const stockValue = products

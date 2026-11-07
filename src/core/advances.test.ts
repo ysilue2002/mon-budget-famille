@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { advanceRemaining, isAdvanceComplete, openAdvancesRemaining, openAdvancesTotal } from './advances';
+import {
+  advanceDirection,
+  advanceRemaining,
+  isAdvanceComplete,
+  openAdvancesRemaining,
+  openAdvancesTotal,
+} from './advances';
 import type { Advance } from './types';
 
 function advance(partial: Partial<Advance>): Advance {
@@ -20,6 +26,32 @@ function advance(partial: Partial<Advance>): Advance {
     ...partial,
   };
 }
+
+describe('avances — sens de l’acompte', () => {
+  it('reçu par défaut, versé quand il est indiqué', () => {
+    expect(advanceDirection(advance({}))).toBe('received');
+    expect(advanceDirection(advance({ direction: 'paid' }))).toBe('paid');
+  });
+
+  it('les totaux en cours se filtrent par sens', () => {
+    const rows = [
+      advance({ id: 'a', amount: 10_000, direction: 'received' }),
+      advance({ id: 'b', amount: 4_000, direction: 'paid' }),
+    ];
+    expect(openAdvancesTotal(rows)).toBe(14_000);
+    expect(openAdvancesTotal(rows, 'received')).toBe(10_000);
+    expect(openAdvancesTotal(rows, 'paid')).toBe(4_000);
+  });
+
+  it('le restant suit le même filtre', () => {
+    const rows = [
+      advance({ id: 'a', amount: 10_000, expected: 25_000, direction: 'received' }),
+      advance({ id: 'b', amount: 4_000, expected: 10_000, direction: 'paid' }),
+    ];
+    expect(openAdvancesRemaining(rows, 'received')).toBe(15_000);
+    expect(openAdvancesRemaining(rows, 'paid')).toBe(6_000);
+  });
+});
 
 describe('avances — reste à recevoir', () => {
   it('reste = total attendu − montant reçu', () => {

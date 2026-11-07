@@ -169,6 +169,23 @@ describe('bilans — formules', () => {
     expect(report.advancesOpen).toBe(19_000);
   });
 
+  it('un acompte versé à un fournisseur reste une sortie, jamais une recette', () => {
+    const supplierDeposit = { ...advance(20_000, '2026-02-10'), direction: 'paid' as const };
+    const withDeposit = buildPeriodReport({
+      businessId: 'b1',
+      transactions,
+      sales,
+      purchases,
+      products: [product],
+      advances: [supplierDeposit, advance(15_000, '2026-02-01')],
+      accounts: [account],
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+    expect(withDeposit.advancesReceived).toBe(15_000);
+    expect(withDeposit.advancesOpen).toBe(15_000);
+  });
+
   it('stock valorisé au prix d’achat', () => {
     expect(report.stockValue).toBe(40_000);
   });
