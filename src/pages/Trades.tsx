@@ -444,6 +444,15 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                           </option>
                         ))}
                       </select>
+                      {!line.productId && (
+                        <TextInput
+                          value={line.label}
+                          onChange={(event) => patchLine(line.key, { label: event.target.value })}
+                          placeholder={t('documents.designation')}
+                          aria-label={t('documents.designation')}
+                          maxLength={120}
+                        />
+                      )}
                       <div className="grid grid-cols-3 gap-2">
                         <TextInput
                           placeholder={t('trade.qty')}
