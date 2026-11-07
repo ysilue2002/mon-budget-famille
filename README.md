@@ -135,6 +135,7 @@ peut aussi être archivée sans perdre son historique.
 - Les menus des deux espaces vivent dans `src/navigation.ts` et sont verrouillés
   par `src/navigation.test.ts` (pas de doublon, douze entrées au plus, libellés
   traduits dans les trois langues).
+
 ## Membres du foyer
 
 L'écran **Membres** gère la liste utilisée pour attribuer les opérations et pour
