@@ -246,7 +246,11 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
     >
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <StatCard label={t('trade.totalMonth')} value={fmt(monthTotal)} hint={t('activity.thisMonth')} />
-        <StatCard label={t('trade.received')} value={fmt(monthPaid)} hint={t('activity.thisMonth')} />
+        <StatCard
+          label={t(kind === 'sale' ? 'trade.received' : 'trade.receivedPurchase')}
+          value={fmt(monthPaid)}
+          hint={t('activity.thisMonth')}
+        />
         <StatCard label={t('trade.unpaid')} value={fmt(totalDue)} valueClass={totalDue > 0 ? 'text-amber-600' : undefined} />
       </div>
 
@@ -267,7 +271,9 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                 <th className="py-1.5">{t('common.date')}</th>
                 <th className="py-1.5">{t(kind === 'sale' ? 'trade.client' : 'trade.supplier')}</th>
                 <th className="py-1.5 text-right">{t('trade.total')}</th>
-                <th className="py-1.5 text-right">{t('trade.paid')}</th>
+                <th className="py-1.5 text-right">
+                  {t(kind === 'sale' ? 'trade.paid' : 'trade.paidPurchase')}
+                </th>
                 <th className="py-1.5 text-right">{t('trade.due')}</th>
                 <th className="py-1.5">{t('common.status')}</th>
                 <th className="py-1.5 text-right">{t('common.actions')}</th>
@@ -467,7 +473,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                 <span className="font-bold">{fmt(total)}</span>
               </div>
               <div className="mt-1 flex justify-between text-sage-600">
-                <span>{t('trade.paid')}</span>
+                <span>{t(kind === 'sale' ? 'trade.paid' : 'trade.paidPurchase')}</span>
                 <span>{fmt(boundPaid(paidMinor, total))}</span>
               </div>
               <div className="mt-1 flex justify-between font-semibold text-amber-700">
@@ -477,7 +483,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label={t('trade.paid')}>
+              <Field label={t(kind === 'sale' ? 'trade.paid' : 'trade.paidPurchase')}>
                 <TextInput
                   inputMode="decimal"
                   value={form.paid}

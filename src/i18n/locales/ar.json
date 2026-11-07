@@ -683,7 +683,9 @@
       "moov": "Moov Money",
       "bank": "تحويل بنكي",
       "other": "أخرى"
-    }
+    },
+    "paidPurchase": "المبلغ المدفوع",
+    "receivedPurchase": "المدفوع"
   },
   "parties": {
     "clients": "عملائي",

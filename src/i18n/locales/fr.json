@@ -683,7 +683,9 @@
       "moov": "Moov Money",
       "bank": "Virement bancaire",
       "other": "Autre"
-    }
+    },
+    "paidPurchase": "Montant payé",
+    "receivedPurchase": "Déjà payé"
   },
   "parties": {
     "clients": "Mes clients",

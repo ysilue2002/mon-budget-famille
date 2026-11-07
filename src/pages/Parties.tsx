@@ -227,7 +227,9 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
                       <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
                         <th className="py-1.5">{t('common.date')}</th>
                         <th className="py-1.5 text-right">{t('trade.total')}</th>
-                        <th className="py-1.5 text-right">{t('trade.paid')}</th>
+                        <th className="py-1.5 text-right">
+                          {t(kind === 'client' ? 'trade.paid' : 'trade.paidPurchase')}
+                        </th>
                         <th className="py-1.5 text-right">{t('trade.due')}</th>
                         <th className="py-1.5">{t('common.status')}</th>
                       </tr>
