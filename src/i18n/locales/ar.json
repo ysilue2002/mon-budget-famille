@@ -982,7 +982,15 @@
     "suppliers": "الموردون",
     "manageSuppliers": "إدارة الموردين وبياناتهم",
     "manageAdvances": "إدارة السلف والدفعات",
-    "advancesTab": "السلف والدفعات المقدمة"
+    "advancesTab": "السلف والدفعات المقدمة",
+    "clientStatement": "كشف حساب عميل",
+    "lineInvoice": "فاتورة",
+    "linePayment": "دفعة",
+    "lineType": "النوع",
+    "reference": "المرجع",
+    "statementScope": "كل السجل",
+    "pickClient": "لا يوجد عملاء: أنشئ بطاقة من «إدارة العملاء وبياناتهم».",
+    "statementHint": "مستندات العميل ودفعاته من الأقدم إلى الأحدث؛ الإجمالي يبيّن ما تبقى للتحصيل."
   },
   "balances": {
     "title": "الميزانيات",

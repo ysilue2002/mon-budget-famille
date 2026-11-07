@@ -982,7 +982,15 @@
     "suppliers": "Fournisseurs",
     "manageSuppliers": "Gérer les fournisseurs et leurs coordonnées",
     "manageAdvances": "Gérer les avances et acomptes",
-    "advancesTab": "Avances et acomptes"
+    "advancesTab": "Avances et acomptes",
+    "clientStatement": "Relevé client",
+    "lineInvoice": "Facture",
+    "linePayment": "Règlement",
+    "lineType": "Type",
+    "reference": "Référence",
+    "statementScope": "Tout l’historique",
+    "pickClient": "Aucun client enregistré : créez une fiche depuis « Gérer les clients et leurs coordonnées ».",
+    "statementHint": "Documents et règlements du client, du plus ancien au plus récent ; le total indique ce qu’il reste à encaisser."
   },
   "balances": {
     "title": "Bilans",

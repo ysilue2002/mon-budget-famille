@@ -10,6 +10,7 @@ import {
   useProducts,
   usePurchases,
   useSales,
+  useSettlements,
   useTransactions,
 } from '@/hooks/useData';
 import { formatAmount } from '@/core/currencies';
@@ -27,6 +28,7 @@ type DocKind =
   | 'supplierCredits'
   | 'clients'
   | 'suppliers'
+  | 'clientStatement'
   | 'advances';
 
 const KINDS: DocKind[] = [
@@ -38,6 +40,7 @@ const KINDS: DocKind[] = [
   'supplierCredits',
   'clients',
   'suppliers',
+  'clientStatement',
   'advances',
 ];
 
@@ -52,9 +55,11 @@ interface StatementTable {
 
 /**
  * États imprimables de l'activité : ventes, achats, dépenses, stock, crédits
- * clients et fournisseurs, avances. Chaque état se prévisualise à l'écran, puis
- * s'imprime en A4 ou se télécharge en PDF. Les données viennent d'IndexedDB :
- * la page fonctionne hors connexion.
+ * clients et fournisseurs, coordonnées des clients et des fournisseurs, relevé
+ * d'un client, avances et acomptes. Chaque état se prévisualise à l'écran
+ * (liste empilée sur téléphone, tableau sur grand écran), puis s'imprime en A4
+ * ou se télécharge en PDF. Les données viennent d'IndexedDB : la page
+ * fonctionne hors connexion.
  */
 export default function ActivityDocs() {
   const { t, i18n } = useTranslation();
@@ -65,12 +70,14 @@ export default function ActivityDocs() {
   const advances = useAdvances();
   const categories = useCategories();
   const parties = useParties();
+  const settlements = useSettlements();
   const businesses = useBusinesses();
   const primary = usePrimaryCurrency() ?? 'XOF';
 
   const [kind, setKind] = useState<DocKind>('sales');
   const [from, setFrom] = useState(`${currentMonth()}-01`);
   const [to, setTo] = useState(endOfMonth(currentMonth()));
+  const [statementClientId, setStatementClientId] = useState('');
 
   const lang = i18n.language;
   const fmt = (minor: number) => formatAmount(minor, primary, lang);
@@ -88,6 +95,16 @@ export default function ActivityDocs() {
       : status === 'refunded'
         ? t('advances.statusRefunded')
         : t('advances.statusOpen');
+
+  const clientList = useMemo(
+    () =>
+      (parties ?? [])
+        .filter((party) => party.kind === 'client' && !party.archived)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [parties],
+  );
+  const statementId = statementClientId || clientList[0]?.id || '';
+  const statementClient = clientList.find((client) => client.id === statementId) ?? null;
 
   const table: StatementTable = useMemo(() => {
     if (kind === 'sales' || kind === 'customerCredits') {
@@ -189,7 +206,6 @@ export default function ActivityDocs() {
 
     if (kind === 'clients') {
       // Coordonnées des clients et solde dû, pour un état nominatif imprimable.
-      const clientRows = (parties ?? []).filter((party) => party.kind === 'client' && !party.archived);
       const documentsOf = (id: string) => (sales ?? []).filter((sale) => sale.partyId === id);
       const dueOf = (id: string) => documentsOf(id).reduce((sum, sale) => sum + sale.due, 0);
       return {
@@ -200,7 +216,7 @@ export default function ActivityDocs() {
           t('parties.documents'),
           t('parties.totalDue'),
         ],
-        body: clientRows.map((party) => [
+        body: clientList.map((party) => [
           party.name,
           party.phone || '—',
           party.address || '—',
@@ -208,8 +224,8 @@ export default function ActivityDocs() {
           fmt(dueOf(party.id)),
         ]),
         totalLabel: t('parties.totalDue'),
-        total: clientRows.reduce((sum, party) => sum + dueOf(party.id), 0),
-        count: clientRows.length,
+        total: clientList.reduce((sum, party) => sum + dueOf(party.id), 0),
+        count: clientList.length,
       };
     }
 
@@ -239,6 +255,55 @@ export default function ActivityDocs() {
       };
     }
 
+    if (kind === 'clientStatement') {
+      // Relevé d'un seul client : ses documents, ses règlements et son reste.
+      const documents = statementClient
+        ? (sales ?? []).filter((sale) => sale.partyId === statementClient.id)
+        : [];
+      const documentIds = new Set(documents.map((doc) => doc.id));
+      const payments = (settlements ?? []).filter(
+        (settlement) =>
+          settlement.kind === 'client' &&
+          ((settlement.documentId && documentIds.has(settlement.documentId)) ||
+            (statementClient && settlement.partyId === statementClient.id)),
+      );
+      const lines = [
+        ...documents.map((doc) => ({
+          date: doc.date,
+          type: t('states.lineInvoice'),
+          reference: doc.number ?? '—',
+          amount: doc.total,
+          due: doc.due,
+        })),
+        ...payments.map((payment) => ({
+          date: payment.date,
+          type: t('states.linePayment'),
+          reference: documents.find((doc) => doc.id === payment.documentId)?.number ?? '—',
+          amount: payment.amount,
+          due: 0,
+        })),
+      ].sort((a, b) => a.date.localeCompare(b.date));
+      return {
+        head: [
+          t('documents.date'),
+          t('states.lineType'),
+          t('states.reference'),
+          t('documents.total'),
+          t('invoices.due'),
+        ],
+        body: lines.map((line) => [
+          line.date,
+          line.type,
+          line.reference,
+          fmt(line.amount),
+          line.due > 0 ? fmt(line.due) : '—',
+        ]),
+        totalLabel: t('invoices.dueTotal'),
+        total: documents.reduce((sum, doc) => sum + doc.due, 0),
+        count: lines.length,
+      };
+    }
+
     const rows = (advances ?? []).filter((advance) => advance.receivedOn >= from && advance.receivedOn <= to);
     return {
       head: [
@@ -263,11 +328,31 @@ export default function ActivityDocs() {
       total: rows.reduce((sum, advance) => sum + advance.amount, 0),
       count: rows.length,
     };
-  }, [kind, sales, purchases, transactions, products, advances, parties, from, to, lang, primary, categories]);
+  }, [
+    kind,
+    sales,
+    purchases,
+    transactions,
+    products,
+    advances,
+    parties,
+    settlements,
+    clientList,
+    statementClient,
+    from,
+    to,
+    lang,
+    primary,
+    categories,
+  ]);
 
   const title = t(`states.${kind}`);
   const locale = lang.startsWith('ar') ? 'ar' : lang.startsWith('fr') ? 'fr-FR' : 'en-US';
   const generatedAt = new Date().toLocaleString(locale);
+
+  const clientDetails = statementClient
+    ? [statementClient.name, statementClient.phone, statementClient.address].filter(Boolean).join(' · ')
+    : '';
 
   const exportPdf = () => {
     if (!pdfSupportsLanguage(lang)) {
@@ -275,11 +360,12 @@ export default function ActivityDocs() {
       return;
     }
     downloadPdf({
-      fileName: pdfFileName(`etat-${kind}`, `${from}_${to}`),
+      fileName: pdfFileName(`etat-${kind}`, statementClient ? `${statementClient.name}-${todayISO()}` : `${from}_${to}`),
       title,
       business,
-      reference: `${from} → ${to}`,
+      reference: statementClient ? clientDetails : `${from} → ${to}`,
       meta: [
+        ...(statementClient ? [[t('advances.client'), clientDetails] as [string, string]] : []),
         [t('states.from'), from],
         [t('states.to'), to],
         [t('states.count'), String(table.count)],
@@ -323,26 +409,50 @@ export default function ActivityDocs() {
       </div>
 
       <div className="no-print mb-4 flex flex-wrap items-center gap-2 text-sm">
-        <label className="flex items-center gap-2">
-          {t('states.from')}
-          <input
-            type="date"
-            value={from}
-            onChange={(event) => setFrom(event.target.value)}
-            className="rounded-lg border border-forest-200 px-2 py-1"
-          />
-        </label>
-        <label className="flex items-center gap-2">
-          {t('states.to')}
-          <input
-            type="date"
-            value={to}
-            onChange={(event) => setTo(event.target.value)}
-            className="rounded-lg border border-forest-200 px-2 py-1"
-          />
-        </label>
+        {kind !== 'clientStatement' && (
+          <label className="flex items-center gap-2">
+            {t('states.from')}
+            <input
+              type="date"
+              value={from}
+              onChange={(event) => setFrom(event.target.value)}
+              className="rounded-lg border border-forest-200 px-2 py-1"
+            />
+          </label>
+        )}
+        {kind !== 'clientStatement' && (
+          <label className="flex items-center gap-2">
+            {t('states.to')}
+            <input
+              type="date"
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+              className="rounded-lg border border-forest-200 px-2 py-1"
+            />
+          </label>
+        )}
+        {kind === 'clientStatement' && clientList.length > 0 && (
+          <label className="flex items-center gap-2">
+            {t('advances.client')}
+            <select
+              value={statementId}
+              onChange={(event) => setStatementClientId(event.target.value)}
+              className="rounded-lg border border-forest-200 px-2 py-1"
+            >
+              {clientList.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <span className="text-xs text-sage-500">{t('states.count', { count: table.count })}</span>
       </div>
+
+      {kind === 'clientStatement' && clientList.length === 0 && (
+        <p className="no-print mb-3 text-sm text-sage-600">{t('states.pickClient')}</p>
+      )}
 
       <Card className="p-0">
         <article className="print-sheet rounded-xl bg-white p-4 sm:p-6">
@@ -350,11 +460,18 @@ export default function ActivityDocs() {
             <div>
               <h2 className="text-lg font-bold text-forest-950">{business?.name ?? t('documents.businessFallback')}</h2>
               <p className="text-xs text-sage-600">{title}</p>
+              {kind === 'clientStatement' && statementClient && (
+                <p className="mt-1 text-sm font-medium text-forest-900">{clientDetails}</p>
+              )}
             </div>
             <div className="text-right text-xs text-sage-600">
-              <p dir="ltr">
-                {from} → {to}
-              </p>
+              {kind !== 'clientStatement' ? (
+                <p dir="ltr">
+                  {from} → {to}
+                </p>
+              ) : (
+                <p>{t('states.statementScope')}</p>
+              )}
               <p>{generatedAt}</p>
               <p>{primary}</p>
             </div>
@@ -363,41 +480,64 @@ export default function ActivityDocs() {
           {table.body.length === 0 ? (
             <p className="py-6 text-center text-sm text-sage-600">{t('states.empty')}</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
-                    {table.head.map((cell) => (
-                      <th key={cell} className="whitespace-nowrap py-1.5 pe-2">
-                        {cell}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {table.body.map((row, index) => (
-                    <tr key={`${row[0]}-${index}`} className="border-b border-forest-50">
-                      {row.map((cell, cellIndex) => (
-                        <td
-                          key={`${cell}-${cellIndex}`}
-                          className={`whitespace-nowrap py-1.5 pe-2 ${cellIndex >= row.length - 2 ? 'text-end' : ''}`}
-                        >
+            <>
+              <div className="sm:hidden print:hidden">
+                {table.body.map((row, index) => (
+                  <div key={`${row[0]}-${index}`} className="border-b border-forest-100 py-2">
+                    <p className="text-[10px] uppercase tracking-wide text-sage-500">{table.head[0]}</p>
+                    <p className="font-semibold text-forest-950">{row[0]}</p>
+                    <dl className="mt-1 flex flex-col gap-0.5 text-xs">
+                      {table.head.slice(1).map((label, cellIndex) => (
+                        <div key={`${label}-${cellIndex}`} className="flex justify-between gap-3">
+                          <dt className="text-sage-600">{label}</dt>
+                          <dd className="text-end font-medium text-forest-950">{row[cellIndex + 1] ?? '—'}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+                <div className="mt-2 flex justify-between border-t-2 border-forest-300 pt-2 text-sm font-semibold">
+                  <span>{table.totalLabel}</span>
+                  <span>{fmt(table.total)}</span>
+                </div>
+              </div>
+
+              <div className="hidden overflow-x-auto sm:block print:block">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
+                      {table.head.map((cell) => (
+                        <th key={cell} className="whitespace-nowrap py-1.5 pe-2">
                           {cell}
-                        </td>
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-forest-300 font-semibold">
-                    <td className="py-1.5">{table.totalLabel}</td>
-                    <td colSpan={table.head.length - 1} className="py-1.5 text-right">
-                      {fmt(table.total)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {table.body.map((row, index) => (
+                      <tr key={`${row[0]}-${index}`} className="border-b border-forest-50">
+                        {row.map((cell, cellIndex) => (
+                          <td
+                            key={`${cell}-${cellIndex}`}
+                            className={`whitespace-nowrap py-1.5 pe-2 ${cellIndex >= row.length - 2 ? 'text-end' : ''}`}
+                          >
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-forest-300 font-semibold">
+                      <td className="py-1.5">{table.totalLabel}</td>
+                      <td colSpan={table.head.length - 1} className="py-1.5 text-right">
+                        {fmt(table.total)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </>
           )}
 
           <footer className="mt-3 flex flex-wrap justify-between gap-2 border-t border-forest-100 pt-2 text-[10px] text-sage-500">
@@ -421,6 +561,7 @@ export default function ActivityDocs() {
           </Link>
         </p>
       )}
+      {kind === 'clientStatement' && <p className="no-print mt-2 text-xs text-sage-500">{t('states.statementHint')}</p>}
       <p className="no-print mt-2 text-xs text-sage-500">{t('states.hint')}</p>
       <div className="no-print mt-2">
         <Tag tone="sage">{t('states.offlineHint')}</Tag>

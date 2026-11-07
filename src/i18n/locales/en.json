@@ -982,7 +982,15 @@
     "suppliers": "Suppliers",
     "manageSuppliers": "Manage suppliers and their details",
     "manageAdvances": "Manage advances and deposits",
-    "advancesTab": "Advances and deposits"
+    "advancesTab": "Advances and deposits",
+    "clientStatement": "Customer statement",
+    "lineInvoice": "Invoice",
+    "linePayment": "Payment",
+    "lineType": "Type",
+    "reference": "Reference",
+    "statementScope": "Full history",
+    "pickClient": "No customer yet: create one from “Manage customers and their details”.",
+    "statementHint": "Customer documents and payments, oldest first; the total shows what is still to collect."
   },
   "balances": {
     "title": "Statements",
