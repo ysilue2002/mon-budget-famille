@@ -257,6 +257,7 @@ describe('compte de résultat', () => {
     transactions,
     sales: [],
     purchases: [],
+    products: [],
     from: '2026-02-01',
     to: '2026-02-28',
   });
@@ -289,6 +290,7 @@ describe('compte de résultat', () => {
       transactions: [],
       sales: [],
       purchases: [],
+      products: [],
       from: '2026-03-01',
       to: '2026-03-31',
     });
@@ -341,6 +343,7 @@ describe('TVA — bénéfice hors taxe', () => {
     transactions,
     sales: [sale],
     purchases: [purchase],
+    products: [],
     from: '2026-04-01',
     to: '2026-04-30',
   });
@@ -373,6 +376,92 @@ describe('TVA — bénéfice hors taxe', () => {
       expenses: 6_000,
       result: 4_000,
     });
+  });
+});
+
+const stockLine = (productId: string, qty: number, unitPrice: number): TradeLine => ({
+  id: `l-${productId}-${qty}-${unitPrice}`,
+  productId,
+  label: 'Riz',
+  qty,
+  unitPrice,
+  lineTotal: qty * unitPrice,
+});
+
+describe('stock — seules les marchandises vendues sont une charge', () => {
+  const riz: Product = { ...product, id: 'p-riz', buyPrice: 1_000, stockQty: 10 };
+  const purchase = {
+    ...doc({ id: 'p-1', date: '2026-03-02', total: 20_000, kind: 'purchase' as const }),
+    lines: [stockLine('p-riz', 20, 1_000)],
+  };
+  const marchSale = {
+    ...doc({ id: 's-1', date: '2026-03-10', total: 8_000, kind: 'sale' as const }),
+    lines: [stockLine('p-riz', 5, 1_600)],
+  };
+  const aprilSale = {
+    ...doc({ id: 's-2', date: '2026-04-05', total: 8_000, kind: 'sale' as const }),
+    lines: [stockLine('p-riz', 5, 1_600)],
+  };
+  const transactions = [
+    tx({ id: 'purchase-1', date: '2026-03-02', type: 'expense', amountInPrimary: 20_000, categoryId: 'cat-autres' }),
+    tx({ id: 'sale-s-1', date: '2026-03-10', type: 'income', amountInPrimary: 8_000 }),
+    tx({ id: 'sale-s-2', date: '2026-04-05', type: 'income', amountInPrimary: 8_000 }),
+  ];
+  const report = (from: string, to: string) =>
+    buildPeriodReport({
+      businessId: 'b1',
+      transactions,
+      sales: [marchSale, aprilSale],
+      purchases: [purchase],
+      products: [riz],
+      advances: [],
+      accounts: [account],
+      from,
+      to,
+    });
+
+  it('un achat qui reste en stock ne pèse pas sur le bénéfice du mois d’achat', () => {
+    const march = report('2026-03-01', '2026-03-31');
+    expect(march.purchasesNet).toBe(20_000);
+    expect(march.stockStart).toBe(0);
+    expect(march.stockEnd).toBe(15_000);
+    expect(march.stockChange).toBe(15_000);
+    expect(march.goodsCost).toBe(5_000);
+    expect(march.result).toBe(3_000);
+  });
+
+  it('le coût des marchandises vendues arrive le mois de la vente', () => {
+    const april = report('2026-04-01', '2026-04-30');
+    expect(april.purchasesNet).toBe(0);
+    expect(april.stockStart).toBe(15_000);
+    expect(april.stockEnd).toBe(10_000);
+    expect(april.stockChange).toBe(-5_000);
+    expect(april.goodsCost).toBe(5_000);
+    expect(april.result).toBe(3_000);
+  });
+
+  it('le compte de résultat détaillé montre la variation et le coût des marchandises', () => {
+    const statement = buildIncomeStatement({
+      businessId: 'b1',
+      transactions,
+      sales: [marchSale, aprilSale],
+      purchases: [purchase],
+      products: [riz],
+      from: '2026-03-01',
+      to: '2026-03-31',
+    });
+    expect(statement.goods).toBe(20_000);
+    expect(statement.stockChange).toBe(15_000);
+    expect(statement.goodsCost).toBe(5_000);
+    expect(statement.expenses).toBe(5_000);
+    expect(statement.result).toBe(3_000);
+  });
+
+  it('le graphique mensuel applique la même règle', () => {
+    const march = report('2026-01-01', '2026-12-31').monthly.find((point) => point.month === '2026-03');
+    const april = report('2026-01-01', '2026-12-31').monthly.find((point) => point.month === '2026-04');
+    expect(march).toEqual({ month: '2026-03', sales: 8_000, expenses: 5_000, result: 3_000 });
+    expect(april).toEqual({ month: '2026-04', sales: 8_000, expenses: 5_000, result: 3_000 });
   });
 });
 

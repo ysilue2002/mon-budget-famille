@@ -84,10 +84,11 @@ export default function Income() {
         transactions: transactions ?? [],
         sales: sales ?? [],
         purchases: purchases ?? [],
+        products: products ?? [],
         from: range.from,
         to: range.to,
       }),
-    [selectedId, transactions, sales, purchases, range.from, range.to],
+    [selectedId, transactions, sales, purchases, products, range.from, range.to],
   );
 
   const report = useMemo(
@@ -138,13 +139,19 @@ export default function Income() {
       body: [
         [t('income.salesHt'), fmt(statement.revenue)],
         [t('income.goodsHt'), fmt(-statement.goods)],
+        ...(statement.stockChange !== 0
+          ? [
+              [t('income.stockChange'), fmt(statement.stockChange)],
+              [t('income.goodsCost'), fmt(-statement.goodsCost)],
+            ]
+          : []),
         ...statement.otherExpenses.map((line) => [categoryLabel(line.id), fmt(-line.total)]),
         [t('income.totalCharges'), fmt(-statement.expenses)],
         [t('income.result'), fmt(statement.result)],
         [t('income.margin'), `${statement.margin.toFixed(1)} %`],
         [t('income.tax'), ''],
         [t('income.taxCollected'), fmt(statement.salesTax)],
-        [t('income.taxDeductible'), fmt(-statement.purchasesTax)],
+        [t('income.taxDeductible'), fmt(statement.purchasesTax > 0 ? -statement.purchasesTax : 0)],
         [statement.taxDue >= 0 ? t('income.taxDue') : t('income.taxCredit'), fmt(Math.abs(statement.taxDue))],
       ],
       totals: [
@@ -260,6 +267,11 @@ export default function Income() {
         </header>
 
         <p className="mb-4 text-xs text-sage-500">{t('income.hint')}</p>
+        {statement.stockChange !== 0 && (
+          <p className="mb-4 text-xs text-sage-500">
+            {t('income.stockNote', { value: fmt(statement.stockEnd) })}
+          </p>
+        )}
 
         <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[
@@ -306,6 +318,18 @@ export default function Income() {
               <td className="py-1.5 pl-3">{t('income.goodsHt')}</td>
               <td className="py-1.5 text-right font-medium">{fmt(-statement.goods)}</td>
             </tr>
+            {statement.stockChange !== 0 && (
+              <>
+                <tr className="border-b border-forest-50">
+                  <td className="py-1.5 pl-6 text-sage-700">{t('income.stockChange')}</td>
+                  <td className="py-1.5 text-right font-medium">{fmt(statement.stockChange)}</td>
+                </tr>
+                <tr className="border-b border-forest-50">
+                  <td className="py-1.5 pl-3 font-medium">{t('income.goodsCost')}</td>
+                  <td className="py-1.5 text-right font-medium">{fmt(-statement.goodsCost)}</td>
+                </tr>
+              </>
+            )}
             {statement.otherExpenses.map((line) => (
               <tr key={line.id} className="border-b border-forest-50">
                 <td className="py-1.5 pl-3">{categoryLabel(line.id)}</td>
@@ -337,7 +361,7 @@ export default function Income() {
             </tr>
             <tr className="border-b border-forest-50">
               <td className="py-1.5 pl-3">{t('income.taxDeductible')}</td>
-              <td className="py-1.5 text-right font-medium">{fmt(-statement.purchasesTax)}</td>
+              <td className="py-1.5 text-right font-medium">{fmt(statement.purchasesTax > 0 ? -statement.purchasesTax : 0)}</td>
             </tr>
             <tr className="border-t-2 border-forest-300">
               <td className="py-1.5 font-bold">

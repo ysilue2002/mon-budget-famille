@@ -137,7 +137,13 @@ peut aussi être archivée sans perdre son historique.
   les autres charges catégorie par catégorie, puis un bilan simplifié (argent,
   stock, crédits clients, dettes fournisseurs, situation nette). L'écran
   s'imprime et s'exporte en PDF comme les autres états.
-- Le **bénéfice est calculé hors taxe** : la TVA facturée n'est pas un gain.
+- Le **bénéfice est calculé hors taxe**, et sur les seules marchandises vendues :
+  les achats hors taxe sont diminués du stock restant en fin de période
+  (`stockValueAt` dans `src/core/stock.ts`, au prix d'achat). Un achat qui dort
+  en magasin ne pèse donc pas sur le mois où il a été payé, et son coût arrive
+  le mois de la vente. Valorisation reconstituée depuis le stock actuel et les
+  documents postérieurs : c'est une estimation, pas un inventaire daté.
+- La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.
   `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
   TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle
   devient un crédit de TVA). L'écran affiche ces trois lignes, Bilans affiche la

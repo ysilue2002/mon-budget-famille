@@ -260,6 +260,7 @@ export default function Balances() {
       </div>
 
       <p className="mt-2 text-xs text-sage-500">{t('balances.taxNote')}</p>
+      <p className="mt-1 text-xs text-sage-500">{t('balances.stockNote')}</p>
       <p className="mt-1 text-xs text-sage-500">{t('balances.resultVsCash')}</p>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -277,6 +278,7 @@ export default function Balances() {
             <tbody>
               {[
                 { key: 'sales', label: t('balances.sales'), value: report.sales, previousValue: before.sales },
+                { key: 'stockChange', label: t('balances.stockDeducted'), value: report.stockChange, previousValue: before.stockChange },
                 { key: 'result', label: t('balances.result'), value: report.result, previousValue: before.result },
                 { key: 'taxDue', label: t('balances.taxDue'), value: report.taxDue, previousValue: before.taxDue },
                 { key: 'cashIn', label: t('balances.cashIn'), value: report.cashIn, previousValue: before.cashIn },

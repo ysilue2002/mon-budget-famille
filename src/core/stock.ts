@@ -5,7 +5,7 @@
  * foyer ; `stockQty` peut être décimal (kg, litre). La valeur du stock se
  * calcule donc au **prix d'achat**, arrondie à la sous-unité.
  */
-import type { Product } from './types';
+import type { Product, TradeDocument } from './types';
 
 /** Produits actifs (les archivés sortent des totaux et des alertes). */
 export function activeProducts(products: Product[]): Product[] {
@@ -18,6 +18,49 @@ export function stockValue(products: Product[]): number {
     (total, product) => total + Math.round(Math.max(0, product.stockQty) * product.buyPrice),
     0,
   );
+}
+
+/**
+ * Valeur du stock à la fin d'une date donnée, au prix d'achat, reconstituée
+ * depuis le stock actuel : les ventes postérieures sont rajoutées (elles sont
+ * déjà sorties du stock) et les achats postérieurs retirés. Les documents sans
+ * marchandise (ligne libre) ne bougent pas le stock et sont ignorés.
+ *
+ * Le stock tenu à la main dans la fiche produit sert de point de départ : c'est
+ * la seule information disponible hors documents, l'estimation reste donc
+ * indicative pour le passé.
+ */
+export function stockValueAt(
+  products: Product[],
+  sales: TradeDocument[],
+  purchases: TradeDocument[],
+  dateISO: string,
+): number {
+  const moved = (documents: TradeDocument[]) => {
+    const byProduct = new Map<string, number>();
+    for (const doc of documents) {
+      if (doc.date <= dateISO) continue;
+      for (const line of doc.lines) {
+        if (!line.productId) continue;
+        byProduct.set(line.productId, (byProduct.get(line.productId) ?? 0) + line.qty);
+      }
+    }
+    return byProduct;
+  };
+
+  const soldAfter = moved(sales);
+  const boughtAfter = moved(purchases);
+  const endOfDay = Date.parse(`${dateISO}T23:59:59.999Z`);
+
+  return activeProducts(products)
+    .filter((product) => !Number.isFinite(endOfDay) || product.createdAt <= endOfDay)
+    .reduce((total, product) => {
+      const qty = Math.max(
+        0,
+        product.stockQty + (soldAfter.get(product.id) ?? 0) - (boughtAfter.get(product.id) ?? 0),
+      );
+      return total + Math.round(qty * Math.max(0, product.buyPrice));
+    }, 0);
 }
 
 /** Quantité totale en stock (toutes unités confondues, indicatif). */

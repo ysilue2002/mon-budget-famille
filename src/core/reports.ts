@@ -2,9 +2,11 @@
  * Bilans de l'activité — logique PURE, testable sans base ni réseau.
  *
  * Trois notions volontairement séparées :
- *   - le RÉSULTAT (bénéfice estimé) : ventes hors taxe − achats hors taxe −
- *     autres dépenses, que les factures soient encaissées ou non
- *     (comptabilité d'engagement) ;
+ *   - le RÉSULTAT (bénéfice estimé) : ventes hors taxe − coût des marchandises
+ *     vendues − autres dépenses, que les factures soient encaissées ou non
+ *     (comptabilité d'engagement). Le coût des marchandises vendues vaut les
+ *     achats hors taxe moins les marchandises encore en stock à la fin de la
+ *     période : un achat qui reste en magasin n'est pas encore une charge ;
  *   - la TVA : collectée sur les ventes, déductible sur les achats, et ce qui
  *     reste à reverser ; elle n'est jamais un gain ;
  *   - l'ARGENT DISPONIBLE : les soldes réels des comptes (caisse, banque,
@@ -15,6 +17,7 @@
  */
 import { advanceDirection } from './advances';
 import { computeAccountBalance } from './selectors';
+import { stockValueAt } from './stock';
 import { taxBreakdown } from './trade';
 import type { Advance, FinancialAccount, Product, TradeDocument, Transaction } from './types';
 
@@ -56,6 +59,14 @@ export interface PeriodReport {
   salesNet: number;
   /** Achats de marchandises hors taxe de la période. */
   purchasesNet: number;
+  /** Valeur du stock au début de la période, au prix d'achat. */
+  stockStart: number;
+  /** Valeur du stock à la fin de la période, au prix d'achat. */
+  stockEnd: number;
+  /** Variation du stock : positive quand des achats restent en magasin. */
+  stockChange: number;
+  /** Coût des marchandises réellement vendues (achats hors taxe − variation). */
+  goodsCost: number;
   /** TVA collectée sur les ventes de la période. */
   salesTax: number;
   /** TVA déductible sur les achats de la période. */
@@ -66,6 +77,8 @@ export interface PeriodReport {
   otherExpenses: number;
   /** Total des charges de la période, TVA incluse (achats + autres dépenses). */
   expensesTotal: number;
+  /** Charges retenues dans le résultat, hors taxe (marchandises vendues + autres). */
+  netExpenses: number;
   /** Bénéfice estimé de la période, hors taxe. */
   result: number;
   /** Marge en pourcentage du chiffre d'affaires hors taxe (0 sans vente). */
@@ -115,6 +128,13 @@ function pad(value: number): string {
 
 function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/** Veille d'une date ISO (pour « le stock à la fin de la veille »). */
+function previousDay(dateISO: string): string {
+  const date = new Date(`${dateISO}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }
 
 /** Borne de période (inclusive) pour un mois `YYYY-MM`, un trimestre `YYYY-Qn` ou une année `YYYY`. */
@@ -215,7 +235,15 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
   const purchasesNet = Math.max(0, purchasesTotal - purchasesTax);
   const taxDue = salesTax - purchasesTax;
 
-  const result = salesNet - purchasesNet - otherExpenses;
+  // Les marchandises encore en stock à la fin de la période ne sont pas encore
+  // une charge : on retire des achats ce qui n'a pas été vendu.
+  const stockEnd = stockValueAt(products, sales, purchases, to);
+  const stockStart = stockValueAt(products, sales, purchases, previousDay(from));
+  const stockChange = stockEnd - stockStart;
+  const goodsCost = Math.max(0, purchasesNet - stockChange);
+  const netExpenses = goodsCost + otherExpenses;
+
+  const result = salesNet - netExpenses;
   const cashIn = sumPaid(inPeriod, (tx) => tx.type === 'income');
   const cashOut = sumPaid(inPeriod, (tx) => tx.type === 'expense');
 
@@ -260,10 +288,20 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
   const monthly: MonthlyPoint[] = Array.from({ length: 12 }, (_, index) => {
     const month = `${year}-${pad(index + 1)}`;
     const rows = tagged.filter((tx) => tx.date.slice(0, 7) === month);
-    const docTax = (documents: TradeDocument[]) =>
-      documentsTax(documents.filter((doc) => doc.businessId === businessId && doc.date.slice(0, 7) === month));
-    const monthSales = sum(rows, (tx) => tx.type === 'income') - docTax(sales);
-    const monthExpenses = sum(rows, (tx) => tx.type === 'expense') - docTax(purchases);
+    const inMonth = (doc: TradeDocument) => doc.businessId === businessId && doc.date.slice(0, 7) === month;
+    const monthPurchases = purchases.filter(inMonth).reduce((total, doc) => total + Math.max(0, doc.total), 0);
+    const monthSales = sum(rows, (tx) => tx.type === 'income') - documentsTax(sales.filter(inMonth));
+    const monthOther =
+      sum(rows, (tx) => tx.type === 'expense') - monthPurchases;
+    // Même règle que la période : seules les marchandises vendues sont une charge.
+    const monthStart = `${month}-01`;
+    const monthEnd = `${month}-${pad(daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7))))}`;
+    const monthStockChange =
+      stockValueAt(products, sales, purchases, monthEnd) -
+      stockValueAt(products, sales, purchases, previousDay(monthStart));
+    const monthPurchasesNet = Math.max(0, monthPurchases - documentsTax(purchases.filter(inMonth)));
+    const monthGoods = Math.max(0, monthPurchasesNet - monthStockChange);
+    const monthExpenses = monthGoods + monthOther;
     return { month, sales: monthSales, expenses: monthExpenses, result: monthSales - monthExpenses };
   });
 
@@ -274,11 +312,16 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
     purchases: purchasesTotal,
     salesNet,
     purchasesNet,
+    stockStart,
+    stockEnd,
+    stockChange,
+    goodsCost,
     salesTax,
     purchasesTax,
     taxDue,
     otherExpenses,
     expensesTotal,
+    netExpenses,
     result,
     margin: salesNet > 0 ? (result / salesNet) * 100 : 0,
     cashIn,
@@ -317,6 +360,14 @@ export interface IncomeStatement {
   revenue: number;
   /** Achats de marchandises hors taxe de la période. */
   goods: number;
+  /** Valeur du stock au début de la période, au prix d'achat. */
+  stockStart: number;
+  /** Valeur du stock à la fin de la période, au prix d'achat. */
+  stockEnd: number;
+  /** Variation du stock : déduite des achats quand des marchandises restent. */
+  stockChange: number;
+  /** Coût des marchandises vendues (achats hors taxe − variation du stock). */
+  goodsCost: number;
   /** TVA collectée sur les ventes de la période. */
   salesTax: number;
   /** TVA déductible sur les achats de la période. */
@@ -338,6 +389,7 @@ export interface IncomeStatementInput {
   transactions: Transaction[];
   sales: TradeDocument[];
   purchases: TradeDocument[];
+  products: Product[];
   /** Bornes inclusives (ISO YYYY-MM-DD). */
   from: string;
   to: string;
@@ -349,7 +401,7 @@ export interface IncomeStatementInput {
  * donc l'écran fonctionne hors connexion.
  */
 export function buildIncomeStatement(input: IncomeStatementInput): IncomeStatement {
-  const { businessId, transactions, sales, purchases, from, to } = input;
+  const { businessId, transactions, sales, purchases, products, from, to } = input;
   const rows = transactions.filter(
     (tx) => tx.businessId === businessId && tx.type !== 'transfer' && tx.date >= from && tx.date <= to,
   );
@@ -381,7 +433,14 @@ export function buildIncomeStatement(input: IncomeStatementInput): IncomeStateme
     .sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
 
   const otherTotal = otherExpenses.reduce((total, line) => total + line.total, 0);
-  const expenses = goods + otherTotal;
+
+  // Ce qui reste en stock n'est pas encore une charge : seules les
+  // marchandises sorties (vendues) comptent dans le résultat.
+  const stockEnd = stockValueAt(products, sales, purchases, to);
+  const stockStart = stockValueAt(products, sales, purchases, previousDay(from));
+  const stockChange = stockEnd - stockStart;
+  const goodsCost = Math.max(0, goods - stockChange);
+  const expenses = goodsCost + otherTotal;
   const result = revenue - expenses;
 
   return {
@@ -389,6 +448,10 @@ export function buildIncomeStatement(input: IncomeStatementInput): IncomeStateme
     to,
     revenue,
     goods,
+    stockStart,
+    stockEnd,
+    stockChange,
+    goodsCost,
     otherExpenses,
     expenses,
     result,
