@@ -78,8 +78,16 @@ export default function Income() {
   const range = periodRange(kind, anchor);
 
   const statement = useMemo(
-    () => buildIncomeStatement({ businessId: selectedId, transactions: transactions ?? [], from: range.from, to: range.to }),
-    [selectedId, transactions, range.from, range.to],
+    () =>
+      buildIncomeStatement({
+        businessId: selectedId,
+        transactions: transactions ?? [],
+        sales: sales ?? [],
+        purchases: purchases ?? [],
+        from: range.from,
+        to: range.to,
+      }),
+    [selectedId, transactions, sales, purchases, range.from, range.to],
   );
 
   const report = useMemo(
@@ -128,12 +136,16 @@ export default function Income() {
       ],
       head: [t('income.line'), t('income.amount')],
       body: [
-        [t('income.sales'), fmt(statement.revenue)],
-        [t('income.goods'), fmt(-statement.goods)],
+        [t('income.salesHt'), fmt(statement.revenue)],
+        [t('income.goodsHt'), fmt(-statement.goods)],
         ...statement.otherExpenses.map((line) => [categoryLabel(line.id), fmt(-line.total)]),
         [t('income.totalCharges'), fmt(-statement.expenses)],
         [t('income.result'), fmt(statement.result)],
         [t('income.margin'), `${statement.margin.toFixed(1)} %`],
+        [t('income.tax'), ''],
+        [t('income.taxCollected'), fmt(statement.salesTax)],
+        [t('income.taxDeductible'), fmt(-statement.purchasesTax)],
+        [statement.taxDue >= 0 ? t('income.taxDue') : t('income.taxCredit'), fmt(Math.abs(statement.taxDue))],
       ],
       totals: [
         [t('income.cash'), fmt(report.cashAvailable)],
@@ -282,7 +294,7 @@ export default function Income() {
               </td>
             </tr>
             <tr className="border-b border-forest-50">
-              <td className="py-1.5 pl-3">{t('income.sales')}</td>
+              <td className="py-1.5 pl-3">{t('income.salesHt')}</td>
               <td className="py-1.5 text-right font-medium">{fmt(statement.revenue)}</td>
             </tr>
             <tr className="border-b border-forest-50">
@@ -291,7 +303,7 @@ export default function Income() {
               </td>
             </tr>
             <tr className="border-b border-forest-50">
-              <td className="py-1.5 pl-3">{t('income.goods')}</td>
+              <td className="py-1.5 pl-3">{t('income.goodsHt')}</td>
               <td className="py-1.5 text-right font-medium">{fmt(-statement.goods)}</td>
             </tr>
             {statement.otherExpenses.map((line) => (
@@ -308,15 +320,35 @@ export default function Income() {
               <td className="py-2 font-bold">{t('income.result')}</td>
               <td
                 className={`py-2 text-right text-base font-bold ${
-                  statement.result >= 0 ? 'text-forest-700' : 'text-red-600'
+                  statement.result >= 0 ? 'text-forest-700' : 'text-red-600'}
                 }`}
               >
                 {fmt(statement.result)}
               </td>
             </tr>
+            <tr className="border-b border-forest-50">
+              <td className="pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sage-600" colSpan={2}>
+                {t('income.tax')}
+              </td>
+            </tr>
+            <tr className="border-b border-forest-50">
+              <td className="py-1.5 pl-3">{t('income.taxCollected')}</td>
+              <td className="py-1.5 text-right font-medium">{fmt(statement.salesTax)}</td>
+            </tr>
+            <tr className="border-b border-forest-50">
+              <td className="py-1.5 pl-3">{t('income.taxDeductible')}</td>
+              <td className="py-1.5 text-right font-medium">{fmt(-statement.purchasesTax)}</td>
+            </tr>
+            <tr className="border-t-2 border-forest-300">
+              <td className="py-1.5 font-bold">
+                {statement.taxDue >= 0 ? t('income.taxDue') : t('income.taxCredit')}
+              </td>
+              <td className="py-1.5 text-right font-bold">{fmt(Math.abs(statement.taxDue))}</td>
+            </tr>
           </tbody>
         </table>
         <p className="mt-1 text-[11px] text-sage-500">{t('income.resultHint')}</p>
+        <p className="mt-1 text-[11px] text-sage-500">{t('income.taxHint')}</p>
 
         <h3 className="mb-2 mt-6 text-sm font-bold uppercase tracking-wide text-forest-900">{t('income.balance')}</h3>
         <div className="grid gap-4 md:grid-cols-2">

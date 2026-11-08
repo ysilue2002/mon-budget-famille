@@ -9,7 +9,7 @@ import {
   shiftAnchor,
   unpaidAmount,
 } from './reports';
-import type { Advance, FinancialAccount, Product, TradeDocument, Transaction } from './types';
+import type { Advance, FinancialAccount, Product, TradeDocument, TradeLine, Transaction } from './types';
 
 const sync = { baseRev: 0, rev: 1, updatedAt: 0, deviceId: 'test', syncStatus: 'synced' as const };
 
@@ -255,6 +255,8 @@ describe('compte de résultat', () => {
   const statement = buildIncomeStatement({
     businessId: 'b1',
     transactions,
+    sales: [],
+    purchases: [],
     from: '2026-02-01',
     to: '2026-02-28',
   });
@@ -282,11 +284,95 @@ describe('compte de résultat', () => {
   });
 
   it('période vide : tout à zéro, pas de division par zéro', () => {
-    const empty = buildIncomeStatement({ businessId: 'b1', transactions: [], from: '2026-03-01', to: '2026-03-31' });
+    const empty = buildIncomeStatement({
+      businessId: 'b1',
+      transactions: [],
+      sales: [],
+      purchases: [],
+      from: '2026-03-01',
+      to: '2026-03-31',
+    });
     expect(empty.revenue).toBe(0);
     expect(empty.expenses).toBe(0);
     expect(empty.margin).toBe(0);
     expect(empty.otherExpenses).toEqual([]);
+  });
+});
+
+const line = (lineTotal: number): TradeLine => ({
+  id: `l-${lineTotal}`,
+  label: 'Riz',
+  qty: 1,
+  unitPrice: lineTotal,
+  lineTotal,
+});
+
+describe('TVA — bénéfice hors taxe', () => {
+  const sale: TradeDocument = {
+    ...doc({ date: '2026-04-10', total: 11_800, kind: 'sale', paid: 11_800, due: 0 }),
+    taxRate: 18,
+    lines: [line(10_000)],
+  };
+  const purchase: TradeDocument = {
+    ...doc({ date: '2026-04-12', total: 5_900, kind: 'purchase', paid: 5_900, due: 0 }),
+    taxRate: 18,
+    lines: [line(5_000)],
+  };
+  const transactions = [
+    tx({ id: 'sale-s1', date: '2026-04-10', type: 'income', amountInPrimary: 11_800 }),
+    tx({ id: 'purchase-p1', date: '2026-04-12', type: 'expense', amountInPrimary: 5_900, categoryId: 'cat-autres' }),
+    tx({ id: 'd1', date: '2026-04-15', type: 'expense', amountInPrimary: 1_000, categoryId: 'cat-loyer' }),
+  ];
+
+  const report = buildPeriodReport({
+    businessId: 'b1',
+    transactions,
+    sales: [sale],
+    purchases: [purchase],
+    products: [],
+    advances: [],
+    accounts: [account],
+    from: '2026-04-01',
+    to: '2026-04-30',
+  });
+
+  const statement = buildIncomeStatement({
+    businessId: 'b1',
+    transactions,
+    sales: [sale],
+    purchases: [purchase],
+    from: '2026-04-01',
+    to: '2026-04-30',
+  });
+
+  it('le bénéfice est hors taxe, et la TVA reste à reverser', () => {
+    expect(report.sales).toBe(11_800);
+    expect(report.salesNet).toBe(10_000);
+    expect(report.purchasesNet).toBe(5_000);
+    expect(report.salesTax).toBe(1_800);
+    expect(report.purchasesTax).toBe(900);
+    expect(report.taxDue).toBe(900);
+    expect(report.result).toBe(4_000);
+    expect(report.margin).toBeCloseTo(40);
+  });
+
+  it('le compte de résultat détaillé affiche la TVA collectée, déductible et à payer', () => {
+    expect(statement.revenue).toBe(10_000);
+    expect(statement.goods).toBe(5_000);
+    expect(statement.expenses).toBe(6_000);
+    expect(statement.result).toBe(4_000);
+    expect(statement.salesTax).toBe(1_800);
+    expect(statement.purchasesTax).toBe(900);
+    expect(statement.taxDue).toBe(900);
+  });
+
+  it('le graphique mensuel compare des montants hors taxe', () => {
+    expect(report.monthly.find((point) => point.month === '2026-04')).toEqual({
+      month: '2026-04',
+      sales: 10_000,
+      expenses: 6_000,
+      result: 4_000,
+    });
   });
 });
 

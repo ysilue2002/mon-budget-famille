@@ -126,6 +126,7 @@ export default function Balances() {
         [t('balances.purchases'), fmt(report.purchases), fmt(before.purchases)],
         [t('balances.otherExpenses'), fmt(report.otherExpenses), fmt(before.otherExpenses)],
         [t('balances.result'), fmt(report.result), fmt(before.result)],
+        [t('balances.taxDue'), fmt(report.taxDue), fmt(before.taxDue)],
         [t('balances.cashIn'), fmt(report.cashIn), fmt(before.cashIn)],
         [t('balances.cashOut'), fmt(report.cashOut), fmt(before.cashOut)],
         [t('balances.customerCredit'), fmt(report.customerCredit), fmt(before.customerCredit)],
@@ -133,6 +134,7 @@ export default function Balances() {
       ],
       totals: [
         [t('balances.result'), fmt(report.result)],
+        [t('balances.taxDue'), fmt(report.taxDue)],
         [t('balances.cashAvailable'), fmt(report.cashAvailable)],
       ],
       footer: t('documents.footer'),
@@ -241,6 +243,12 @@ export default function Balances() {
           valueClass={report.result >= 0 ? 'text-forest-700' : 'text-red-600'}
           hint={t('balances.marginHint', { value: report.margin.toFixed(1) })}
         />
+        <StatCard
+          label={t('balances.taxDue')}
+          value={fmt(report.taxDue)}
+          hint={t('balances.taxDueHint')}
+          valueClass={report.taxDue > 0 ? 'text-amber-700' : undefined}
+        />
         <StatCard label={t('balances.cashIn')} value={fmt(report.cashIn)} hint={t('balances.cashInHint')} />
         <StatCard label={t('balances.cashOut')} value={fmt(report.cashOut)} hint={t('balances.cashOutHint')} />
         <StatCard label={t('balances.cashAvailable')} value={fmt(report.cashAvailable)} hint={t('balances.cashAvailableHint')} />
@@ -251,7 +259,8 @@ export default function Balances() {
         <StatCard label={t('balances.advancesOpen')} value={fmt(report.advancesOpen)} hint={t('balances.advancesOpenHint')} />
       </div>
 
-      <p className="mt-2 text-xs text-sage-500">{t('balances.resultVsCash')}</p>
+      <p className="mt-2 text-xs text-sage-500">{t('balances.taxNote')}</p>
+      <p className="mt-1 text-xs text-sage-500">{t('balances.resultVsCash')}</p>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card>
@@ -269,6 +278,7 @@ export default function Balances() {
               {[
                 { key: 'sales', label: t('balances.sales'), value: report.sales, previousValue: before.sales },
                 { key: 'result', label: t('balances.result'), value: report.result, previousValue: before.result },
+                { key: 'taxDue', label: t('balances.taxDue'), value: report.taxDue, previousValue: before.taxDue },
                 { key: 'cashIn', label: t('balances.cashIn'), value: report.cashIn, previousValue: before.cashIn },
                 { key: 'expenses', label: t('balances.expensesTotal'), value: report.expensesTotal, previousValue: before.expensesTotal },
               ].map((row) => {

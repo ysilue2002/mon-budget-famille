@@ -137,6 +137,12 @@ peut aussi être archivée sans perdre son historique.
   les autres charges catégorie par catégorie, puis un bilan simplifié (argent,
   stock, crédits clients, dettes fournisseurs, situation nette). L'écran
   s'imprime et s'exporte en PDF comme les autres états.
+- Le **bénéfice est calculé hors taxe** : la TVA facturée n'est pas un gain.
+  `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
+  TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle
+  devient un crédit de TVA). L'écran affiche ces trois lignes, Bilans affiche la
+  TVA à payer et des ventes/achats rappelés TVA incluse. Les montants de
+  trésorerie et les crédits restent TTC : c'est l'argent réellement échangé.
 - Les menus des deux espaces vivent dans `src/navigation.ts` et sont verrouillés
   par `src/navigation.test.ts` (pas de doublon, treize entrées au plus, libellés
   traduits dans les trois langues).

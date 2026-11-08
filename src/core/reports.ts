@@ -1,17 +1,21 @@
 /**
  * Bilans de l'activité — logique PURE, testable sans base ni réseau.
  *
- * Deux notions volontairement séparées :
- *   - le RÉSULTAT (bénéfice estimé) : ventes − achats − autres dépenses, que
- *     les factures soient encaissées ou non (comptabilité d'engagement) ;
+ * Trois notions volontairement séparées :
+ *   - le RÉSULTAT (bénéfice estimé) : ventes hors taxe − achats hors taxe −
+ *     autres dépenses, que les factures soient encaissées ou non
+ *     (comptabilité d'engagement) ;
+ *   - la TVA : collectée sur les ventes, déductible sur les achats, et ce qui
+ *     reste à reverser ; elle n'est jamais un gain ;
  *   - l'ARGENT DISPONIBLE : les soldes réels des comptes (caisse, banque,
- *     mobile money), qui ne bougent qu'aux règlements effectifs.
+ *     mobile money), qui ne bougent qu'aux règlements effectifs (TTC).
  *
  * Une avance reçue n'est pas une vente : elle est comptée à part. Un transfert
  * entre moyens de paiement n'est ni une recette ni une dépense.
  */
 import { advanceDirection } from './advances';
 import { computeAccountBalance } from './selectors';
+import { taxBreakdown } from './trade';
 import type { Advance, FinancialAccount, Product, TradeDocument, Transaction } from './types';
 
 export type PeriodKind = 'month' | 'quarter' | 'year';
@@ -25,25 +29,46 @@ export interface PeriodRange {
 export interface MonthlyPoint {
   /** Mois au format YYYY-MM. */
   month: string;
+  /** Ventes hors taxe du mois. */
   sales: number;
+  /** Charges hors taxe du mois (achats de marchandises et autres dépenses). */
   expenses: number;
   result: number;
+}
+
+/**
+ * TVA contenue dans une liste de documents (ventes ou achats). Recalculée à
+ * partir des lignes et du taux, comme à l'enregistrement : le montant est donc
+ * exact, sans arrondi cumulé.
+ */
+export function documentsTax(documents: Pick<TradeDocument, 'lines' | 'taxRate'>[]): number {
+  return documents.reduce((total, doc) => total + taxBreakdown(doc.lines, doc.taxRate).tax, 0);
 }
 
 export interface PeriodReport {
   from: string;
   to: string;
-  /** Ventes facturées de la période (engagées, réglées ou non). */
+  /** Ventes facturées de la période, TVA incluse (engagées, réglées ou non). */
   sales: number;
-  /** Achats de marchandises de la période (documents d'achat). */
+  /** Achats de marchandises de la période, TVA incluse (documents d'achat). */
   purchases: number;
+  /** Ventes hors taxe de la période, ce qui sert au bénéfice. */
+  salesNet: number;
+  /** Achats de marchandises hors taxe de la période. */
+  purchasesNet: number;
+  /** TVA collectée sur les ventes de la période. */
+  salesTax: number;
+  /** TVA déductible sur les achats de la période. */
+  purchasesTax: number;
+  /** TVA à reverser sur la période (négatif = crédit de TVA). */
+  taxDue: number;
   /** Dépenses hors achats de marchandises (loyer, transport, salaires…). */
   otherExpenses: number;
-  /** Total des charges de la période (achats + autres dépenses). */
+  /** Total des charges de la période, TVA incluse (achats + autres dépenses). */
   expensesTotal: number;
-  /** Bénéfice estimé de la période. */
+  /** Bénéfice estimé de la période, hors taxe. */
   result: number;
-  /** Marge en pourcentage du chiffre d'affaires (0 sans vente). */
+  /** Marge en pourcentage du chiffre d'affaires hors taxe (0 sans vente). */
   margin: number;
   /** Encaissements effectivement reçus (part réglée des ventes). */
   cashIn: number;
@@ -182,7 +207,15 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
   // isole du reste pour ne jamais les compter deux fois.
   const otherExpenses = Math.max(0, expensesTotal - purchasesTotal);
 
-  const result = salesTotal - expensesTotal;
+  // La TVA n'est pas un gain : le bénéfice se calcule hors taxe, et la TVA
+  // collectée moins la TVA déductible reste à reverser.
+  const salesTax = documentsTax(salesDocs);
+  const purchasesTax = documentsTax(purchaseDocs);
+  const salesNet = Math.max(0, salesTotal - salesTax);
+  const purchasesNet = Math.max(0, purchasesTotal - purchasesTax);
+  const taxDue = salesTax - purchasesTax;
+
+  const result = salesNet - purchasesNet - otherExpenses;
   const cashIn = sumPaid(inPeriod, (tx) => tx.type === 'income');
   const cashOut = sumPaid(inPeriod, (tx) => tx.type === 'expense');
 
@@ -227,8 +260,10 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
   const monthly: MonthlyPoint[] = Array.from({ length: 12 }, (_, index) => {
     const month = `${year}-${pad(index + 1)}`;
     const rows = tagged.filter((tx) => tx.date.slice(0, 7) === month);
-    const monthSales = sum(rows, (tx) => tx.type === 'income');
-    const monthExpenses = sum(rows, (tx) => tx.type === 'expense');
+    const docTax = (documents: TradeDocument[]) =>
+      documentsTax(documents.filter((doc) => doc.businessId === businessId && doc.date.slice(0, 7) === month));
+    const monthSales = sum(rows, (tx) => tx.type === 'income') - docTax(sales);
+    const monthExpenses = sum(rows, (tx) => tx.type === 'expense') - docTax(purchases);
     return { month, sales: monthSales, expenses: monthExpenses, result: monthSales - monthExpenses };
   });
 
@@ -237,10 +272,15 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
     to,
     sales: salesTotal,
     purchases: purchasesTotal,
+    salesNet,
+    purchasesNet,
+    salesTax,
+    purchasesTax,
+    taxDue,
     otherExpenses,
     expensesTotal,
     result,
-    margin: salesTotal > 0 ? (result / salesTotal) * 100 : 0,
+    margin: salesNet > 0 ? (result / salesNet) * 100 : 0,
     cashIn,
     cashOut,
     netCashFlow: cashIn - cashOut,
@@ -273,10 +313,16 @@ export interface StatementLine {
 export interface IncomeStatement {
   from: string;
   to: string;
-  /** Produits de la période (ventes facturées). */
+  /** Produits hors taxe de la période (ventes facturées). */
   revenue: number;
-  /** Achats de marchandises de la période (coût des marchandises achetées). */
+  /** Achats de marchandises hors taxe de la période. */
   goods: number;
+  /** TVA collectée sur les ventes de la période. */
+  salesTax: number;
+  /** TVA déductible sur les achats de la période. */
+  purchasesTax: number;
+  /** TVA à reverser (négatif = crédit de TVA). */
+  taxDue: number;
   /** Autres charges, regroupées par catégorie et triées de la plus forte à la plus faible. */
   otherExpenses: StatementLine[];
   /** Total des charges (marchandises + autres). */
@@ -290,6 +336,8 @@ export interface IncomeStatement {
 export interface IncomeStatementInput {
   businessId: string;
   transactions: Transaction[];
+  sales: TradeDocument[];
+  purchases: TradeDocument[];
   /** Bornes inclusives (ISO YYYY-MM-DD). */
   from: string;
   to: string;
@@ -301,19 +349,26 @@ export interface IncomeStatementInput {
  * donc l'écran fonctionne hors connexion.
  */
 export function buildIncomeStatement(input: IncomeStatementInput): IncomeStatement {
-  const { businessId, transactions, from, to } = input;
+  const { businessId, transactions, sales, purchases, from, to } = input;
   const rows = transactions.filter(
     (tx) => tx.businessId === businessId && tx.type !== 'transfer' && tx.date >= from && tx.date <= to,
   );
+  const inPeriod = (doc: TradeDocument) =>
+    doc.businessId === businessId && doc.date >= from && doc.date <= to;
 
-  const revenue = rows
+  const salesTax = documentsTax(sales.filter(inPeriod));
+  const purchasesTax = documentsTax(purchases.filter(inPeriod));
+
+  const grossRevenue = rows
     .filter((tx) => tx.type === 'income')
     .reduce((total, tx) => total + Math.max(0, tx.amountInPrimary), 0);
+  const revenue = Math.max(0, grossRevenue - salesTax);
 
   const expenseRows = rows.filter((tx) => tx.type === 'expense');
-  const goods = expenseRows
+  const grossGoods = expenseRows
     .filter((tx) => tx.id.startsWith(PURCHASE_TRANSACTION_PREFIX))
     .reduce((total, tx) => total + Math.max(0, tx.amountInPrimary), 0);
+  const goods = Math.max(0, grossGoods - purchasesTax);
 
   const byCategory = new Map<string, number>();
   for (const tx of expenseRows) {
@@ -338,6 +393,9 @@ export function buildIncomeStatement(input: IncomeStatementInput): IncomeStateme
     expenses,
     result,
     margin: revenue > 0 ? (result / revenue) * 100 : 0,
+    salesTax,
+    purchasesTax,
+    taxDue: salesTax - purchasesTax,
   };
 }
 
