@@ -256,6 +256,91 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
   };
 }
 
+/**
+ * Les achats de marchandises créent une opération de dépense dont l'identifiant
+ * commence par `purchase-` (voir `repo.createTrade`) : c'est ce qui permet de
+ * les isoler des autres charges sans compter deux fois le même argent.
+ */
+const PURCHASE_TRANSACTION_PREFIX = 'purchase-';
+
+/** Ligne de charge du compte de résultat (« achats » ou une catégorie). */
+export interface StatementLine {
+  /** Identifiant de catégorie, vide pour les charges sans catégorie. */
+  id: string;
+  total: number;
+}
+
+export interface IncomeStatement {
+  from: string;
+  to: string;
+  /** Produits de la période (ventes facturées). */
+  revenue: number;
+  /** Achats de marchandises de la période (coût des marchandises achetées). */
+  goods: number;
+  /** Autres charges, regroupées par catégorie et triées de la plus forte à la plus faible. */
+  otherExpenses: StatementLine[];
+  /** Total des charges (marchandises + autres). */
+  expenses: number;
+  /** Résultat net de la période (produits − charges). */
+  result: number;
+  /** Marge en pourcentage des produits (0 sans vente). */
+  margin: number;
+}
+
+export interface IncomeStatementInput {
+  businessId: string;
+  transactions: Transaction[];
+  /** Bornes inclusives (ISO YYYY-MM-DD). */
+  from: string;
+  to: string;
+}
+
+/**
+ * Compte de résultat détaillé d'une période : produits, achats de marchandises
+ * et autres charges catégorie par catégorie. Tout vient des opérations locales,
+ * donc l'écran fonctionne hors connexion.
+ */
+export function buildIncomeStatement(input: IncomeStatementInput): IncomeStatement {
+  const { businessId, transactions, from, to } = input;
+  const rows = transactions.filter(
+    (tx) => tx.businessId === businessId && tx.type !== 'transfer' && tx.date >= from && tx.date <= to,
+  );
+
+  const revenue = rows
+    .filter((tx) => tx.type === 'income')
+    .reduce((total, tx) => total + Math.max(0, tx.amountInPrimary), 0);
+
+  const expenseRows = rows.filter((tx) => tx.type === 'expense');
+  const goods = expenseRows
+    .filter((tx) => tx.id.startsWith(PURCHASE_TRANSACTION_PREFIX))
+    .reduce((total, tx) => total + Math.max(0, tx.amountInPrimary), 0);
+
+  const byCategory = new Map<string, number>();
+  for (const tx of expenseRows) {
+    if (tx.id.startsWith(PURCHASE_TRANSACTION_PREFIX)) continue;
+    const key = tx.categoryId ?? '';
+    byCategory.set(key, (byCategory.get(key) ?? 0) + Math.max(0, tx.amountInPrimary));
+  }
+  const otherExpenses = [...byCategory.entries()]
+    .map(([id, total]) => ({ id, total }))
+    .sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
+
+  const otherTotal = otherExpenses.reduce((total, line) => total + line.total, 0);
+  const expenses = goods + otherTotal;
+  const result = revenue - expenses;
+
+  return {
+    from,
+    to,
+    revenue,
+    goods,
+    otherExpenses,
+    expenses,
+    result,
+    margin: revenue > 0 ? (result / revenue) * 100 : 0,
+  };
+}
+
 /** Écart absolu entre deux périodes pour une valeur donnée. */
 export function changeBetween(current: number, previous: number): number {
   return current - previous;

@@ -40,6 +40,7 @@ export const NAV_BUSINESS: readonly NavItem[] = [
   { to: '/quotes', key: 'nav.quotes', icon: '📝' },
   { to: '/invoices', key: 'nav.invoices', icon: '🧾' },
   { to: '/balances', key: 'nav.balances', icon: '📈' },
+  { to: '/income', key: 'nav.income', icon: '🧮' },
   { to: '/treasury', key: 'nav.treasury', icon: '💧' },
   { to: '/states', key: 'nav.states', icon: '📋' },
   { to: '/profile', key: 'nav.profile', icon: '🧑‍💼' },

@@ -31,6 +31,7 @@ import Advances from '@/pages/Advances';
 import ProfilePage from '@/pages/Profile';
 import Expenses from '@/pages/Expenses';
 import Balances from '@/pages/Balances';
+import Income from '@/pages/Income';
 import Treasury from '@/pages/Treasury';
 import Quotes from '@/pages/Quotes';
 import Invoices from '@/pages/Invoices';
@@ -167,6 +168,7 @@ function Layout() {
               <Route path="/purchases" element={<Trades kind="purchase" />} />
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/balances" element={<Balances />} />
+              <Route path="/income" element={<Income />} />
               <Route path="/treasury" element={<Treasury />} />
               <Route path="/quotes" element={<Quotes />} />
               <Route path="/invoices" element={<Invoices />} />

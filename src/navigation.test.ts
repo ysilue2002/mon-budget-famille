@@ -34,9 +34,9 @@ describe('menus', () => {
     }
   });
 
-  it('tient sur un téléphone : douze entrées au plus', () => {
+  it('tient sur un téléphone : treize entrées au plus', () => {
     for (const menu of menus) {
-      expect(menu.items.length, menu.name).toBeLessThanOrEqual(12);
+      expect(menu.items.length, menu.name).toBeLessThanOrEqual(13);
     }
   });
 

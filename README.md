@@ -132,8 +132,13 @@ peut aussi être archivée sans perdre son historique.
   (`src/pages/Balances.tsx`, calculs dans `src/core/reports.ts`), la trésorerie
   par **Trésorerie** (`src/core/treasury.ts`) et les documents imprimables par
   **États** (`src/pages/ActivityDocs.tsx`).
+- **Compte de résultat** (`src/pages/Income.tsx`, `buildIncomeStatement` dans
+  `src/core/reports.ts`) détaille les produits, les achats de marchandises et
+  les autres charges catégorie par catégorie, puis un bilan simplifié (argent,
+  stock, crédits clients, dettes fournisseurs, situation nette). L'écran
+  s'imprime et s'exporte en PDF comme les autres états.
 - Les menus des deux espaces vivent dans `src/navigation.ts` et sont verrouillés
-  par `src/navigation.test.ts` (pas de doublon, douze entrées au plus, libellés
+  par `src/navigation.test.ts` (pas de doublon, treize entrées au plus, libellés
   traduits dans les trois langues).
 
 ## Membres du foyer
