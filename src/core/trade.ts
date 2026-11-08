@@ -32,6 +32,60 @@ export function tradeTotal(lines: { lineTotal: number }[]): number {
   return lines.reduce((sum, line) => sum + safe(line.lineTotal), 0);
 }
 
+/** Quantité lisible : deux décimales au plus, séparateur local. */
+export function formatQty(qty: number, locale?: string): string {
+  const value = Number.isFinite(qty) ? qty : 0;
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
+}
+
+/**
+ * « Riz 25 kg × 2 · Sucre × 3 » : les marchandises d'un document, en clair.
+ * Les lignes sans libellé sont ignorées ; le séparateur reste modifiable.
+ */
+export function linesSummary(
+  lines: { label?: string; qty: number }[],
+  locale?: string,
+  separator = ' · ',
+): string {
+  return lines
+    .map((line) => {
+      const label = (line.label ?? '').trim();
+      if (!label) return '';
+      const qty = Number.isFinite(line.qty) ? line.qty : 0;
+      return qty > 0 ? `${label} × ${formatQty(qty, locale)}` : label;
+    })
+    .filter(Boolean)
+    .join(separator);
+}
+
+/** Une marchandise vendue dans la journée, telle qu'elle apparaît à l'état. */
+export interface DailySaleRow {
+  label: string;
+  qty: number;
+  unitPrice: number;
+  amount: number;
+}
+
+/**
+ * Détail des ventes d'un jour : une ligne par marchandise vendue, dans l'ordre
+ * des documents. Les prix restent hors taxe, comme sur le document d'origine.
+ */
+export function dailySalesDetail(
+  sales: { date: string; lines: TradeLine[] }[],
+  day: string,
+): DailySaleRow[] {
+  return sales
+    .filter((sale) => sale.date === day)
+    .flatMap((sale) =>
+      sale.lines.map((line) => ({
+        label: line.label,
+        qty: Number.isFinite(line.qty) ? line.qty : 0,
+        unitPrice: line.unitPrice,
+        amount: lineTotal(line.qty, line.unitPrice),
+      })),
+    );
+}
+
 /** Taux de TVA normalisé : entre 0 et 100, arrondi à deux décimales. */
 export function normalizeTaxRate(rate: number | undefined): number {
   if (!Number.isFinite(rate ?? NaN)) return 0;

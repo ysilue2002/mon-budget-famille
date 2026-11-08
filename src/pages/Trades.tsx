@@ -13,7 +13,7 @@ import {
 import { createParty, createTrade, deleteTrade, updateParty, updateTrade } from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
 import { parseAmountInput, toMajor } from '@/core/money';
-import { paidForMode, taxBreakdown, tradeDue, tradeStatus, type PaymentEntryMode } from '@/core/trade';
+import { linesSummary, paidForMode, taxBreakdown, tradeDue, tradeStatus, type PaymentEntryMode } from '@/core/trade';
 import { uuid } from '@/lib/id';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import type { PaymentMethod, TradeDocument } from '@/core/types';
@@ -335,7 +335,8 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                   <td className="py-1.5">
                     <div className="font-medium text-forest-950">{document.partyName || '—'}</div>
                     <div className="text-xs text-sage-500">
-                      {document.lines.length} {t('trade.product').toLowerCase()}
+                      {linesSummary(document.lines, i18n.language) ||
+                        `${document.lines.length} ${t('trade.product').toLowerCase()}`}
                     </div>
                   </td>
                   <td className="py-1.5 text-right font-semibold">{fmt(document.total)}</td>

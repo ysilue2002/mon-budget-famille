@@ -15,12 +15,14 @@ import {
 } from '@/hooks/useData';
 import { formatAmount } from '@/core/currencies';
 import { advanceDirection, advanceRemaining } from '@/core/advances';
+import { dailySalesDetail, formatQty, linesSummary } from '@/core/trade';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/core/pdf';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import { Card, Page, Tag, btnGhost, btnPrimary } from '@/components/common';
 
 type DocKind =
   | 'sales'
+  | 'dailySales'
   | 'purchases'
   | 'expenses'
   | 'stock'
@@ -34,6 +36,7 @@ type DocKind =
 
 const KINDS: DocKind[] = [
   'sales',
+  'dailySales',
   'purchases',
   'expenses',
   'stock',
@@ -53,6 +56,8 @@ interface StatementTable {
   total: number;
   /** Nombre de lignes, affiché sous le titre. */
   count: number;
+  /** Précision affichée sous le tableau (par exemple la TVA du total). */
+  note?: string;
 }
 
 /**
@@ -85,6 +90,10 @@ export default function ActivityDocs() {
 
   const lang = i18n.language;
   const fmt = (minor: number) => formatAmount(minor, primary, lang);
+  // L'état des ventes du jour ne dépend pas de la période : il porte sur aujourd'hui.
+  const isDaily = kind === 'dailySales';
+  const rangeFrom = isDaily ? todayISO() : from;
+  const rangeTo = isDaily ? todayISO() : to;
   const business = (businesses ?? []).find((row) => !row.archived) ?? null;
 
   const categoryLabel = (id?: string) => {
@@ -123,9 +132,30 @@ export default function ActivityDocs() {
   const isStatement = kind === 'clientStatement' || kind === 'supplierStatement';
 
   const table: StatementTable = useMemo(() => {
+    if (kind === 'dailySales') {
+      // Ventes du jour, marchandise par marchandise : ce qui est sorti, à quel
+      // prix et pour quel montant — le contrôle de caisse de fin de journée.
+      const daySales = (sales ?? []).filter((sale) => sale.date === rangeFrom);
+      const detail = dailySalesDetail(daySales, rangeFrom);
+      const taxed = daySales.some((sale) => (sale.taxRate ?? 0) > 0);
+      return {
+        head: [t('trade.product'), t('trade.qty'), t('trade.unitPrice'), t('documents.total')],
+        body: detail.map((line) => [
+          line.label || '—',
+          formatQty(line.qty, lang),
+          fmt(line.unitPrice),
+          fmt(line.amount),
+        ]),
+        totalLabel: t('states.todayTotal'),
+        total: daySales.reduce((sum, sale) => sum + sale.total, 0),
+        count: detail.length,
+        note: taxed ? t('states.taxNote') : undefined,
+      };
+    }
+
     if (kind === 'sales' || kind === 'customerCredits') {
       const rows = (sales ?? []).filter((sale) => {
-        if (sale.date < from || sale.date > to) return false;
+        if (sale.date < rangeFrom || sale.date > rangeTo) return false;
         return kind === 'sales' ? true : sale.due > 0;
       });
       return {
@@ -133,6 +163,7 @@ export default function ActivityDocs() {
           t('invoices.number'),
           t('documents.date'),
           t('invoices.client'),
+          t('trade.product'),
           t('documents.total'),
           t('invoices.paid'),
           t('invoices.due'),
@@ -141,6 +172,7 @@ export default function ActivityDocs() {
           sale.number ?? '—',
           sale.date,
           sale.partyName ?? '—',
+          linesSummary(sale.lines, lang) || '—',
           fmt(sale.total),
           fmt(sale.paid),
           fmt(sale.due),
@@ -153,7 +185,7 @@ export default function ActivityDocs() {
 
     if (kind === 'purchases' || kind === 'supplierCredits') {
       const rows = (purchases ?? []).filter((purchase) => {
-        if (purchase.date < from || purchase.date > to) return false;
+        if (purchase.date < rangeFrom || purchase.date > rangeTo) return false;
         return kind === 'purchases' ? true : purchase.due > 0;
       });
       return {
@@ -161,6 +193,7 @@ export default function ActivityDocs() {
           t('invoices.number'),
           t('documents.date'),
           t('nav.suppliers'),
+          t('trade.product'),
           t('documents.total'),
           t('invoices.paid'),
           t('invoices.due'),
@@ -169,6 +202,7 @@ export default function ActivityDocs() {
           purchase.number ?? '—',
           purchase.date,
           purchase.partyName ?? '—',
+          linesSummary(purchase.lines, lang) || '—',
           fmt(purchase.total),
           fmt(purchase.paid),
           fmt(purchase.due),
@@ -405,8 +439,8 @@ export default function ActivityDocs() {
     supplierList,
     statementClient,
     statementSupplier,
-    from,
-    to,
+    rangeFrom,
+    rangeTo,
     lang,
     primary,
     categories,
@@ -432,7 +466,11 @@ export default function ActivityDocs() {
       ),
       title,
       business,
-      reference: statementParty ? partyDetails : `${from} → ${to}`,
+      reference: statementParty
+        ? partyDetails
+        : isDaily
+          ? rangeFrom
+          : `${rangeFrom} → ${rangeTo}`,
       meta: [
         ...(statementParty
           ? [
@@ -442,8 +480,12 @@ export default function ActivityDocs() {
               ] as [string, string],
             ]
           : []),
-        [t('states.from'), from],
-        [t('states.to'), to],
+        ...(isDaily
+          ? ([[t('common.date'), rangeFrom]] as [string, string][])
+          : ([
+              [t('states.from'), rangeFrom],
+              [t('states.to'), rangeTo],
+            ] as [string, string][])),
         [t('states.count'), String(table.count)],
       ],
       head: table.head,
@@ -519,7 +561,7 @@ export default function ActivityDocs() {
       </div>
 
       <div className="no-print mb-4 flex flex-wrap items-center gap-2 text-sm">
-        {!isStatement && (
+        {!isStatement && !isDaily && (
           <label className="flex items-center gap-2">
             {t('states.from')}
             <input
@@ -530,7 +572,7 @@ export default function ActivityDocs() {
             />
           </label>
         )}
-        {!isStatement && (
+        {!isStatement && !isDaily && (
           <label className="flex items-center gap-2">
             {t('states.to')}
             <input
@@ -592,9 +634,11 @@ export default function ActivityDocs() {
               {statementParty && <p className="mt-1 text-sm font-medium text-forest-900">{partyDetails}</p>}
             </div>
             <div className="text-right text-xs text-sage-600">
-              {!isStatement ? (
+              {isDaily ? (
+                <p dir="ltr">{rangeFrom}</p>
+              ) : !isStatement ? (
                 <p dir="ltr">
-                  {from} → {to}
+                  {rangeFrom} → {rangeTo}
                 </p>
               ) : (
                 <p>{t('states.statementScope')}</p>
@@ -666,6 +710,8 @@ export default function ActivityDocs() {
               </div>
             </>
           )}
+
+          {table.note && <p className="mt-2 text-[11px] text-sage-600">{table.note}</p>}
 
           <footer className="mt-3 flex flex-wrap justify-between gap-2 border-t border-forest-100 pt-2 text-[10px] text-sage-500">
             <span>{t('documents.footer')}</span>

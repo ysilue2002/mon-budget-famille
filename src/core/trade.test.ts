@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   boundPaid,
   buildLines,
+  dailySalesDetail,
   lineTotal,
+  linesSummary,
   paidForMode,
   stockDeltaMap,
   stockMovements,
@@ -101,5 +103,50 @@ describe('trade — lignes enregistrées', () => {
     expect(lines[0]).toEqual({ id: 'l1', productId: 'p1', label: 'Riz', qty: 2, unitPrice: 700, lineTotal: 1400 });
     expect(lines[1].label).toBe('—');
     expect(lines[1].lineTotal).toBe(0);
+  });
+});
+
+describe('trade — marchandises à l’écran', () => {
+  it('résume un document par ses marchandises et leurs quantités', () => {
+    const text = linesSummary(
+      [
+        { label: 'Riz 25 kg', qty: 2 },
+        { label: 'Sucre', qty: 3 },
+      ],
+      'fr-FR',
+    );
+    expect(text).toBe('Riz 25 kg × 2 · Sucre × 3');
+  });
+
+  it('ignore les lignes sans libellé et les quantités nulles', () => {
+    expect(linesSummary([{ label: '   ', qty: 1 }, { label: 'Café', qty: 0 }], 'fr-FR')).toBe('Café');
+    expect(linesSummary([])).toBe('');
+  });
+
+  it('détaille les ventes du jour, marchandise par marchandise', () => {
+    const rows = dailySalesDetail(
+      [
+        {
+          date: '2026-11-08',
+          lines: [
+            { id: 'a', label: 'Riz 25 kg', qty: 2, unitPrice: 12000, lineTotal: 24000 },
+            { id: 'b', label: 'Sucre', qty: 3, unitPrice: 700, lineTotal: 2100 },
+          ],
+        },
+        {
+          date: '2026-11-07',
+          lines: [{ id: 'c', label: 'Thé', qty: 1, unitPrice: 1500, lineTotal: 1500 }],
+        },
+      ],
+      '2026-11-08',
+    );
+    expect(rows).toEqual([
+      { label: 'Riz 25 kg', qty: 2, unitPrice: 12000, amount: 24000 },
+      { label: 'Sucre', qty: 3, unitPrice: 700, amount: 2100 },
+    ]);
+  });
+
+  it('ne renvoie rien pour un jour sans vente', () => {
+    expect(dailySalesDetail([], '2026-11-08')).toEqual([]);
   });
 });
