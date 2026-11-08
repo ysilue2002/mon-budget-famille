@@ -177,6 +177,28 @@ export interface Product extends SyncFields {
   createdAt: number;
 }
 
+/** Origine d'un mouvement de stock. */
+export type StockMovementReason = 'initial' | 'purchase' | 'sale' | 'inventory';
+
+/**
+ * Mouvement de stock daté : la seule source de vérité pour la quantité en
+ * stock à une date donnée. Une entrée est positive, une sortie négative. Le
+ * stock affiché reste `Product.stockQty`, tenu à jour en même temps.
+ */
+export interface StockMovement extends SyncFields {
+  id: string;
+  familyId: string;
+  productId: string;
+  /** Date du mouvement (YYYY-MM-DD) : celle du document quand il y en a un. */
+  date: string;
+  /** Quantité signée (entrée positive, sortie négative), en unités du produit. */
+  qty: number;
+  reason: StockMovementReason;
+  /** Document d'origine (vente ou achat) : ses mouvements suivent sa vie. */
+  documentId?: string;
+  createdAt: number;
+}
+
 /** Moyens de paiement proposés à la saisie (indépendants des comptes). */
 export type PaymentMethod = 'cash' | 'wave' | 'orange' | 'mtn' | 'moov' | 'bank' | 'other';
 
@@ -458,7 +480,8 @@ export type SyncEntity =
   | 'party'
   | 'advance'
   | 'settlement'
-  | 'quote';
+  | 'quote'
+  | 'stockMovement';
 
 export interface OutboxOperation {
   id: string;

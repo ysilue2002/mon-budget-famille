@@ -19,7 +19,14 @@ import { advanceDirection } from './advances';
 import { computeAccountBalance } from './selectors';
 import { stockValueAt } from './stock';
 import { taxBreakdown } from './trade';
-import type { Advance, FinancialAccount, Product, TradeDocument, Transaction } from './types';
+import type {
+  Advance,
+  FinancialAccount,
+  Product,
+  StockMovement,
+  TradeDocument,
+  Transaction,
+} from './types';
 
 export type PeriodKind = 'month' | 'quarter' | 'year';
 
@@ -113,6 +120,8 @@ export interface PeriodReportInput {
   sales: TradeDocument[];
   purchases: TradeDocument[];
   products: Product[];
+  /** Journal daté du stock : il donne la valeur du stock aux deux bornes. */
+  stockMovements: StockMovement[];
   advances: Advance[];
   accounts: FinancialAccount[];
   /** Bornes inclusives (ISO YYYY-MM-DD). */
@@ -205,7 +214,18 @@ export function unpaidAmount(transaction: Pick<Transaction, 'amountInPrimary' | 
 }
 
 export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
-  const { businessId, transactions, sales, purchases, products, advances, accounts, from, to } = input;
+  const {
+    businessId,
+    transactions,
+    sales,
+    purchases,
+    products,
+    stockMovements,
+    advances,
+    accounts,
+    from,
+    to,
+  } = input;
   const year = input.year ?? Number(from.slice(0, 4));
 
   const tagged = transactions.filter((tx) => tx.businessId === businessId && tx.type !== 'transfer');
@@ -237,8 +257,8 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
 
   // Les marchandises encore en stock à la fin de la période ne sont pas encore
   // une charge : on retire des achats ce qui n'a pas été vendu.
-  const stockEnd = stockValueAt(products, sales, purchases, to);
-  const stockStart = stockValueAt(products, sales, purchases, previousDay(from));
+  const stockEnd = stockValueAt(products, stockMovements, to);
+  const stockStart = stockValueAt(products, stockMovements, previousDay(from));
   const stockChange = stockEnd - stockStart;
   const goodsCost = Math.max(0, purchasesNet - stockChange);
   const netExpenses = goodsCost + otherExpenses;
@@ -297,8 +317,8 @@ export function buildPeriodReport(input: PeriodReportInput): PeriodReport {
     const monthStart = `${month}-01`;
     const monthEnd = `${month}-${pad(daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7))))}`;
     const monthStockChange =
-      stockValueAt(products, sales, purchases, monthEnd) -
-      stockValueAt(products, sales, purchases, previousDay(monthStart));
+      stockValueAt(products, stockMovements, monthEnd) -
+      stockValueAt(products, stockMovements, previousDay(monthStart));
     const monthPurchasesNet = Math.max(0, monthPurchases - documentsTax(purchases.filter(inMonth)));
     const monthGoods = Math.max(0, monthPurchasesNet - monthStockChange);
     const monthExpenses = monthGoods + monthOther;
@@ -390,6 +410,8 @@ export interface IncomeStatementInput {
   sales: TradeDocument[];
   purchases: TradeDocument[];
   products: Product[];
+  /** Journal daté du stock (voir `StockMovement`). */
+  stockMovements: StockMovement[];
   /** Bornes inclusives (ISO YYYY-MM-DD). */
   from: string;
   to: string;
@@ -401,7 +423,7 @@ export interface IncomeStatementInput {
  * donc l'écran fonctionne hors connexion.
  */
 export function buildIncomeStatement(input: IncomeStatementInput): IncomeStatement {
-  const { businessId, transactions, sales, purchases, products, from, to } = input;
+  const { businessId, transactions, sales, purchases, products, stockMovements, from, to } = input;
   const rows = transactions.filter(
     (tx) => tx.businessId === businessId && tx.type !== 'transfer' && tx.date >= from && tx.date <= to,
   );
@@ -436,8 +458,8 @@ export function buildIncomeStatement(input: IncomeStatementInput): IncomeStateme
 
   // Ce qui reste en stock n'est pas encore une charge : seules les
   // marchandises sorties (vendues) comptent dans le résultat.
-  const stockEnd = stockValueAt(products, sales, purchases, to);
-  const stockStart = stockValueAt(products, sales, purchases, previousDay(from));
+  const stockEnd = stockValueAt(products, stockMovements, to);
+  const stockStart = stockValueAt(products, stockMovements, previousDay(from));
   const stockChange = stockEnd - stockStart;
   const goodsCost = Math.max(0, goods - stockChange);
   const expenses = goodsCost + otherTotal;

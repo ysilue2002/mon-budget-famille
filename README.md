@@ -141,8 +141,14 @@ peut aussi être archivée sans perdre son historique.
   les achats hors taxe sont diminués du stock restant en fin de période
   (`stockValueAt` dans `src/core/stock.ts`, au prix d'achat). Un achat qui dort
   en magasin ne pèse donc pas sur le mois où il a été payé, et son coût arrive
-  le mois de la vente. Valorisation reconstituée depuis le stock actuel et les
-  documents postérieurs : c'est une estimation, pas un inventaire daté.
+  le mois de la vente.
+- Le **journal daté du stock** (`StockMovement`, table `stockMovements`) porte
+  chaque entrée et sortie avec sa date : achat, vente, quantité de départ à la
+  création de la marchandise, et correction d'inventaire datée du jour. La
+  valeur d'une période passée se lit dans ce journal, elle ne dépend donc plus
+  du stock d'aujourd'hui. `ensureStockLedger` reprend une fois l'existant depuis
+  les documents déjà saisis (ids déterministes, donc rejouable sans doublon) ;
+  les écrans Marchandises affichent les derniers mouvements.
 - La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.
   `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
   TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle

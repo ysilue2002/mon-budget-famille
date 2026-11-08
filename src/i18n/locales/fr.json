@@ -557,6 +557,14 @@
   "products": {
     "title": "Mes marchandises",
     "new": "Ajouter une marchandise",
+    "history": "Journal du stock",
+    "historyHint": "Chaque entrée et sortie, à sa date : le stock d’un mois passé ne change plus.",
+    "reason": {
+      "initial": "Stock de départ",
+      "purchase": "Achat",
+      "sale": "Vente",
+      "inventory": "Inventaire"
+    },
     "name": "Nom du produit",
     "unit": "Unité",
     "unitPlaceholder": "pièce, kg, litre, service…",

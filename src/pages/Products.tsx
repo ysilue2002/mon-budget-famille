@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { usePrimaryCurrency, useProducts } from '@/hooks/useData';
+import { usePrimaryCurrency, useProducts, useStockMovements } from '@/hooks/useData';
 import { createProduct, deleteProduct, updateProduct } from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
 import { isLowStock, lowStockProducts, stockValue, totalUnits } from '@/core/stock';
@@ -61,6 +61,8 @@ export default function Products() {
 
   const rows = products ?? [];
   const active = rows.filter((product) => !product.archived);
+  const movements = useStockMovements() ?? [];
+  const nameOf = (productId: string) => rows.find((product) => product.id === productId)?.name ?? '—';
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return needle ? active.filter((product) => product.name.toLowerCase().includes(needle)) : active;
@@ -235,6 +237,29 @@ export default function Products() {
             </div>
             <p className="mt-2 text-[11px] text-sage-500">{t('products.hint')}</p>
           </article>
+
+          {movements.length > 0 && (
+            <Card className="no-print mt-4">
+              <h2 className="mb-1 text-sm font-bold text-forest-950">{t('products.history')}</h2>
+              <p className="mb-2 text-xs text-sage-500">{t('products.historyHint')}</p>
+              <ul className="divide-y divide-forest-50 text-sm">
+                {movements.slice(0, 12).map((movement) => (
+                  <li key={movement.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-1.5">
+                    <span className="w-24 text-xs text-sage-600">{movement.date}</span>
+                    <span className="font-medium text-forest-950">{nameOf(movement.productId)}</span>
+                    <span className="text-xs text-sage-500">{t(`products.reason.${movement.reason}`)}</span>
+                    <span
+                      className={`ml-auto font-semibold ${
+                        movement.qty >= 0 ? 'text-forest-700' : 'text-amber-700'
+                      }`}
+                    >
+                      {movement.qty >= 0 ? '+' : '−'}{formatQty(Math.abs(movement.qty))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
         </>
       )}
 

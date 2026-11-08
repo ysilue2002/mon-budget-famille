@@ -9,6 +9,7 @@ import {
   useProducts,
   usePurchases,
   useSales,
+  useStockMovements,
   useTransactions,
 } from '@/hooks/useData';
 import {
@@ -57,6 +58,7 @@ export default function Income() {
   const advances = useAdvances();
   const accounts = useAccounts();
   const transactions = useTransactions();
+  const stockMovements = useStockMovements();
   const categories = useCategories();
   const businesses = useBusinesses();
   const primary = usePrimaryCurrency() ?? 'XOF';
@@ -85,10 +87,11 @@ export default function Income() {
         sales: sales ?? [],
         purchases: purchases ?? [],
         products: products ?? [],
+        stockMovements: stockMovements ?? [],
         from: range.from,
         to: range.to,
       }),
-    [selectedId, transactions, sales, purchases, products, range.from, range.to],
+    [selectedId, transactions, sales, purchases, products, stockMovements, range.from, range.to],
   );
 
   const report = useMemo(
@@ -99,6 +102,7 @@ export default function Income() {
         sales: sales ?? [],
         purchases: purchases ?? [],
         products: products ?? [],
+        stockMovements: stockMovements ?? [],
         advances: advances ?? [],
         accounts: accounts ?? [],
         from: range.from,
@@ -106,10 +110,24 @@ export default function Income() {
         year: range.year,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedId, transactions, sales, purchases, products, advances, accounts, range.from, range.to, range.year],
+    [
+      selectedId,
+      transactions,
+      sales,
+      purchases,
+      products,
+      stockMovements,
+      advances,
+      accounts,
+      range.from,
+      range.to,
+      range.year,
+    ],
   );
 
   const fmt = (value: number) => formatAmount(value, primary, i18n.language);
+  // Charge affichée en négatif ; un zéro reste « 0 », jamais « -0 ».
+  const debit = (value: number) => fmt(value === 0 ? 0 : -value);
 
   const categoryLabel = (id: string) => {
     const category = (categories ?? []).find((row) => row.id === id);
@@ -138,15 +156,15 @@ export default function Income() {
       head: [t('income.line'), t('income.amount')],
       body: [
         [t('income.salesHt'), fmt(statement.revenue)],
-        [t('income.goodsHt'), fmt(-statement.goods)],
+        [t('income.goodsHt'), debit(statement.goods)],
         ...(statement.stockChange !== 0
           ? [
               [t('income.stockChange'), fmt(statement.stockChange)],
-              [t('income.goodsCost'), fmt(-statement.goodsCost)],
+              [t('income.goodsCost'), debit(statement.goodsCost)],
             ]
           : []),
-        ...statement.otherExpenses.map((line) => [categoryLabel(line.id), fmt(-line.total)]),
-        [t('income.totalCharges'), fmt(-statement.expenses)],
+        ...statement.otherExpenses.map((line) => [categoryLabel(line.id), debit(line.total)]),
+        [t('income.totalCharges'), debit(statement.expenses)],
         [t('income.result'), fmt(statement.result)],
         [t('income.margin'), `${statement.margin.toFixed(1)} %`],
         [t('income.tax'), ''],
@@ -316,7 +334,7 @@ export default function Income() {
             </tr>
             <tr className="border-b border-forest-50">
               <td className="py-1.5 pl-3">{t('income.goodsHt')}</td>
-              <td className="py-1.5 text-right font-medium">{fmt(-statement.goods)}</td>
+              <td className="py-1.5 text-right font-medium">{debit(statement.goods)}</td>
             </tr>
             {statement.stockChange !== 0 && (
               <>
@@ -326,19 +344,19 @@ export default function Income() {
                 </tr>
                 <tr className="border-b border-forest-50">
                   <td className="py-1.5 pl-3 font-medium">{t('income.goodsCost')}</td>
-                  <td className="py-1.5 text-right font-medium">{fmt(-statement.goodsCost)}</td>
+                  <td className="py-1.5 text-right font-medium">{debit(statement.goodsCost)}</td>
                 </tr>
               </>
             )}
             {statement.otherExpenses.map((line) => (
               <tr key={line.id} className="border-b border-forest-50">
                 <td className="py-1.5 pl-3">{categoryLabel(line.id)}</td>
-                <td className="py-1.5 text-right font-medium">{fmt(-line.total)}</td>
+                <td className="py-1.5 text-right font-medium">{debit(line.total)}</td>
               </tr>
             ))}
             <tr className="border-t border-forest-300">
               <td className="py-1.5 font-semibold">{t('income.totalCharges')}</td>
-              <td className="py-1.5 text-right font-bold">{fmt(-statement.expenses)}</td>
+              <td className="py-1.5 text-right font-bold">{debit(statement.expenses)}</td>
             </tr>
             <tr className="border-t-2 border-forest-300">
               <td className="py-2 font-bold">{t('income.result')}</td>

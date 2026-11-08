@@ -8,6 +8,7 @@ import {
   useProducts,
   usePurchases,
   useSales,
+  useStockMovements,
   useTransactions,
 } from '@/hooks/useData';
 import {
@@ -53,6 +54,7 @@ export default function Balances() {
   const sales = useSales();
   const purchases = usePurchases();
   const products = useProducts();
+  const stockMovements = useStockMovements();
   const advances = useAdvances();
   const accounts = useAccounts();
   const transactions = useTransactions();
@@ -83,6 +85,7 @@ export default function Balances() {
       sales: sales ?? [],
       purchases: purchases ?? [],
       products: products ?? [],
+      stockMovements: stockMovements ?? [],
       advances: advances ?? [],
       accounts: accounts ?? [],
       from,
@@ -93,12 +96,36 @@ export default function Balances() {
   const report = useMemo(
     () => build(range.from, range.to, range.year),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedId, transactions, sales, purchases, products, advances, accounts, range.from, range.to, range.year],
+    [
+      selectedId,
+      transactions,
+      sales,
+      purchases,
+      products,
+      stockMovements,
+      advances,
+      accounts,
+      range.from,
+      range.to,
+      range.year,
+    ],
   );
   const before = useMemo(
     () => build(previous.from, previous.to, previous.year),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedId, transactions, sales, purchases, products, advances, accounts, previous.from, previous.to, previous.year],
+    [
+      selectedId,
+      transactions,
+      sales,
+      purchases,
+      products,
+      stockMovements,
+      advances,
+      accounts,
+      previous.from,
+      previous.to,
+      previous.year,
+    ],
   );
 
   const fmt = (value: number) => formatAmount(value, primary, i18n.language);

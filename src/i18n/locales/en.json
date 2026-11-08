@@ -557,6 +557,14 @@
   "products": {
     "title": "My goods",
     "new": "Add an item",
+    "history": "Stock journal",
+    "historyHint": "Every entry and exit, with its date: the stock of a past month no longer changes.",
+    "reason": {
+      "initial": "Opening stock",
+      "purchase": "Purchase",
+      "sale": "Sale",
+      "inventory": "Stock count"
+    },
     "name": "Product name",
     "unit": "Unit",
     "unitPlaceholder": "piece, kg, litre, service…",

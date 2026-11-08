@@ -10,6 +10,7 @@ import { clearAuth, getAuth } from '@/lib/api';
 import { clearOfflineMode, isOfflineMode } from '@/lib/session';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { WealthTracker } from '@/components/WealthTracker';
+import { StockLedgerTracker } from '@/components/StockLedgerTracker';
 import { materializeDueRecurrences } from '@/core/recurring';
 import Dashboard from '@/pages/Dashboard';
 import Transactions from '@/pages/Transactions';
@@ -245,6 +246,7 @@ export default function App() {
       <SyncProvider>
         <RecurringScheduler />
         <WealthTracker />
+        <StockLedgerTracker />
         <Shell />
       </SyncProvider>
     </SpaceProvider>

@@ -184,6 +184,7 @@ describe('flux de la période', () => {
     sales,
     purchases,
     products: [product],
+    stockMovements: [],
     advances,
     accounts,
     from: '2026-11-01',
@@ -226,6 +227,7 @@ describe('flux de la période', () => {
       sales,
       purchases,
       products: [product],
+      stockMovements: [],
       advances,
       settlements: [
         settlement({ id: 'st1', amount: 4_000, partyName: 'Awa', documentId: 's1' }),

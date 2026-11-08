@@ -8,6 +8,7 @@ import {
   createTrade,
   createTransaction,
   deleteTrade,
+  ensureStockLedger,
   partyDocuments,
   recordPartyPayment,
   updateTrade,
@@ -289,6 +290,84 @@ describe('dépenses de l’activité', () => {
     expect(tx?.settled).toBe(false);
     expect(tx?.settledAmount).toBeUndefined();
     expect(tx?.businessId).toBe(businessId);
+  });
+});
+
+describe('journal du stock', () => {
+  it('date chaque entrée et sortie, avec son document', async () => {
+    const productId = await product(10);
+    const purchaseId = await createTrade(
+      'purchase',
+      tradeInput({ date: '2026-03-02', lines: [{ productId, label: 'Sac de riz', qty: 20, unitPrice: COST }], paid: 0 }),
+    );
+    const saleId = await createTrade(
+      'sale',
+      tradeInput({ date: '2026-03-10', lines: [{ productId, label: 'Sac de riz', qty: 5, unitPrice: PRICE }], paid: 0 }),
+    );
+
+    const rows = await db.stockMovements.where('productId').equals(productId).toArray();
+    const initial = rows.find((row) => row.reason === 'initial');
+    expect(initial?.qty).toBe(10);
+    expect(rows.find((row) => row.documentId === purchaseId)).toMatchObject({
+      qty: 20,
+      date: '2026-03-02',
+      reason: 'purchase',
+    });
+    expect(rows.find((row) => row.documentId === saleId)).toMatchObject({
+      qty: -5,
+      date: '2026-03-10',
+      reason: 'sale',
+    });
+  });
+
+  it('suit les modifications et la suppression d’un document', async () => {
+    const productId = await product(10);
+    const saleId = await createTrade(
+      'sale',
+      tradeInput({ date: '2026-03-10', lines: [{ productId, label: 'Sac de riz', qty: 5, unitPrice: PRICE }], paid: 0 }),
+    );
+
+    await updateTrade(
+      'sale',
+      saleId,
+      tradeInput({ date: '2026-03-12', lines: [{ productId, label: 'Sac de riz', qty: 2, unitPrice: PRICE }], paid: 0 }),
+    );
+    const afterEdit = (await db.stockMovements.where('documentId').equals(saleId).toArray())[0];
+    expect(await db.stockMovements.where('documentId').equals(saleId).count()).toBe(1);
+    expect(afterEdit).toMatchObject({ qty: -2, date: '2026-03-12' });
+    expect((await db.products.get(productId))?.stockQty).toBe(8);
+
+    await deleteTrade('sale', saleId);
+    expect(await db.stockMovements.where('documentId').equals(saleId).count()).toBe(0);
+    expect((await db.products.get(productId))?.stockQty).toBe(10);
+  });
+
+  it('reprend une fois l’existant depuis les documents déjà saisis', async () => {
+    const productId = await product(10);
+    await createTrade(
+      'purchase',
+      tradeInput({ date: '2026-03-02', lines: [{ productId, label: 'Sac de riz', qty: 20, unitPrice: COST }], paid: 0 }),
+    );
+    await createTrade(
+      'sale',
+      tradeInput({ date: '2026-03-10', lines: [{ productId, label: 'Sac de riz', qty: 5, unitPrice: PRICE }], paid: 0 }),
+    );
+    // Situation d'avant le journal : aucun mouvement, un stock de 25.
+    await db.stockMovements.clear();
+    const created = await db.products.get(productId);
+    if (!created) throw new Error('marchandise manquante');
+    await db.products.put({ ...created, stockQty: 25 });
+
+    await ensureStockLedger();
+    const rows = await db.stockMovements.toArray();
+    expect(rows.reduce((total, row) => total + row.qty, 0)).toBe(25);
+    expect(rows.filter((row) => row.reason === 'sale')).toHaveLength(1);
+    expect(rows.filter((row) => row.reason === 'purchase')).toHaveLength(1);
+    expect(rows.find((row) => row.reason === 'initial')?.qty).toBe(10);
+
+    // Rejouer ne double rien.
+    await ensureStockLedger();
+    expect(await db.stockMovements.count()).toBe(rows.length);
   });
 });
 

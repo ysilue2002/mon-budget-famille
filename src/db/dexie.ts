@@ -13,6 +13,7 @@ import type {
   Product,
   Quote,
   Settlement,
+  StockMovement,
   TradeDocument,
   OutboxOperation,
   RateSnapshot,
@@ -40,6 +41,7 @@ export class BudgetFamilyDB extends Dexie {
   advances!: Table<Advance, string>;
   settlements!: Table<Settlement, string>;
   quotes!: Table<Quote, string>;
+  stockMovements!: Table<StockMovement, string>;
   categories!: Table<Category, string>;
   transactions!: Table<Transaction, string>;
   budgets!: Table<Budget, string>;
@@ -130,6 +132,11 @@ export class BudgetFamilyDB extends Dexie {
     // v12 : devis (documents commerciaux, hors chiffre d'affaires).
     this.version(12).stores({
       quotes: 'id, familyId, businessId, date, number, syncStatus',
+    });
+    // v13 : journal daté du stock (une ligne par entrée/sortie), pour valoriser
+    // le stock d'une date passée sans le reconstituer.
+    this.version(13).stores({
+      stockMovements: 'id, familyId, productId, date, documentId, syncStatus',
     });
   }
 }

@@ -89,6 +89,11 @@ export function useProducts() {
   }, []);
 }
 
+/** Journal daté du stock, les mouvements les plus récents d'abord. */
+export function useStockMovements() {
+  return useLiveQuery(() => db.stockMovements.orderBy('date').reverse().toArray(), []);
+}
+
 /** Devis, les plus récents d'abord. */
 export function useQuotes() {
   return useLiveQuery(() => db.quotes.orderBy('date').reverse().toArray(), []);

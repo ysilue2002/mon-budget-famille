@@ -23,6 +23,7 @@ import type {
   Product,
   RateSnapshot,
   Settlement,
+  StockMovement,
   TradeDocument,
   Transaction,
 } from './types';
@@ -167,6 +168,8 @@ export interface TreasuryInput {
   sales: TradeDocument[];
   purchases: TradeDocument[];
   products: Product[];
+  /** Journal daté du stock, pour la valeur du stock aux bornes. */
+  stockMovements: StockMovement[];
   advances: Advance[];
   settlements: Settlement[];
   /** Bornes incluses (ISO YYYY-MM-DD). */
@@ -194,6 +197,7 @@ export function buildTreasurySnapshot(input: TreasuryInput): TreasurySnapshot {
     sales: input.sales,
     purchases: input.purchases,
     products: input.products,
+    stockMovements: input.stockMovements,
     advances: input.advances,
     accounts: input.accounts,
     from: input.from,

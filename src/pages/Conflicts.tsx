@@ -22,6 +22,7 @@ const ENTITY_ICONS: Record<SyncConflict['entity'], string> = {
   advance: 'Avance reçue',
   quote: 'Devis',
   settlement: 'Règlement',
+  stockMovement: 'Mouvement de stock',
 };
 
 function preview(value: unknown): string {

@@ -9,7 +9,15 @@ import {
   shiftAnchor,
   unpaidAmount,
 } from './reports';
-import type { Advance, FinancialAccount, Product, TradeDocument, TradeLine, Transaction } from './types';
+import type {
+  Advance,
+  FinancialAccount,
+  Product,
+  StockMovement,
+  TradeDocument,
+  TradeLine,
+  Transaction,
+} from './types';
 
 const sync = { baseRev: 0, rev: 1, updatedAt: 0, deviceId: 'test', syncStatus: 'synced' as const };
 
@@ -131,6 +139,7 @@ describe('bilans — formules', () => {
     sales,
     purchases,
     products: [product],
+    stockMovements: [],
     advances: [advance(15_000, '2026-02-01'), advance(4_000, '2026-01-15')],
     accounts: [account],
     from: '2026-02-01',
@@ -178,6 +187,7 @@ describe('bilans — formules', () => {
       sales,
       purchases,
       products: [product],
+      stockMovements: [],
       advances: [supplierDeposit, advance(15_000, '2026-02-01')],
       accounts: [account],
       from: '2026-02-01',
@@ -200,6 +210,7 @@ describe('bilans — formules', () => {
       sales: [],
       purchases: [],
       products: [],
+      stockMovements: [],
       advances: [],
       accounts: [account],
       from: '2026-02-01',
@@ -229,6 +240,7 @@ describe('bilans — formules', () => {
       sales,
       purchases,
       products: [product],
+      stockMovements: [],
       advances: [],
       accounts: [account],
       from: '2026-01-01',
@@ -258,6 +270,7 @@ describe('compte de résultat', () => {
     sales: [],
     purchases: [],
     products: [],
+    stockMovements: [],
     from: '2026-02-01',
     to: '2026-02-28',
   });
@@ -291,6 +304,7 @@ describe('compte de résultat', () => {
       sales: [],
       purchases: [],
       products: [],
+      stockMovements: [],
       from: '2026-03-01',
       to: '2026-03-31',
     });
@@ -332,6 +346,7 @@ describe('TVA — bénéfice hors taxe', () => {
     sales: [sale],
     purchases: [purchase],
     products: [],
+    stockMovements: [],
     advances: [],
     accounts: [account],
     from: '2026-04-01',
@@ -344,6 +359,7 @@ describe('TVA — bénéfice hors taxe', () => {
     sales: [sale],
     purchases: [purchase],
     products: [],
+    stockMovements: [],
     from: '2026-04-01',
     to: '2026-04-30',
   });
@@ -402,18 +418,43 @@ describe('stock — seules les marchandises vendues sont une charge', () => {
     ...doc({ id: 's-2', date: '2026-04-05', total: 8_000, kind: 'sale' as const }),
     lines: [stockLine('p-riz', 5, 1_600)],
   };
+  const movement = (
+    id: string,
+    date: string,
+    qty: number,
+    reason: StockMovement['reason'],
+    documentId?: string,
+  ): StockMovement => ({
+    id,
+    familyId: 'f1',
+    productId: 'p-riz',
+    date,
+    qty,
+    reason,
+    documentId,
+    createdAt: 0,
+    ...sync,
+  });
+  // Journal daté : 20 entrés, 5 sortis en mars, 5 en avril.
+  const stockMovements = [
+    movement('sm-initial', '2026-03-01', 0, 'initial'),
+    movement('sm-p-1', '2026-03-02', 20, 'purchase', 'p-1'),
+    movement('sm-s-1', '2026-03-10', -5, 'sale', 's-1'),
+    movement('sm-s-2', '2026-04-05', -5, 'sale', 's-2'),
+  ];
   const transactions = [
     tx({ id: 'purchase-1', date: '2026-03-02', type: 'expense', amountInPrimary: 20_000, categoryId: 'cat-autres' }),
     tx({ id: 'sale-s-1', date: '2026-03-10', type: 'income', amountInPrimary: 8_000 }),
     tx({ id: 'sale-s-2', date: '2026-04-05', type: 'income', amountInPrimary: 8_000 }),
   ];
-  const report = (from: string, to: string) =>
+  const report = (from: string, to: string, products: Product[] = [riz]) =>
     buildPeriodReport({
       businessId: 'b1',
       transactions,
       sales: [marchSale, aprilSale],
       purchases: [purchase],
-      products: [riz],
+      products,
+      stockMovements,
       advances: [],
       accounts: [account],
       from,
@@ -447,6 +488,7 @@ describe('stock — seules les marchandises vendues sont une charge', () => {
       sales: [marchSale, aprilSale],
       purchases: [purchase],
       products: [riz],
+      stockMovements,
       from: '2026-03-01',
       to: '2026-03-31',
     });
@@ -463,6 +505,16 @@ describe('stock — seules les marchandises vendues sont une charge', () => {
     expect(march).toEqual({ month: '2026-03', sales: 8_000, expenses: 5_000, result: 3_000 });
     expect(april).toEqual({ month: '2026-04', sales: 8_000, expenses: 5_000, result: 3_000 });
   });
+
+  it('le passé ne bouge plus quand le stock d’aujourd’hui change', () => {
+    // Le même journal, avec une fiche produit dont le stock actuel a été corrigé
+    // (ou lue sur un autre appareil) : la valeur de mars doit rester identique.
+    const corrected: Product = { ...riz, stockQty: 0 };
+    const march = report('2026-03-01', '2026-03-31', [corrected]);
+    expect(march.stockEnd).toBe(15_000);
+    expect(march.goodsCost).toBe(5_000);
+    expect(march.result).toBe(3_000);
+  });
 });
 
 describe('bilans — périodes vides', () => {
@@ -473,6 +525,7 @@ describe('bilans — périodes vides', () => {
       sales: [],
       purchases: [],
       products: [],
+      stockMovements: [],
       advances: [],
       accounts: [],
       from: '2026-03-01',

@@ -11,7 +11,7 @@ import { uuid } from '@/lib/id';
 import { boundPaid, buildLines, stockDeltaMap, stockMovements, taxBreakdown, tradeDue } from '@/core/trade';
 import { allocatePayment } from '@/core/payments';
 import { nextDocumentNumber, quoteCanConvert, quoteIsEditable, yearOf } from '@/core/documents';
-import { todayISO } from '@/lib/date';
+import { todayISO, toISODate } from '@/lib/date';
 import { firstRecurringDue } from '@/lib/recurrence';
 import type {
   Budget,
@@ -33,6 +33,8 @@ import type {
   RecurringRule,
   SavingsGoal,
   Settlement,
+  StockMovement,
+  StockMovementReason,
   SyncFields,
   Transaction,
   TransactionType,
@@ -60,7 +62,8 @@ type SyncedEntity =
   | 'party'
   | 'advance'
   | 'settlement'
-  | 'quote';
+  | 'quote'
+  | 'stockMovement';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
   const table = (() => {
@@ -97,6 +100,8 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.settlements;
       case 'quote':
         return db.quotes;
+      case 'stockMovement':
+        return db.stockMovements;
     }
   })();
   const row = await table.get(id);
@@ -652,10 +657,51 @@ export async function createProduct(input: ProductInput): Promise<string> {
   };
   await db.products.put(product);
   await enqueue('product', product.id, 'upsert', recordOf(product));
+  if (product.stockQty !== 0) {
+    await recordStockMovement(product, product.stockQty, { date: todayISO(), reason: 'initial' });
+  }
   return product.id;
 }
 
-export async function updateProduct(id: string, patch: Partial<ProductInput>): Promise<void> {
+/** Origine d'un mouvement : sa date et sa raison, posées par l'appelant. */
+export interface StockMovementMeta {
+  date: string;
+  reason: StockMovementReason;
+  documentId?: string;
+}
+
+/**
+ * Écrit un mouvement de stock daté et le met en file de synchronisation. C'est
+ * ce journal, et non une reconstitution, qui donne la quantité d'une date
+ * passée.
+ */
+async function recordStockMovement(product: Product, qty: number, meta: StockMovementMeta): Promise<void> {
+  if (!Number.isFinite(qty) || qty === 0) return;
+  const movement: StockMovement = {
+    id: uuid(),
+    familyId: product.familyId,
+    productId: product.id,
+    date: meta.date,
+    qty,
+    reason: meta.reason,
+    documentId: meta.documentId,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db.stockMovements.put(movement);
+  await enqueue('stockMovement', movement.id, 'upsert', recordOf(movement));
+}
+
+/**
+ * Écrit la fiche produit et, si la quantité change, le mouvement correspondant.
+ * Un mouvement venu d'un document passe sa propre date ; une correction à la
+ * main est datée du jour et compte comme un inventaire.
+ */
+async function saveProduct(
+  id: string,
+  patch: Partial<ProductInput>,
+  meta: StockMovementMeta | null = { date: todayISO(), reason: 'inventory' },
+): Promise<void> {
   const base = await baseSnapshotOf('product', id);
   const current = await db.products.get(id);
   if (!current) throw new Error('not-found');
@@ -668,6 +714,11 @@ export async function updateProduct(id: string, patch: Partial<ProductInput>): P
   };
   await db.products.put(updated);
   await enqueueUpsert('product', id, recordOf(updated), current.rev, base);
+  if (meta) await recordStockMovement(updated, updated.stockQty - current.stockQty, meta);
+}
+
+export async function updateProduct(id: string, patch: Partial<ProductInput>): Promise<void> {
+  await saveProduct(id, patch);
 }
 
 /**
@@ -675,15 +726,97 @@ export async function updateProduct(id: string, patch: Partial<ProductInput>): P
  * une vente ne peut pas rendre la quantité négative (donnée de départ fausse
  * plutôt qu'un stock impossible à afficher).
  */
-export async function adjustProductStock(id: string, delta: number): Promise<void> {
+export async function adjustProductStock(
+  id: string,
+  delta: number,
+  meta: StockMovementMeta = { date: todayISO(), reason: 'inventory' },
+): Promise<void> {
   const current = await db.products.get(id);
   if (!current) return;
-  await updateProduct(id, { stockQty: Math.max(0, current.stockQty + delta) });
+  await saveProduct(id, { stockQty: Math.max(0, current.stockQty + delta) }, meta);
+}
+
+/** Clé du repère « journal de stock repris depuis les documents existants ». */
+const STOCK_LEDGER_KEY = 'stock-ledger-v1';
+
+/**
+ * Reprend une fois l'existant : le journal daté du stock est fabriqué à partir
+ * des ventes et achats déjà saisis, plus une quantité de départ datée de la
+ * création de chaque marchandise. Ids déterministes, donc rejouable sans
+ * doublon ; une fois posé, le journal n'est plus jamais reconstitué.
+ */
+export async function ensureStockLedger(): Promise<void> {
+  if (await db.meta.get(STOCK_LEDGER_KEY)) return;
+  const [products, sales, purchases] = await Promise.all([
+    db.products.toArray(),
+    db.sales.toArray(),
+    db.purchases.toArray(),
+  ]);
+
+  const seed = async (
+    product: Product,
+    entry: { id: string; date: string; qty: number; reason: StockMovementReason; documentId?: string },
+  ) => {
+    if (!Number.isFinite(entry.qty) || entry.qty === 0) return;
+    const movement: StockMovement = {
+      id: entry.id,
+      familyId: product.familyId,
+      productId: product.id,
+      date: entry.date,
+      qty: entry.qty,
+      reason: entry.reason,
+      documentId: entry.documentId,
+      createdAt: Date.now(),
+      ...newSyncFields(),
+    };
+    await db.stockMovements.put(movement);
+    await enqueue('stockMovement', movement.id, 'upsert', recordOf(movement));
+  };
+
+  for (const product of products) {
+    const entries: { doc: TradeDocument; lineId: string; qty: number; reason: StockMovementReason }[] = [];
+    for (const doc of sales) {
+      for (const line of doc.lines) {
+        if (line.productId !== product.id) continue;
+        entries.push({ doc, lineId: line.id, qty: -line.qty, reason: 'sale' });
+      }
+    }
+    for (const doc of purchases) {
+      for (const line of doc.lines) {
+        if (line.productId !== product.id) continue;
+        entries.push({ doc, lineId: line.id, qty: line.qty, reason: 'purchase' });
+      }
+    }
+    const fromDocuments = entries.reduce((total, entry) => total + entry.qty, 0);
+    await seed(product, {
+      id: `sm-initial-${product.id}`,
+      date: toISODate(new Date(product.createdAt)),
+      qty: product.stockQty - fromDocuments,
+      reason: 'initial',
+    });
+    for (const entry of entries) {
+      await seed(product, {
+        id: `sm-${entry.doc.id}-${entry.lineId}`,
+        date: entry.doc.date,
+        qty: entry.qty,
+        reason: entry.reason,
+        documentId: entry.doc.id,
+      });
+    }
+  }
+
+  await db.meta.put({ key: STOCK_LEDGER_KEY, value: true });
 }
 
 export async function deleteProduct(id: string): Promise<void> {
   await db.products.delete(id);
   await enqueue('product', id, 'delete', null);
+  // Un produit supprimé n'a plus de stock : son journal part avec lui.
+  const movements = await db.stockMovements.where('productId').equals(id).toArray();
+  for (const movement of movements) {
+    await db.stockMovements.delete(movement.id);
+    await enqueue('stockMovement', movement.id, 'delete', null);
+  }
 }
 
 // ----------------------------------------------------------------------------- ventes & achats
@@ -719,12 +852,34 @@ export interface TradeInput {
  * Applique un mouvement de stock, en ignorant les marchandises disparues
  * (supprimées entre-temps) : un stock absent ne doit pas bloquer la saisie.
  */
-async function applyMovements(movements: { productId: string; qty: number }[]): Promise<void> {
+async function applyMovements(
+  movements: { productId: string; qty: number }[],
+  meta: StockMovementMeta,
+): Promise<void> {
   for (const movement of stockDeltaMap(movements)) {
     const [productId, qty] = movement;
     if (qty === 0) continue;
-    await adjustProductStock(productId, qty);
+    await adjustProductStock(productId, qty, meta);
   }
+}
+
+/**
+ * Annule les mouvements d'un document (sans en créer de nouveaux) : leurs
+ * quantités reviennent au stock. Retourne ce qui a été annulé par produit.
+ */
+async function reverseDocumentMovements(documentId: string): Promise<Map<string, number>> {
+  const movements = await db.stockMovements.where('documentId').equals(documentId).toArray();
+  const reverted = new Map<string, number>();
+  for (const movement of movements) {
+    await db.stockMovements.delete(movement.id);
+    await enqueue('stockMovement', movement.id, 'delete', null);
+    const current = await db.products.get(movement.productId);
+    if (current) {
+      await saveProduct(movement.productId, { stockQty: Math.max(0, current.stockQty - movement.qty) }, null);
+    }
+    reverted.set(movement.productId, (reverted.get(movement.productId) ?? 0) + movement.qty);
+  }
+  return reverted;
 }
 
 function tradeMovements(lines: TradeLineInput[], kind: 'sale' | 'purchase'): { productId: string; qty: number }[] {
@@ -787,7 +942,11 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
     `${kind === 'sale' ? 'sale' : 'purchase'}-${id}`,
   );
 
-  await applyMovements(tradeMovements(input.lines, kind));
+  await applyMovements(tradeMovements(input.lines, kind), {
+    date: input.date,
+    reason: kind,
+    documentId: id,
+  });
   return id;
 }
 
@@ -827,13 +986,14 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
   await table.put(updated);
   await enqueueUpsert(kind, id, recordOf(updated), current.rev, base);
 
-  // Stock : on annule l'ancien mouvement puis on applique le nouveau.
-  const reverse = stockMovements(
-    current.lines.map((line) => ({ productId: line.productId, qty: line.qty, unitPrice: line.unitPrice })),
-    kind === 'sale' ? 'purchase' : 'sale',
-  );
-  await applyMovements(reverse);
-  await applyMovements(tradeMovements(input.lines, kind));
+  // Stock : les mouvements datés de l'ancienne version partent, ceux de la
+  // nouvelle arrivent, à la date (peut-être changée) du document.
+  await reverseDocumentMovements(id);
+  await applyMovements(tradeMovements(input.lines, kind), {
+    date: input.date,
+    reason: kind,
+    documentId: id,
+  });
 
   const txId = `${kind === 'sale' ? 'sale' : 'purchase'}-${id}`;
   const existingTx = await db.transactions.get(txId);
@@ -858,12 +1018,11 @@ export async function deleteTrade(kind: 'sale' | 'purchase', id: string): Promis
   const table = kind === 'sale' ? db.sales : db.purchases;
   const current = await table.get(id);
   if (!current) return;
-  const restore = current.lines.map((line) => ({ productId: line.productId, qty: line.qty, unitPrice: line.unitPrice }));
   await table.delete(id);
   await enqueue(kind, id, 'delete', null);
   const txId = `${kind === 'sale' ? 'sale' : 'purchase'}-${id}`;
   if (await db.transactions.get(txId)) await deleteTransaction(txId);
-  await applyMovements(stockMovements(restore, kind === 'sale' ? 'purchase' : 'sale'));
+  await reverseDocumentMovements(id);
 }
 
 /** Marque une opération professionnelle comme réglée (ou en attente). */

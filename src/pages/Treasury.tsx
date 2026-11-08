@@ -11,6 +11,7 @@ import {
   useRates,
   useSales,
   useSettlements,
+  useStockMovements,
   useTransactions,
 } from '@/hooks/useData';
 import { buildTreasurySnapshot, totalInPrimary } from '@/core/treasury';
@@ -57,6 +58,7 @@ export default function Treasury() {
   const purchases = usePurchases();
   const advances = useAdvances();
   const settlements = useSettlements();
+  const stockMovements = useStockMovements();
   const products = useProducts();
   const businesses = useBusinesses();
   const primary = usePrimaryCurrency() ?? 'XOF';
@@ -79,13 +81,27 @@ export default function Treasury() {
         sales: sales ?? [],
         purchases: purchases ?? [],
         products: products ?? [],
+        stockMovements: stockMovements ?? [],
         advances: advances ?? [],
         settlements: settlements ?? [],
         from: range.from,
         to: range.to,
         year: range.year,
       }),
-    [business?.id, accounts, transactions, sales, purchases, products, advances, settlements, range.from, range.to, range.year],
+    [
+      business?.id,
+      accounts,
+      transactions,
+      sales,
+      purchases,
+      products,
+      stockMovements,
+      advances,
+      settlements,
+      range.from,
+      range.to,
+      range.year,
+    ],
   );
 
   const available = snapshot ? totalInPrimary(report.lines, primary, snapshot) : report.available;
