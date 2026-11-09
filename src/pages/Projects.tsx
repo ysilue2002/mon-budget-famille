@@ -13,7 +13,7 @@ import {
   useTransactions,
 } from '@/hooks/useData';
 import { createProject, deleteProject, updateProject } from '@/core/repo';
-import { projectEntries, projectTotals, sortedProjects } from '@/core/projects';
+import { projectEntries, projectReportEntries, projectTotals, sortedProjects } from '@/core/projects';
 import { formatAmount } from '@/core/currencies';
 import { todayISO } from '@/lib/date';
 import type { Project } from '@/core/types';
@@ -83,6 +83,8 @@ export default function Projects() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<ProjectForm>(emptyForm());
   const [error, setError] = useState<string | null>(null);
+  // Chantier dont on affiche (et imprime) l'état de rentabilité.
+  const [reportId, setReportId] = useState<string | null>(null);
 
   const fmt = (minor: number) => formatAmount(minor, primary, i18n.language);
 
@@ -101,6 +103,16 @@ export default function Projects() {
   const clients = (parties ?? []).filter((party) => party.kind === 'client' && !party.archived);
   const rows = sortedProjects(projects ?? []);
   const summary = (id: string) => projectTotals(id, books);
+
+  const reportProject = reportId ? rows.find((project) => project.id === reportId) : undefined;
+  const report = useMemo(() => {
+    if (!reportProject) return null;
+    return {
+      totals: projectTotals(reportProject.id, books),
+      entries: projectReportEntries(reportProject.id, books),
+      business: (businesses ?? []).find((row) => row.id === reportProject.businessId),
+    };
+  }, [reportProject, books, businesses]);
 
   const totals = rows.reduce(
     (acc, project) => {
@@ -176,6 +188,104 @@ export default function Projects() {
         </button>
       }
     >
+      {report && reportProject && (
+        <>
+          <div className="no-print mb-3 flex flex-wrap gap-2">
+            <button type="button" className={btnPrimary} onClick={() => window.print()}>
+              🖨 {t('documents.print')}
+            </button>
+            <button type="button" className={btnGhost} onClick={() => setReportId(null)}>
+              {t('documents.close')}
+            </button>
+          </div>
+
+          <article className="print-sheet mb-4 rounded-xl border border-forest-100 bg-white p-5 shadow-sm sm:p-8">
+            <header className="mb-4 flex flex-wrap items-start justify-between gap-2 border-b border-forest-200 pb-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-sage-600">
+                  Mon Budget Famille{report.business ? ` · ${report.business.name}` : ''}
+                </p>
+                <h2 className="text-xl font-bold text-forest-950">{t('projects.reportTitle')}</h2>
+                <p className="text-sm text-forest-900">{reportProject.name}</p>
+                <p className="text-xs text-sage-600">
+                  {reportProject.partyName || t('projects.noClient')}
+                  {' · '}
+                  {reportProject.startDate}
+                  {reportProject.endDate ? ` → ${reportProject.endDate}` : ''}
+                  {' · '}
+                  {reportProject.status === 'done' ? t('projects.statusDone') : t('projects.statusOpen')}
+                </p>
+              </div>
+              <div className="text-right text-xs text-sage-600">
+                <p>{primary}</p>
+                <p>{t('projects.generatedAt', { date: todayISO() })}</p>
+              </div>
+            </header>
+
+            <h3 className="mb-2 text-sm font-semibold text-forest-900">
+              {t('projects.entries', { count: report.entries.length })}
+            </h3>
+            {report.entries.length === 0 ? (
+              <p className="text-sm text-sage-600">{t('projects.noEntries')}</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-forest-200 whitespace-nowrap text-left text-[11px] uppercase text-sage-600">
+                    <th className="py-1.5 pe-2">{t('common.date')}</th>
+                    <th className="py-1.5 pe-2">{t('projects.type')}</th>
+                    <th className="py-1.5 pe-2">{t('projects.document')}</th>
+                    <th className="py-1.5 pe-2 text-right">{t('projects.amount')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.entries.map((entry) => (
+                    <tr key={`${entry.kind}-${entry.id}`} className="border-b border-forest-50">
+                      <td className="py-1.5 pe-2 whitespace-nowrap">{entry.date}</td>
+                      <td className="py-1.5 pe-2">{t(`projects.kinds.${entry.kind}`)}</td>
+                      <td className="py-1.5 pe-2">{entry.label || '—'}</td>
+                      <td className="py-1.5 pe-2 text-right font-semibold">{fmt(entry.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div className="mt-4 grid gap-2 border-t border-forest-200 pt-3 text-sm sm:grid-cols-2">
+              <div>
+                <p className="font-semibold text-forest-900">
+                  {t('projects.sales')} : {fmt(report.totals.salesHt)}
+                </p>
+                <p className="text-xs text-sage-600">
+                  {t('projects.salesSplit', {
+                    labor: fmt(report.totals.laborHt),
+                    supplies: fmt(report.totals.suppliesHt),
+                  })}
+                </p>
+                <p className="mt-1 font-semibold text-forest-900">
+                  {t('projects.purchases')} : {fmt(report.totals.purchasesHt)}
+                </p>
+                <p className="mt-1 font-semibold text-forest-900">
+                  {t('projects.expenses')} : {fmt(report.totals.expenses)}
+                </p>
+              </div>
+              <div>
+                <p className="font-bold text-forest-950">
+                  {t('projects.margin')} : {fmt(report.totals.margin)}
+                </p>
+                <p className="mt-1 text-forest-900">
+                  {t('projects.advancesReceived')} : {fmt(report.totals.advancesReceived)}
+                </p>
+                <p className="mt-1 text-forest-900">
+                  {t('projects.due')} : {fmt(report.totals.due)}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 border-t border-forest-100 pt-2 text-[11px] text-sage-500">{t('projects.reportHint')}</p>
+          </article>
+        </>
+      )}
+
+      <div className={report ? 'no-print' : undefined}>
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <StatCard
           label={t('projects.openCount')}
@@ -219,6 +329,16 @@ export default function Projects() {
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="rounded px-2 py-1 text-xs font-medium text-forest-800 hover:bg-forest-50"
+                      onClick={() => {
+                        setReportId(project.id);
+                        window.scrollTo({ top: 0 });
+                      }}
+                    >
+                      🖨 {t('projects.report')}
+                    </button>
                     <button
                       type="button"
                       className="rounded p-1 text-sm hover:bg-forest-50"
@@ -270,6 +390,8 @@ export default function Projects() {
                   {([
                     ['sales', '🛒'],
                     ['purchases', '📥'],
+                    ['quotes', '📝'],
+                    ['invoices', '📄'],
                     ['expenses', '🧾'],
                   ] as const).map(([route, icon]) => (
                     <Link
@@ -312,6 +434,7 @@ export default function Projects() {
       )}
 
       <p className="mt-3 text-xs text-sage-500">{t('projects.hint')}</p>
+      </div>
 
       <Modal title={form.id ? t('common.edit') : t('projects.new')} open={open} onClose={() => setOpen(false)}>
         <form

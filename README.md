@@ -172,8 +172,11 @@ peut aussi être archivée sans perdre son historique.
   affichent une colonne « Chantier » et un filtre qui restreint la liste et ses
   totaux au chantier choisi (`ProjectFilter`). Le filtre vit dans l'adresse
   (`?chantier=<id>`), donc la fiche d'un chantier ouvre directement ses ventes,
-  ses achats et ses dépenses, et un rechargement garde le filtre. Le profil de
-  l'activité reste à un clic depuis l'accueil : le menu garde treize entrées.
+  ses achats, ses devis, ses factures et ses dépenses, et un rechargement garde
+  le filtre. Le bouton « État » de la fiche affiche un état de rentabilité
+  imprimable (`print-sheet`) : la liste détaillée de ses documents hors taxe,
+  puis ventes, achats, dépenses, marge, acomptes et reste à encaisser. Le profil
+  de l'activité reste à un clic depuis l'accueil : le menu garde treize entrées.
 - La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.
   `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
   TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle

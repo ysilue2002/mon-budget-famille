@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectEntries, projectTotals, sortedProjects } from '@/core/projects';
+import { projectEntries, projectReportEntries, projectTotals, sortedProjects } from '@/core/projects';
 import type {
   Advance,
   Product,
@@ -189,6 +189,26 @@ describe('projectEntries', () => {
     const entries = projectEntries('p1', books);
     expect(entries.map((entry) => entry.kind)).toEqual(['expense', 'sale', 'purchase', 'advance']);
     expect(entries.map((entry) => entry.amount)).toEqual([250, 1000, 500, 300]);
+  });
+});
+
+describe('projectReportEntries', () => {
+  it('affiche le numéro du document et son montant hors taxe', () => {
+    const books = {
+      products: [product('ciment', 'goods'), product('main', 'service')],
+      sales: [document_('s1', 'sale', 'p1', [[1, 1000]], 1180)],
+      purchases: [document_('a1', 'purchase', 'p1', [[1, 500]], 590)],
+      transactions: [expense('t1', 'p1', 250)],
+      advances: [advance('av1', 'p1', 300, 'open')],
+    };
+    books.sales[0] = { ...books.sales[0], number: 'FAC-2026-0007', partyName: 'Diallo' };
+    const entries = projectReportEntries('p1', books);
+    const sale = entries.find((entry) => entry.kind === 'sale');
+    const purchase = entries.find((entry) => entry.kind === 'purchase');
+    expect(sale?.amount).toBe(1000);
+    expect(sale?.label).toBe('FAC-2026-0007 · Diallo');
+    expect(purchase?.amount).toBe(500);
+    expect(entries.find((entry) => entry.kind === 'expense')?.amount).toBe(250);
   });
 });
 

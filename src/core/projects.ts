@@ -163,6 +163,26 @@ export function projectEntries(projectId: string, books: ProjectBooks): ProjectE
   return entries.sort((a, b) => b.date.localeCompare(a.date));
 }
 
+/**
+ * Détail d'un chantier pour l'état imprimé : mêmes lignes que `projectEntries`,
+ * mais les ventes et les achats y portent leur montant hors taxe (celui des
+ * totaux) et leur numéro, pour retrouver le document papier.
+ */
+export function projectReportEntries(projectId: string, books: ProjectBooks): ProjectEntry[] {
+  const documents = new Map<string, TradeDocument>();
+  for (const document of [...books.sales, ...books.purchases]) documents.set(document.id, document);
+
+  return projectEntries(projectId, books).map((entry) => {
+    const document = documents.get(entry.id);
+    if (!document) return entry;
+    return {
+      ...entry,
+      amount: documentSubtotal(document),
+      label: [document.number, document.partyName].filter(Boolean).join(' · '),
+    };
+  });
+}
+
 /** Chantiers ouverts d'abord, puis les plus récents. */
 export function sortedProjects(projects: Project[]): Project[] {
   return [...projects].sort(
