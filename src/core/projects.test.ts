@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { projectEntries, projectReportEntries, projectTotals, sortedProjects } from '@/core/projects';
+import {
+  projectEntries,
+  projectReceivedAdvances,
+  projectReportEntries,
+  projectSales,
+  projectTotals,
+  sortedProjects,
+} from '@/core/projects';
 import type {
   Advance,
   Product,
@@ -220,5 +227,72 @@ describe('sortedProjects', () => {
       project('archive', { archived: true, startDate: '2026-06-01' }),
     ];
     expect(sortedProjects(rows).map((row) => row.id)).toEqual(['recent', 'vieux-fini', 'archive']);
+  });
+});
+
+describe('période des états', () => {
+  const books = {
+    products: [product('ciment', 'goods')],
+    sales: [
+      { ...document_('s1', 'sale', 'p1', [[1, 1000]], 1000, 400), date: '2026-02-10', number: 'FAC-1' },
+      { ...document_('s2', 'sale', 'p1', [[1, 2000]], 2000, 0), date: '2026-03-10', number: 'FAC-2' },
+    ],
+    purchases: [{ ...document_('a1', 'purchase', 'p1', [[1, 300]]), date: '2026-02-11' }],
+    transactions: [
+      { ...expense('t1', 'p1', 100), date: '2026-02-12' },
+      { ...expense('t2', 'p1', 900), date: '2026-03-12' },
+    ],
+    advances: [
+      { ...advance('av1', 'p1', 500, 'open'), receivedOn: '2026-02-15' },
+      { ...advance('av2', 'p1', 700, 'open'), receivedOn: '2026-03-15' },
+      { ...advance('av3', 'p1', 800, 'refunded'), receivedOn: '2026-02-16' },
+    ],
+  };
+  const february = { from: '2026-02-01', to: '2026-02-28' };
+
+  it('ne retient que les documents de la période demandée', () => {
+    const totals = projectTotals('p1', books, february);
+    expect(totals.salesHt).toBe(1000);
+    expect(totals.purchasesHt).toBe(300);
+    expect(totals.expenses).toBe(100);
+    expect(totals.advancesReceived).toBe(500);
+    expect(totals.due).toBe(400);
+    expect(totals.margin).toBe(600);
+    expect(totals.salesCount).toBe(1);
+  });
+
+  it('garde tous les documents sans période', () => {
+    const totals = projectTotals('p1', books);
+    expect(totals.salesHt).toBe(3000);
+    expect(totals.expenses).toBe(1000);
+    expect(totals.advancesReceived).toBe(1200);
+    expect(totals.due).toBe(400);
+  });
+
+  it('filtre aussi le journal imprimé', () => {
+    const entries = projectReportEntries('p1', books, february);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'advance',
+      'advance',
+      'expense',
+      'purchase',
+      'sale',
+    ]);
+    expect(projectEntries('p1', books)).toHaveLength(8);
+  });
+
+  it('liste les ventes avec ce qui est facturé, reçu et dû', () => {
+    const sales = projectSales('p1', books);
+    expect(sales.map((sale) => sale.label)).toEqual(['FAC-2', 'FAC-1']);
+    expect(sales.map((sale) => [sale.total, sale.paid, sale.due])).toEqual([
+      [2000, 2000, 0],
+      [1000, 600, 400],
+    ]);
+    expect(projectSales('p1', books, february).map((sale) => sale.id)).toEqual(['s1']);
+  });
+
+  it('liste les acomptes reçus de la période, sans les remboursés', () => {
+    expect(projectReceivedAdvances('p1', books).map((line) => line.amount)).toEqual([700, 500]);
+    expect(projectReceivedAdvances('p1', books, february).map((line) => line.amount)).toEqual([500]);
   });
 });

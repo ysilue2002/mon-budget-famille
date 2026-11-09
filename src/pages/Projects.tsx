@@ -13,7 +13,15 @@ import {
   useTransactions,
 } from '@/hooks/useData';
 import { createProject, deleteProject, updateProject } from '@/core/repo';
-import { projectEntries, projectReportEntries, projectTotals, sortedProjects } from '@/core/projects';
+import {
+  projectEntries,
+  projectReceivedAdvances,
+  projectReportEntries,
+  projectSales,
+  projectTotals,
+  sortedProjects,
+} from '@/core/projects';
+import { anchorFor, periodRange, shiftAnchor, type PeriodKind } from '@/core/reports';
 import { formatAmount } from '@/core/currencies';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage } from '@/core/pdf';
 import { todayISO } from '@/lib/date';
@@ -64,6 +72,14 @@ const ENTRY_ICONS: Record<'sale' | 'purchase' | 'expense' | 'advance', string> =
   advance: '💵',
 };
 
+/** Libellé lisible d'un mois ou d'une année, dans la langue de l'utilisateur. */
+function periodText(kind: PeriodKind, anchor: string, from: string, language: string): string {
+  if (kind === 'year') return anchor;
+  const locale = language.startsWith('ar') ? 'ar' : language.startsWith('fr') ? 'fr-FR' : 'en-US';
+  const date = new Date(Number(from.slice(0, 4)), Number(from.slice(5, 7)) - 1, 1);
+  return date.toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+}
+
 /**
  * Chantiers : chaque travail (maison, toiture, réparation, commande) regroupe
  * ses ventes, ses achats, ses dépenses et ses acomptes pour dire s'il est
@@ -86,6 +102,9 @@ export default function Projects() {
   const [error, setError] = useState<string | null>(null);
   // État de rentabilité affiché : un chantier (`id`) ou tous ceux en cours.
   const [reportScope, setReportScope] = useState<'all' | string | null>(null);
+  // Période de l'état global : tous les documents, un mois ou une année.
+  const [globalKind, setGlobalKind] = useState<'all' | PeriodKind>('all');
+  const [globalAnchor, setGlobalAnchor] = useState(() => anchorFor('month', todayISO()));
   const [notice, setNotice] = useState<string | null>(null);
   const lang = i18n.language;
 
@@ -114,13 +133,24 @@ export default function Projects() {
     return {
       totals: projectTotals(reportProject.id, books),
       entries: projectReportEntries(reportProject.id, books),
+      sales: projectSales(reportProject.id, books),
+      advances: projectReceivedAdvances(reportProject.id, books),
       business: (businesses ?? []).find((row) => row.id === reportProject.businessId),
     };
   }, [reportProject, books, businesses]);
 
+  const globalRange = globalKind === 'all' ? null : periodRange(globalKind, globalAnchor);
+  const globalPeriodLabel =
+    globalRange && globalKind !== 'all'
+      ? periodText(globalKind, globalAnchor, globalRange.from, lang)
+      : t('projects.periodAll');
+
   const showAll = reportScope === 'all';
   const running = rows.filter((project) => !project.archived && project.status === 'open');
-  const runningLines = running.map((project) => ({ project, totals: projectTotals(project.id, books) }));
+  const runningLines = running.map((project) => ({
+    project,
+    totals: projectTotals(project.id, books, globalRange),
+  }));
   const runningTotals = runningLines.reduce(
     (acc, line) => ({
       salesHt: acc.salesHt + line.totals.salesHt,
@@ -139,9 +169,12 @@ export default function Projects() {
       return;
     }
     downloadPdf({
-      fileName: pdfFileName('etat-chantiers', todayISO()),
+      fileName: pdfFileName(
+        'etat-chantiers',
+        globalKind === 'all' ? todayISO() : `${globalKind}-${globalAnchor}`,
+      ),
       title: t('projects.reportAllTitle'),
-      meta: [],
+      meta: [[t('common.period'), globalPeriodLabel]],
       head: [
         t('projects.choose'),
         t('projects.clientLabel'),
@@ -324,6 +357,59 @@ export default function Projects() {
           >
             {t('documents.close')}
           </button>
+          {showAll && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                className="flex overflow-hidden rounded-lg border border-forest-200"
+                role="group"
+                aria-label={t('common.period')}
+              >
+                {(['all', 'month', 'year'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setGlobalKind(value);
+                      if (value !== 'all') setGlobalAnchor(anchorFor(value, todayISO()));
+                    }}
+                    aria-pressed={globalKind === value}
+                    className={`px-3 py-2 text-sm font-medium ${
+                      globalKind === value
+                        ? 'bg-forest-600 text-white'
+                        : 'bg-white text-forest-800 hover:bg-forest-50'
+                    }`}
+                  >
+                    {value === 'all'
+                      ? t('common.all')
+                      : t(`balances.kind.${value}`)}
+                  </button>
+                ))}
+              </div>
+              {globalKind !== 'all' && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className={btnGhost}
+                    onClick={() => setGlobalAnchor(shiftAnchor(globalKind, globalAnchor, -1))}
+                    aria-label={t('balances.previousPeriod')}
+                  >
+                    ←
+                  </button>
+                  <span className="min-w-[8rem] text-center text-sm font-semibold text-forest-950">
+                    {globalPeriodLabel}
+                  </span>
+                  <button
+                    type="button"
+                    className={btnGhost}
+                    onClick={() => setGlobalAnchor(shiftAnchor(globalKind, globalAnchor, 1))}
+                    aria-label={t('balances.nextPeriod')}
+                  >
+                    →
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       {notice && <p className="no-print mb-3 max-w-2xl text-xs text-sage-600">{notice}</p>}
@@ -411,6 +497,69 @@ export default function Projects() {
                 </p>
               </div>
             </div>
+
+            {report.sales.length > 0 && (
+              <section className="mt-4 border-t border-forest-200 pt-3">
+                <h3 className="mb-1 text-sm font-semibold text-forest-900">
+                  {t('projects.salesDue', { count: report.sales.length })}
+                </h3>
+                <ul className="divide-y divide-forest-50 text-sm">
+                  {report.sales.map((sale) => (
+                    <li key={sale.id} className="py-1.5">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <p className="min-w-0 truncate text-forest-900">
+                          {sale.label || t('projects.kinds.sale')}
+                        </p>
+                        <p
+                          className={`shrink-0 font-semibold ${
+                            sale.due > 0 ? 'text-forest-950' : 'text-sage-500'
+                          }`}
+                        >
+                          {fmt(sale.due)}
+                        </p>
+                      </div>
+                      <p className="text-[11px] text-sage-500">
+                        {sale.date} · {t('trade.total')} {fmt(sale.total)} · {t('trade.paid')}{' '}
+                        {fmt(sale.paid)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs font-semibold text-forest-950">
+                  {t('projects.due')} : {fmt(report.totals.due)}
+                </p>
+              </section>
+            )}
+
+            {report.advances.length > 0 && (
+              <section className="mt-4 border-t border-forest-200 pt-3">
+                <h3 className="mb-1 text-sm font-semibold text-forest-900">
+                  {t('projects.advancesList', { count: report.advances.length })}
+                </h3>
+                <ul className="divide-y divide-forest-50 text-sm">
+                  {report.advances.map((advanceReceived) => (
+                    <li
+                      key={advanceReceived.id}
+                      className="flex items-baseline justify-between gap-3 py-1.5"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-forest-900">
+                          {advanceReceived.label || t('projects.kinds.advance')}
+                        </span>
+                        <span className="block text-[11px] text-sage-500">{advanceReceived.date}</span>
+                      </span>
+                      <span className="shrink-0 font-semibold text-forest-900">
+                        {fmt(advanceReceived.amount)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs font-semibold text-forest-950">
+                  {t('projects.advancesReceived')} : {fmt(report.totals.advancesReceived)}
+                </p>
+              </section>
+            )}
+
             <p className="mt-3 border-t border-forest-100 pt-2 text-[11px] text-sage-500">{t('projects.reportHint')}</p>
           </article>
         </>
@@ -427,6 +576,9 @@ export default function Projects() {
             <div className="text-right text-xs text-sage-600">
               <p>{primary}</p>
               <p>{t('projects.generatedAt', { date: todayISO() })}</p>
+              <p className="font-semibold text-forest-900">
+                {t('common.period')} : {globalPeriodLabel}
+              </p>
             </div>
           </header>
 

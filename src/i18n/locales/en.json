@@ -649,6 +649,9 @@
     "reportAll": "All projects",
     "reportAllTitle": "Projects in progress",
     "reportAllHint": "Comparison of projects in progress: sales, purchases, expenses, margin and still to collect.",
+    "periodAll": "All documents",
+    "salesDue": "Still to collect per sale ({{count}})",
+    "advancesList": "Advances received ({{count}})",
     "clientLabel": "Client",
     "total": "Total",
     "kinds": {

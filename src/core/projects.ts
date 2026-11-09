@@ -10,6 +10,17 @@ import type { Advance, Product, Project, TradeDocument, Transaction } from '@/co
  * montant saisi pour les dépenses.
  */
 
+/** Bornes de dates (incluses) pour restreindre un état à une période. */
+export interface ProjectRange {
+  from: string;
+  to: string;
+}
+
+function inRange(date: string, range?: ProjectRange | null): boolean {
+  if (!range) return true;
+  return date >= range.from && date <= range.to;
+}
+
 export interface ProjectBooks {
   sales: TradeDocument[];
   purchases: TradeDocument[];
@@ -59,25 +70,29 @@ export function documentSubtotal(document: TradeDocument): number {
  * Totaux d'un chantier. Les documents d'un autre chantier, ou sans chantier,
  * sont ignorés.
  */
-export function projectTotals(projectId: string, books: ProjectBooks): ProjectTotals {
+export function projectTotals(
+  projectId: string,
+  books: ProjectBooks,
+  range?: ProjectRange | null,
+): ProjectTotals {
   const serviceIds = new Set(
     books.products.filter((product) => isService(product)).map((product) => product.id),
   );
 
-  const sales = books.sales.filter((document) => document.projectId === projectId);
-  const purchases = books.purchases.filter((document) => document.projectId === projectId);
+  const sales = books.sales.filter(
+    (document) => document.projectId === projectId && inRange(document.date, range),
+  );
+  const purchases = books.purchases.filter(
+    (document) => document.projectId === projectId && inRange(document.date, range),
+  );
   const expenses = books.transactions.filter(
     (transaction) =>
       transaction.projectId === projectId &&
       transaction.type === 'expense' &&
-      !isDocumentTransaction(transaction),
+      !isDocumentTransaction(transaction) &&
+      inRange(transaction.date, range),
   );
-  const advances = books.advances.filter(
-    (advance) =>
-      advance.projectId === projectId &&
-      (advance.direction ?? 'received') === 'received' &&
-      advance.status !== 'refunded',
-  );
+  const advances = receivedAdvances(projectId, books, range);
 
   let laborHt = 0;
   let salesHt = 0;
@@ -107,6 +122,24 @@ export function projectTotals(projectId: string, books: ProjectBooks): ProjectTo
   };
 }
 
+/**
+ * Acomptes réellement reçus du client pour un chantier (les acomptes versés à un
+ * fournisseur et les acomptes remboursés sont écartés).
+ */
+function receivedAdvances(
+  projectId: string,
+  books: ProjectBooks,
+  range?: ProjectRange | null,
+): Advance[] {
+  return books.advances.filter(
+    (advance) =>
+      advance.projectId === projectId &&
+      (advance.direction ?? 'received') === 'received' &&
+      advance.status !== 'refunded' &&
+      inRange(advance.receivedOn, range),
+  );
+}
+
 /** Ligne de détail affichée sous un chantier (document, dépense ou acompte). */
 export interface ProjectEntry {
   id: string;
@@ -117,10 +150,14 @@ export interface ProjectEntry {
 }
 
 /** Tout ce qui est rattaché à un chantier, du plus récent au plus ancien. */
-export function projectEntries(projectId: string, books: ProjectBooks): ProjectEntry[] {
+export function projectEntries(
+  projectId: string,
+  books: ProjectBooks,
+  range?: ProjectRange | null,
+): ProjectEntry[] {
   const entries: ProjectEntry[] = [];
   for (const document of books.sales) {
-    if (document.projectId !== projectId) continue;
+    if (document.projectId !== projectId || !inRange(document.date, range)) continue;
     entries.push({
       id: document.id,
       kind: 'sale',
@@ -130,7 +167,7 @@ export function projectEntries(projectId: string, books: ProjectBooks): ProjectE
     });
   }
   for (const document of books.purchases) {
-    if (document.projectId !== projectId) continue;
+    if (document.projectId !== projectId || !inRange(document.date, range)) continue;
     entries.push({
       id: document.id,
       kind: 'purchase',
@@ -142,6 +179,7 @@ export function projectEntries(projectId: string, books: ProjectBooks): ProjectE
   for (const transaction of books.transactions) {
     if (transaction.projectId !== projectId || transaction.type !== 'expense') continue;
     if (isDocumentTransaction(transaction)) continue;
+    if (!inRange(transaction.date, range)) continue;
     entries.push({
       id: transaction.id,
       kind: 'expense',
@@ -151,7 +189,7 @@ export function projectEntries(projectId: string, books: ProjectBooks): ProjectE
     });
   }
   for (const advance of books.advances) {
-    if (advance.projectId !== projectId) continue;
+    if (advance.projectId !== projectId || !inRange(advance.receivedOn, range)) continue;
     entries.push({
       id: advance.id,
       kind: 'advance',
@@ -168,11 +206,15 @@ export function projectEntries(projectId: string, books: ProjectBooks): ProjectE
  * mais les ventes et les achats y portent leur montant hors taxe (celui des
  * totaux) et leur numéro, pour retrouver le document papier.
  */
-export function projectReportEntries(projectId: string, books: ProjectBooks): ProjectEntry[] {
+export function projectReportEntries(
+  projectId: string,
+  books: ProjectBooks,
+  range?: ProjectRange | null,
+): ProjectEntry[] {
   const documents = new Map<string, TradeDocument>();
   for (const document of [...books.sales, ...books.purchases]) documents.set(document.id, document);
 
-  return projectEntries(projectId, books).map((entry) => {
+  return projectEntries(projectId, books, range).map((entry) => {
     const document = documents.get(entry.id);
     if (!document) return entry;
     return {
@@ -181,6 +223,56 @@ export function projectReportEntries(projectId: string, books: ProjectBooks): Pr
       label: [document.number, document.partyName].filter(Boolean).join(' · '),
     };
   });
+}
+
+/** Vente d'un chantier avec ce qui a été facturé, reçu et ce qui reste à encaisser. */
+export interface ProjectSaleLine {
+  id: string;
+  date: string;
+  /** Numéro du document et client, quand ils existent. */
+  label: string;
+  /** Montant facturé (TTC, tel que compté par la trésorerie). */
+  total: number;
+  /** Montant déjà encaissé. */
+  paid: number;
+  /** Reste à encaisser sur cette vente. */
+  due: number;
+}
+
+/** Ventes d'un chantier, la plus récente d'abord, avec leur reste à encaisser. */
+export function projectSales(
+  projectId: string,
+  books: ProjectBooks,
+  range?: ProjectRange | null,
+): ProjectSaleLine[] {
+  return books.sales
+    .filter((document) => document.projectId === projectId && inRange(document.date, range))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map((document) => ({
+      id: document.id,
+      date: document.date,
+      label: [document.number, document.partyName].filter(Boolean).join(' · '),
+      total: document.total,
+      paid: document.paid,
+      due: document.due,
+    }));
+}
+
+/** Acomptes reçus pour un chantier, du plus récent au plus ancien. */
+export function projectReceivedAdvances(
+  projectId: string,
+  books: ProjectBooks,
+  range?: ProjectRange | null,
+): ProjectEntry[] {
+  return receivedAdvances(projectId, books, range)
+    .map((advance) => ({
+      id: advance.id,
+      kind: 'advance' as const,
+      date: advance.receivedOn,
+      label: advance.subject,
+      amount: advance.amount,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /** Chantiers ouverts d'abord, puis les plus récents. */
