@@ -449,7 +449,9 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                         <option value="">{t('trade.freeLine')}</option>
                         {activeProducts.map((product) => (
                           <option key={product.id} value={product.id}>
-                            {product.name} ({product.stockQty} {product.unit})
+                            {product.kind === 'service'
+                              ? `${product.name} (${product.unit})`
+                              : `${product.name} (${product.stockQty} ${product.unit})`}
                           </option>
                         ))}
                       </select>

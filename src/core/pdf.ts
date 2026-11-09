@@ -24,6 +24,8 @@ export interface PdfInput {
   body?: (string | number)[][];
   /** Totaux affichés sous le tableau. */
   totals?: [string, string][];
+  /** Second tableau, sous le premier (journal détaillé d'un état). */
+  extra?: { title: string; head: string[]; body: (string | number)[][] };
   footer?: string;
   /** Numéro affiché en pied de page. */
   reference?: string;
@@ -136,6 +138,23 @@ export function downloadPdf(input: PdfInput): void {
       margin: { left: width / 2, right: margin },
     });
     y = ((doc as unknown as WithAutoTable).lastAutoTable?.finalY ?? y) + 18;
+  }
+
+  if (input.extra && input.extra.body.length > 0) {
+    doc.setFontSize(12);
+    doc.setTextColor(20, 40, 25);
+    doc.text(input.extra.title, margin, y + 4);
+    y += 10;
+    autoTable(doc, {
+      startY: y,
+      head: [input.extra.head],
+      body: input.extra.body,
+      theme: 'striped',
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [20, 83, 45], textColor: 255 },
+      margin: { left: margin, right: margin },
+    });
+    y = ((doc as unknown as WithAutoTable).lastAutoTable?.finalY ?? y) + 14;
   }
 
   const pages = doc.getNumberOfPages();

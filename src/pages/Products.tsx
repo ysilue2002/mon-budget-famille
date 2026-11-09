@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { usePrimaryCurrency, useProducts, useStockMovements } from '@/hooks/useData';
 import { createProduct, deleteProduct, updateProduct } from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
-import { isLowStock, lowStockProducts, stockValue, totalUnits } from '@/core/stock';
+import { isLowStock, lowStockProducts, stockValue, totalUnits, isService } from '@/core/stock';
 import { todayISO } from '@/lib/date';
-import type { Product } from '@/core/types';
+import type { Product, ProductKind } from '@/core/types';
 import {
   Card,
   ConfirmButton,
@@ -14,6 +14,7 @@ import {
   Modal,
   MoneyInput,
   Page,
+  SelectInput,
   StatCard,
   Tag,
   TextInput,
@@ -23,6 +24,7 @@ import {
 
 interface ProductForm {
   id?: string;
+  kind: ProductKind;
   name: string;
   unit: string;
   buyPrice: number;
@@ -32,6 +34,7 @@ interface ProductForm {
 }
 
 const EMPTY_FORM: ProductForm = {
+  kind: 'goods',
   name: '',
   unit: 'pcs',
   buyPrice: 0,
@@ -46,8 +49,10 @@ function parseQty(value: string): number {
 }
 
 /**
- * Marchandises et stock : produits, quantités, prix d'achat et de vente,
- * valeur du stock, alertes de réapprovisionnement et état imprimable.
+ * Articles et prestations : biens stockés (marchandises, matières premières,
+ * pièces détachées) et prestations facturées sans stock (main d'œuvre, pose,
+ * réparation, location). Prix d'achat et de vente, valeur du stock, alertes de
+ * réapprovisionnement et journal daté des mouvements.
  * Les prix sont saisis dans la devise du foyer (sous-unités en base).
  */
 export default function Products() {
@@ -72,7 +77,7 @@ export default function Products() {
   const fmt = (minor: number) => formatAmount(minor, primary, i18n.language);
 
   const openCreate = () => {
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM });
     setError(null);
     setOpen(true);
   };
@@ -80,6 +85,7 @@ export default function Products() {
   const openEdit = (product: Product) => {
     setForm({
       id: product.id,
+      kind: product.kind ?? 'goods',
       name: product.name,
       unit: product.unit,
       buyPrice: product.buyPrice,
@@ -98,11 +104,12 @@ export default function Products() {
     }
     const input = {
       name: form.name,
+      kind: form.kind,
       unit: form.unit,
       buyPrice: form.buyPrice,
       sellPrice: form.sellPrice,
-      stockQty: parseQty(form.stockQty),
-      alertQty: parseQty(form.alertQty),
+      stockQty: form.kind === 'service' ? 0 : parseQty(form.stockQty),
+      alertQty: form.kind === 'service' ? 0 : parseQty(form.alertQty),
     };
     if (form.id) await updateProduct(form.id, input);
     else await createProduct(input);
@@ -187,6 +194,7 @@ export default function Products() {
                       <td className="py-1.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-forest-950">{product.name}</span>
+                          {isService(product) && <Tag tone="sage">{t('products.kind.service')}</Tag>}
                           {isLowStock(product) && (
                             <Tag tone="amber">
                               {product.stockQty <= 0 ? t('products.outOfStock') : t('products.lowStock')}
@@ -195,11 +203,13 @@ export default function Products() {
                         </div>
                         <span className="text-xs text-sage-500">{product.unit}</span>
                       </td>
-                      <td className="py-1.5 text-right font-medium">{formatQty(product.stockQty)}</td>
+                      <td className="py-1.5 text-right font-medium">
+                        {isService(product) ? '—' : formatQty(product.stockQty)}
+                      </td>
                       <td className="py-1.5 text-right">{fmt(product.buyPrice)}</td>
                       <td className="py-1.5 text-right">{fmt(product.sellPrice)}</td>
                       <td className="py-1.5 text-right font-semibold">
-                        {fmt(Math.round(product.stockQty * product.buyPrice))}
+                        {isService(product) ? '—' : fmt(Math.round(product.stockQty * product.buyPrice))}
                       </td>
                       <td className="no-print py-1.5 text-right">
                         <div className="flex justify-end gap-1">
@@ -275,6 +285,15 @@ export default function Products() {
             void save();
           }}
         >
+          <SelectInput
+            label={t('products.kind.label')}
+            value={form.kind}
+            onChange={(value) => setForm({ ...form, kind: value === 'service' ? 'service' : 'goods' })}
+            options={[
+              { value: 'goods', label: t('products.kind.goods') },
+              { value: 'service', label: t('products.kind.service') },
+            ]}
+          />
           <Field label={t('products.name')}>
             <TextInput
               value={form.name}
@@ -304,26 +323,30 @@ export default function Products() {
               onMinor={(minor) => setForm({ ...form, sellPrice: minor })}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t('products.stockQty')}>
-              <TextInput
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.stockQty}
-                onChange={(event) => setForm({ ...form, stockQty: event.target.value })}
-              />
-            </Field>
-            <Field label={t('products.alertQty')} hint={t('products.alertHint')}>
-              <TextInput
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.alertQty}
-                onChange={(event) => setForm({ ...form, alertQty: event.target.value })}
-              />
-            </Field>
-          </div>
+          {form.kind === 'service' ? (
+            <p className="rounded-lg bg-sage-50 px-3 py-2 text-xs text-sage-700">{t('products.kind.serviceHint')}</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={t('products.stockQty')}>
+                <TextInput
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={form.stockQty}
+                  onChange={(event) => setForm({ ...form, stockQty: event.target.value })}
+                />
+              </Field>
+              <Field label={t('products.alertQty')} hint={t('products.alertHint')}>
+                <TextInput
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={form.alertQty}
+                  onChange={(event) => setForm({ ...form, alertQty: event.target.value })}
+                />
+              </Field>
+            </div>
+          )}
           {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" className={btnGhost} onClick={() => setOpen(false)}>

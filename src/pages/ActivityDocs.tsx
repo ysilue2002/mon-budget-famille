@@ -11,11 +11,13 @@ import {
   usePurchases,
   useSales,
   useSettlements,
+  useStockMovements,
   useTransactions,
 } from '@/hooks/useData';
 import { formatAmount } from '@/core/currencies';
 import { advanceDirection, advanceRemaining } from '@/core/advances';
 import { dailySalesDetail, formatQty, linesSummary } from '@/core/trade';
+import { buildStockLedger } from '@/core/stock';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/core/pdf';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import { Card, Page, Tag, btnGhost, btnPrimary } from '@/components/common';
@@ -26,6 +28,7 @@ type DocKind =
   | 'purchases'
   | 'expenses'
   | 'stock'
+  | 'stockLedger'
   | 'customerCredits'
   | 'supplierCredits'
   | 'clients'
@@ -40,6 +43,7 @@ const KINDS: DocKind[] = [
   'purchases',
   'expenses',
   'stock',
+  'stockLedger',
   'customerCredits',
   'supplierCredits',
   'clients',
@@ -58,6 +62,8 @@ interface StatementTable {
   count: number;
   /** Précision affichée sous le tableau (par exemple la TVA du total). */
   note?: string;
+  /** Second tableau imprimé sous le premier (journal détaillé, par exemple). */
+  extra?: { title: string; head: string[]; body: string[][] };
 }
 
 /**
@@ -78,6 +84,7 @@ export default function ActivityDocs() {
   const advances = useAdvances();
   const categories = useCategories();
   const parties = useParties();
+  const stockMovements = useStockMovements();
   const settlements = useSettlements();
   const businesses = useBusinesses();
   const primary = usePrimaryCurrency() ?? 'XOF';
@@ -251,6 +258,54 @@ export default function ActivityDocs() {
         totalLabel: t('products.value'),
         total: rows.reduce((sum, product) => sum + Math.round(Math.max(0, product.stockQty) * product.buyPrice), 0),
         count: rows.length,
+      };
+    }
+
+    if (kind === 'stockLedger') {
+      // Journal daté du stock : ce qui restait au début, ce qui est entré et
+      // sorti, ce qui reste à la fin — article par article, puis mouvement par
+      // mouvement avec le stock restant après chacun.
+      const ledger = buildStockLedger(products ?? [], stockMovements ?? [], rangeFrom, rangeTo);
+      return {
+        head: [
+          t('products.name'),
+          t('states.openingStock'),
+          t('states.inStock'),
+          t('states.outStock'),
+          t('states.closingStock'),
+          t('states.closingValue'),
+        ],
+        body: ledger.lines.map((line) => [
+          line.name,
+          formatQty(line.openingQty, lang),
+          formatQty(line.inQty, lang),
+          formatQty(line.outQty, lang),
+          formatQty(line.closingQty, lang),
+          fmt(line.value),
+        ]),
+        totalLabel: t('states.closingValue'),
+        total: ledger.closingValue,
+        count: ledger.lines.length,
+        note: t('states.stockLedgerNote', { opening: fmt(ledger.openingValue) }),
+        extra: {
+          title: t('states.stockMovements'),
+          head: [
+            t('documents.date'),
+            t('products.name'),
+            t('states.reason'),
+            t('states.inStock'),
+            t('states.outStock'),
+            t('states.stockAfter'),
+          ],
+          body: ledger.entries.map((entry) => [
+            entry.date,
+            entry.name,
+            t(`products.reason.${entry.reason}`),
+            entry.inQty > 0 ? formatQty(entry.inQty, lang) : '—',
+            entry.outQty > 0 ? formatQty(entry.outQty, lang) : '—',
+            formatQty(entry.balance, lang),
+          ]),
+        },
       };
     }
 
@@ -432,6 +487,7 @@ export default function ActivityDocs() {
     purchases,
     transactions,
     products,
+    stockMovements,
     advances,
     parties,
     settlements,
@@ -491,6 +547,7 @@ export default function ActivityDocs() {
       head: table.head,
       body: table.body,
       totals: [[table.totalLabel, fmt(table.total)]],
+      extra: table.extra,
       footer: `${t('documents.footer')} · ${generatedAt}`,
     });
   };
@@ -712,6 +769,56 @@ export default function ActivityDocs() {
           )}
 
           {table.note && <p className="mt-2 text-[11px] text-sage-600">{table.note}</p>}
+
+          {table.extra && table.extra.body.length > 0 && (
+            <section className="mt-4">
+              <h3 className="mb-1 text-sm font-bold text-forest-950">{table.extra.title}</h3>
+              <div className="sm:hidden print:hidden">
+                {table.extra.body.map((row, index) => (
+                  <div key={`${row[0]}-${index}`} className="border-b border-forest-100 py-1.5 text-xs">
+                    <div className="flex justify-between gap-2 font-semibold text-forest-950">
+                      <span>{row[0]}</span>
+                      <span className="text-sage-600">{row[1]}</span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap justify-between gap-2 text-sage-700">
+                      <span>{row[2]}</span>
+                      <span>
+                        {table.extra!.head[3]} {row[3]} · {table.extra!.head[4]} {row[4]} · {table.extra!.head[5]}{' '}
+                        {row[5]}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto sm:block print:block">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
+                      {table.extra.head.map((cell) => (
+                        <th key={cell} className="whitespace-nowrap py-1.5 pe-2">
+                          {cell}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {table.extra.body.map((row, index) => (
+                      <tr key={`${row[0]}-${index}`} className="border-b border-forest-50">
+                        {row.map((cell, cellIndex) => (
+                          <td
+                            key={`${cell}-${cellIndex}`}
+                            className={`whitespace-nowrap py-1.5 pe-2 ${cellIndex >= 3 ? 'text-end' : ''}`}
+                          >
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           <footer className="mt-3 flex flex-wrap justify-between gap-2 border-t border-forest-100 pt-2 text-[10px] text-sage-500">
             <span>{t('documents.footer')}</span>

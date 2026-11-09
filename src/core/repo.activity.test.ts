@@ -108,6 +108,36 @@ describe('marchandises', () => {
   });
 });
 
+describe('prestations', () => {
+  it('se facture sans stock ni mouvement de stock', async () => {
+    const labour = await createProduct({
+      name: 'Main d’œuvre maçonnerie',
+      kind: 'service',
+      unit: 'm²',
+      buyPrice: 0,
+      sellPrice: 2_500_000,
+      stockQty: 40,
+      alertQty: 5,
+    });
+    const saved = await db.products.get(labour);
+    expect(saved).toMatchObject({ kind: 'service', stockQty: 0, alertQty: 0 });
+    expect(await db.stockMovements.count()).toBe(0);
+
+    await createTrade(
+      'sale',
+      tradeInput({
+        lines: [{ productId: labour, label: 'Main d’œuvre maçonnerie', qty: 12, unitPrice: 2_500_000 }],
+        paid: 30_000_000,
+      }),
+    );
+    const after = await db.products.get(labour);
+    expect(after?.stockQty).toBe(0);
+    expect(await db.stockMovements.count()).toBe(0);
+    const sale = await db.sales.toCollection().first();
+    expect(sale?.total).toBe(30_000_000);
+  });
+});
+
 describe('ventes', () => {
   it('calcule le total, déplace le stock et crée l’opération de journal', async () => {
     const productId = await product(10);

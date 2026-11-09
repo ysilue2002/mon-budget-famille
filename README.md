@@ -148,7 +148,17 @@ peut aussi être archivée sans perdre son historique.
   valeur d'une période passée se lit dans ce journal, elle ne dépend donc plus
   du stock d'aujourd'hui. `ensureStockLedger` reprend une fois l'existant depuis
   les documents déjà saisis (ids déterministes, donc rejouable sans doublon) ;
-  les écrans Marchandises affichent les derniers mouvements.
+  les écrans Articles affichent les derniers mouvements, et l'état
+  « Journal du stock » (`buildStockLedger`) s'imprime sur une période avec le
+  stock de début, les entrées, les sorties, le stock de fin et le détail des
+  mouvements.
+- **Articles et prestations** : une fiche est soit un article stocké
+  (marchandise, matière première, pièce détachée), soit une **prestation**
+  (`kind: 'service'`) — main d'œuvre, pose, réparation, location. Une prestation
+  se facture normalement mais ne touche pas au stock, n'entre pas dans la valeur
+  du stock et ne déclenche pas d'alerte de réapprovisionnement. C'est ce qui rend
+  l'espace Activité utilisable par un maçon, un menuisier, un mécanicien ou un
+  prestataire de services, et pas seulement par un commerce.
 - La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.
   `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
   TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle

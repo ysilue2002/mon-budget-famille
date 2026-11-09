@@ -159,10 +159,20 @@ export interface Business extends SyncFields {
  * Les prix sont en sous-unités de la devise du foyer ; les quantités peuvent
  * être décimales (kg, litre) — c'est le seul champ non entier du modèle.
  */
+/**
+ * Nature d'une fiche : un article que l'on stocke (marchandise, matière
+ * première, pièce) ou une prestation que l'on facture sans stock (main
+ * d'œuvre, pose, réparation, location). Absent = article, pour les fiches
+ * créées avant l'arrivée des prestations.
+ */
+export type ProductKind = 'goods' | 'service';
+
 export interface Product extends SyncFields {
   id: string;
   familyId: string;
   name: string;
+  /** Article stocké ou prestation facturée (défaut : article). */
+  kind?: ProductKind;
   /** Unité de vente : pièce, kg, litre, service… */
   unit: string;
   /** Prix d'achat unitaire en sous-unités de la devise du foyer. */

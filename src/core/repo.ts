@@ -27,6 +27,7 @@ import type {
   Party,
   PaymentMethod,
   Product,
+  ProductKind,
   Quote,
   RecurrenceFrequency,
   TradeDocument,
@@ -631,6 +632,8 @@ export async function archiveBusiness(id: string): Promise<void> {
 
 export interface ProductInput {
   name: string;
+  /** Article stocké (défaut) ou prestation facturée sans stock. */
+  kind?: ProductKind;
   unit: string;
   /** Prix en sous-unités de la devise du foyer. */
   buyPrice: number;
@@ -642,15 +645,17 @@ export interface ProductInput {
 export async function createProduct(input: ProductInput): Promise<string> {
   const family = await getActiveFamily();
   if (!family) throw new Error('no-family');
+  const kind: ProductKind = input.kind ?? 'goods';
   const product: Product = {
     id: uuid(),
     familyId: family.id,
     name: input.name.trim(),
+    kind,
     unit: input.unit.trim() || 'pcs',
     buyPrice: Math.max(0, Math.round(input.buyPrice)),
     sellPrice: Math.max(0, Math.round(input.sellPrice)),
-    stockQty: Math.max(0, input.stockQty),
-    alertQty: Math.max(0, input.alertQty),
+    stockQty: kind === 'service' ? 0 : Math.max(0, input.stockQty),
+    alertQty: kind === 'service' ? 0 : Math.max(0, input.alertQty),
     archived: false,
     createdAt: Date.now(),
     ...newSyncFields(),
@@ -712,9 +717,15 @@ async function saveProduct(
     ...(patch.stockQty !== undefined ? { stockQty: Math.max(0, patch.stockQty) } : {}),
     ...(updatedSyncFields(current) as object),
   };
+  // Une prestation ne tient pas de stock : ni quantité, ni alerte, ni mouvement.
+  const service = updated.kind === 'service';
+  if (service) {
+    updated.stockQty = 0;
+    updated.alertQty = 0;
+  }
   await db.products.put(updated);
   await enqueueUpsert('product', id, recordOf(updated), current.rev, base);
-  if (meta) await recordStockMovement(updated, updated.stockQty - current.stockQty, meta);
+  if (!service && meta) await recordStockMovement(updated, updated.stockQty - current.stockQty, meta);
 }
 
 export async function updateProduct(id: string, patch: Partial<ProductInput>): Promise<void> {
@@ -774,6 +785,7 @@ export async function ensureStockLedger(): Promise<void> {
   };
 
   for (const product of products) {
+    if (product.kind === 'service') continue;
     const entries: { doc: TradeDocument; lineId: string; qty: number; reason: StockMovementReason }[] = [];
     for (const doc of sales) {
       for (const line of doc.lines) {
@@ -859,6 +871,9 @@ async function applyMovements(
   for (const movement of stockDeltaMap(movements)) {
     const [productId, qty] = movement;
     if (qty === 0) continue;
+    const product = await db.products.get(productId);
+    // Une prestation facturée ne déplace aucun stock.
+    if (!product || product.kind === 'service') continue;
     await adjustProductStock(productId, qty, meta);
   }
 }
