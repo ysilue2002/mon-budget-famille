@@ -102,9 +102,11 @@ export default function Projects() {
   const [error, setError] = useState<string | null>(null);
   // État de rentabilité affiché : un chantier (`id`) ou tous ceux en cours.
   const [reportScope, setReportScope] = useState<'all' | string | null>(null);
-  // Période de l'état global : tous les documents, un mois ou une année.
-  const [globalKind, setGlobalKind] = useState<'all' | PeriodKind>('all');
+  // Période de l'état global : tous les documents, un mois, une année ou deux dates.
+  const [globalKind, setGlobalKind] = useState<'all' | PeriodKind | 'custom'>('all');
   const [globalAnchor, setGlobalAnchor] = useState(() => anchorFor('month', todayISO()));
+  const [customFrom, setCustomFrom] = useState(() => `${todayISO().slice(0, 7)}-01`);
+  const [customTo, setCustomTo] = useState(() => todayISO());
   const [notice, setNotice] = useState<string | null>(null);
   const lang = i18n.language;
 
@@ -139,11 +141,24 @@ export default function Projects() {
     };
   }, [reportProject, books, businesses]);
 
-  const globalRange = globalKind === 'all' ? null : periodRange(globalKind, globalAnchor);
-  const globalPeriodLabel =
-    globalRange && globalKind !== 'all'
-      ? periodText(globalKind, globalAnchor, globalRange.from, lang)
-      : t('projects.periodAll');
+  // Deux dates saisies à l'envers sont remises dans l'ordre plutôt que d'afficher un état vide.
+  const customRange =
+    globalKind === 'custom' && customFrom && customTo
+      ? customFrom <= customTo
+        ? { from: customFrom, to: customTo }
+        : { from: customTo, to: customFrom }
+      : null;
+  const globalRange =
+    globalKind === 'all'
+      ? null
+      : globalKind === 'custom'
+        ? customRange
+        : periodRange(globalKind, globalAnchor);
+  const globalPeriodLabel = !globalRange
+    ? t('projects.periodAll')
+    : globalKind === 'custom'
+      ? `${globalRange.from} → ${globalRange.to}`
+      : periodText(globalKind as PeriodKind, globalAnchor, globalRange.from, lang);
 
   const showAll = reportScope === 'all';
   const running = rows.filter((project) => !project.archived && project.status === 'open');
@@ -171,7 +186,11 @@ export default function Projects() {
     downloadPdf({
       fileName: pdfFileName(
         'etat-chantiers',
-        globalKind === 'all' ? todayISO() : `${globalKind}-${globalAnchor}`,
+        !globalRange
+          ? todayISO()
+          : globalKind === 'custom'
+            ? `${globalRange.from}_${globalRange.to}`
+            : `${globalKind}-${globalAnchor}`,
       ),
       title: t('projects.reportAllTitle'),
       meta: [[t('common.period'), globalPeriodLabel]],
@@ -240,6 +259,34 @@ export default function Projects() {
         [t('projects.margin'), fmt(report.totals.margin)],
         [t('projects.advancesReceived'), fmt(report.totals.advancesReceived)],
         [t('projects.due'), fmt(report.totals.due)],
+      ],
+      extras: [
+        {
+          title: t('projects.salesDue', { count: report.sales.length }),
+          head: [
+            t('common.date'),
+            t('projects.document'),
+            t('projects.total'),
+            t('trade.paid'),
+            t('projects.due'),
+          ],
+          body: report.sales.map((sale) => [
+            sale.date,
+            sale.label || '—',
+            fmt(sale.total),
+            fmt(sale.paid),
+            fmt(sale.due),
+          ]),
+        },
+        {
+          title: t('projects.advancesList', { count: report.advances.length }),
+          head: [t('common.date'), t('projects.subject'), t('projects.amount')],
+          body: report.advances.map((advance) => [
+            advance.date,
+            advance.label || '—',
+            fmt(advance.amount),
+          ]),
+        },
       ],
       footer: t('documents.footer'),
     });
@@ -364,13 +411,15 @@ export default function Projects() {
                 role="group"
                 aria-label={t('common.period')}
               >
-                {(['all', 'month', 'year'] as const).map((value) => (
+                {(['all', 'month', 'year', 'custom'] as const).map((value) => (
                   <button
                     key={value}
                     type="button"
                     onClick={() => {
                       setGlobalKind(value);
-                      if (value !== 'all') setGlobalAnchor(anchorFor(value, todayISO()));
+                      if (value === 'month' || value === 'year') {
+                        setGlobalAnchor(anchorFor(value, todayISO()));
+                      }
                     }}
                     aria-pressed={globalKind === value}
                     className={`px-3 py-2 text-sm font-medium ${
@@ -381,11 +430,33 @@ export default function Projects() {
                   >
                     {value === 'all'
                       ? t('common.all')
-                      : t(`balances.kind.${value}`)}
+                      : value === 'custom'
+                        ? t('projects.periodCustom')
+                        : t(`balances.kind.${value}`)}
                   </button>
                 ))}
               </div>
-              {globalKind !== 'all' && (
+              {globalKind === 'custom' && (
+                <div className="flex flex-wrap items-end gap-2">
+                  <Field label={t('reports.from')}>
+                    <TextInput
+                      type="date"
+                      value={customFrom}
+                      max={customTo || undefined}
+                      onChange={(event) => setCustomFrom(event.target.value)}
+                    />
+                  </Field>
+                  <Field label={t('reports.to')}>
+                    <TextInput
+                      type="date"
+                      value={customTo}
+                      min={customFrom || undefined}
+                      onChange={(event) => setCustomTo(event.target.value)}
+                    />
+                  </Field>
+                </div>
+              )}
+              {(globalKind === 'month' || globalKind === 'year') && (
                 <div className="flex items-center gap-1">
                   <button
                     type="button"

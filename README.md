@@ -178,11 +178,13 @@ peut aussi être archivée sans perdre son historique.
   puis ventes, achats, dépenses, marge, acomptes et reste à encaisser, avec le
   détail vente par vente (facturé, reçu, reste à encaisser) et la liste des
   acomptes reçus ; le même état s'exporte en PDF (`downloadPdf`, avec bascule
-  vers l'impression en arabe). « État global » compare tous les chantiers en
-  cours dans un tableau unique avec ligne de totaux, imprimable et exportable
-  en PDF ; il se restreint à un mois ou à une année (`periodRange`), navigable
-  avec les flèches, et le PDF porte la période retenue. Sur téléphone le tableau
-  laisse place à une fiche par chantier, sans défilement latéral.
+  vers l'impression en arabe), les deux tableaux de détail y figurant à la
+  suite du journal. « État global » compare tous les chantiers en cours dans un
+  tableau unique avec ligne de totaux, imprimable et exportable en PDF ; il se
+  restreint à un mois, à une année (`periodRange`), navigable avec les flèches,
+  ou à deux dates saisies (« Dates », remises dans l'ordre si besoin), et le PDF
+  porte la période retenue jusque dans son nom de fichier. Sur téléphone le
+  tableau laisse place à une fiche par chantier, sans défilement latéral.
   Le profil de l'activité reste à un clic depuis l'accueil : le menu garde
   treize entrées.
 - La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.

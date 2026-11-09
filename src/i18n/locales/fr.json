@@ -650,8 +650,10 @@
     "reportAllTitle": "Chantiers en cours",
     "reportAllHint": "Comparaison des chantiers en cours : ventes, achats, dépenses, marge et reste à encaisser.",
     "periodAll": "Tous les documents",
+    "periodCustom": "Dates",
     "salesDue": "Reste à encaisser par vente ({{count}})",
     "advancesList": "Acomptes reçus ({{count}})",
+    "subject": "Objet",
     "clientLabel": "Client",
     "total": "Total",
     "kinds": {

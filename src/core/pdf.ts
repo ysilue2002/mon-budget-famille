@@ -12,6 +12,12 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Business } from './types';
 
+export interface PdfExtra {
+  title: string;
+  head: string[];
+  body: (string | number)[][];
+}
+
 export interface PdfInput {
   fileName: string;
   title: string;
@@ -25,7 +31,9 @@ export interface PdfInput {
   /** Totaux affichés sous le tableau. */
   totals?: [string, string][];
   /** Second tableau, sous le premier (journal détaillé d'un état). */
-  extra?: { title: string; head: string[]; body: (string | number)[][] };
+  extra?: PdfExtra;
+  /** Tableaux de détail suivants, dans l'ordre. */
+  extras?: PdfExtra[];
   footer?: string;
   /** Numéro affiché en pied de page. */
   reference?: string;
@@ -41,10 +49,11 @@ export function pdfSupportsLanguage(language: string): boolean {
 /**
  * jsPDF écrit avec les polices standard (WinAnsi) : les espaces fines ou
  * insécables des montants formatés (U+202F, U+00A0, U+2009) y sortent en
- * caractères parasites. On les ramène à une espace ordinaire avant l'écriture.
+ * caractères parasites, et la flèche → n'existe pas dans cette table. On les
+ * ramène à des caractères simples avant l'écriture.
  */
 export function pdfSafeText(value: string): string {
-  return value.replace(/[\u202f\u00a0\u2009]/g, ' ');
+  return value.replace(/[\u202f\u00a0\u2009]/g, ' ').replace(/\s*\u2192\s*/g, ' - ');
 }
 
 /** Imprime la feuille A4 affichée (le navigateur propose « Enregistrer en PDF »). */
@@ -143,21 +152,28 @@ export function downloadPdf(input: PdfInput): void {
       body: input.totals.map(([label, value]) => [pdfSafeText(label), pdfSafeText(value)]),
       theme: 'grid',
       styles: { fontSize: 10, cellPadding: 4 },
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 220 }, 1: { halign: 'right', fontStyle: 'bold' } },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 130 }, 1: { halign: 'right', fontStyle: 'bold' } },
       margin: { left: width / 2, right: margin },
     });
     y = ((doc as unknown as WithAutoTable).lastAutoTable?.finalY ?? y) + 18;
   }
 
-  if (input.extra && input.extra.body.length > 0) {
+  const extras = [...(input.extra ? [input.extra] : []), ...(input.extras ?? [])];
+  for (const table of extras) {
+    if (table.body.length === 0) continue;
+    // Un titre seul en bas de page serait suivi du tableau sur la suivante.
+    if (y > doc.internal.pageSize.getHeight() - 90) {
+      doc.addPage();
+      y = margin;
+    }
     doc.setFontSize(12);
     doc.setTextColor(20, 40, 25);
-    doc.text(pdfSafeText(input.extra.title), margin, y + 4);
+    doc.text(pdfSafeText(table.title), margin, y + 4);
     y += 10;
     autoTable(doc, {
       startY: y,
-      head: [input.extra.head.map(pdfSafeText)],
-      body: input.extra.body.map((row) => row.map((cell) => (typeof cell === 'string' ? pdfSafeText(cell) : cell))),
+      head: [table.head.map(pdfSafeText)],
+      body: table.body.map((row) => row.map((cell) => (typeof cell === 'string' ? pdfSafeText(cell) : cell))),
       theme: 'striped',
       styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: [20, 83, 45], textColor: 255 },
