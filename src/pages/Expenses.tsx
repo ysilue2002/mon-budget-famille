@@ -5,9 +5,11 @@ import {
   useBusinesses,
   useCategories,
   usePrimaryCurrency,
+  useProjects,
   useTransactions,
 } from '@/hooks/useData';
 import { createTransaction, deleteTransaction } from '@/core/repo';
+import { ProjectFilter } from '@/components/ProjectFilter';
 import { ProjectSelect } from '@/components/ProjectSelect';
 import { formatAmount } from '@/core/currencies';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
@@ -50,6 +52,7 @@ export default function Expenses() {
   const categories = useCategories();
   const businesses = useBusinesses();
   const transactions = useTransactions();
+  const projects = useProjects();
   const primary = usePrimaryCurrency() ?? 'XOF';
 
   const activeAccounts = (accounts ?? []).filter((account) => !account.archived);
@@ -59,6 +62,9 @@ export default function Expenses() {
   const [form, setForm] = useState<ExpenseForm | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [projectFilter, setProjectFilter] = useState('');
+
+  const projectName = (id?: string) => (projects ?? []).find((project) => project.id === id)?.name;
 
   const fmt = (minor: number) => formatAmount(minor, primary, i18n.language);
   const categoryLabel = (id?: string) => {
@@ -72,9 +78,10 @@ export default function Expenses() {
     () =>
       (transactions ?? [])
         .filter((tx) => tx.type === 'expense' && tx.businessId && tx.businessId === businessId)
+        .filter((tx) => !projectFilter || tx.projectId === projectFilter)
         .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, 100),
-    [transactions, businessId],
+    [transactions, businessId, projectFilter],
   );
 
   const month = currentMonth();
@@ -143,9 +150,12 @@ export default function Expenses() {
     <Page
       title={t('expenses.title')}
       actions={
-        <button type="button" className={btnPrimary} onClick={startForm}>
-          ＋ {t('expenses.new')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ProjectFilter value={projectFilter} onChange={setProjectFilter} businessId={businessId} />
+          <button type="button" className={btnPrimary} onClick={startForm}>
+            ＋ {t('expenses.new')}
+          </button>
+        </div>
       }
     >
       {activeBusinesses.length === 0 ? (
@@ -248,16 +258,23 @@ export default function Expenses() {
             </Card>
           ) : rows.length === 0 ? (
             <Card>
-              <EmptyState label={t('expenses.empty')} icon="🧾" />
-              <p className="mt-2 text-center text-xs text-sage-600">{t('expenses.emptyHint')}</p>
+              {projectFilter ? (
+                <p className="py-6 text-center text-sm text-sage-600">{t('projects.noMatch')}</p>
+              ) : (
+                <>
+                  <EmptyState label={t('expenses.empty')} icon="🧾" />
+                  <p className="mt-2 text-center text-xs text-sage-600">{t('expenses.emptyHint')}</p>
+                </>
+              )}
             </Card>
           ) : (
             <Card className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
+                  <tr className="border-b border-forest-200 whitespace-nowrap text-left text-[11px] uppercase text-sage-600">
                     <th className="py-1.5">{t('expenses.date')}</th>
                     <th className="py-1.5">{t('expenses.category')}</th>
+                    <th className="py-1.5">{t('projects.choose')}</th>
                     <th className="py-1.5">{t('expenses.note')}</th>
                     <th className="py-1.5 text-right">{t('expenses.amount')}</th>
                     <th className="py-1.5">{t('expenses.status')}</th>
@@ -269,6 +286,7 @@ export default function Expenses() {
                     <tr key={tx.id} className="border-b border-forest-50">
                       <td className="whitespace-nowrap py-1.5">{tx.date}</td>
                       <td className="py-1.5">{categoryLabel(tx.categoryId)}</td>
+                      <td className="py-1.5 text-xs text-sage-700">{projectName(tx.projectId) ?? '—'}</td>
                       <td className="max-w-[16rem] truncate py-1.5">{tx.note || '—'}</td>
                       <td className="whitespace-nowrap py-1.5 text-right font-semibold">{fmt(tx.amountInPrimary)}</td>
                       <td className="py-1.5">{statusTag(tx)}</td>

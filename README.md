@@ -168,8 +168,10 @@ peut aussi être archivée sans perdre son historique.
   des documents existants, et le supprimer ne touche ni aux montants ni au
   stock. L'opération de journal générée par une vente ou un achat est exclue du
   calcul des dépenses (`isDocumentTransaction`), sinon elle doublerait le
-  document. Le profil de l'activité reste à un clic depuis l'accueil : le menu
-  garde treize entrées.
+  document. Les listes de ventes, d'achats et de dépenses affichent une colonne
+  « Chantier » et un filtre qui restreint la liste et ses totaux au chantier
+  choisi (`ProjectFilter`). Le profil de l'activité reste à un clic depuis
+  l'accueil : le menu garde treize entrées.
 - La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.
   `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
   TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle

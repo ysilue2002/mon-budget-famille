@@ -7,6 +7,7 @@ import {
   useParties,
   usePrimaryCurrency,
   useProducts,
+  useProjects,
   usePurchases,
   useSales,
 } from '@/hooks/useData';
@@ -14,6 +15,7 @@ import { createParty, createTrade, deleteTrade, updateParty, updateTrade } from 
 import { formatAmount } from '@/core/currencies';
 import { parseAmountInput, toMajor } from '@/core/money';
 import { linesSummary, paidForMode, taxBreakdown, tradeDue, tradeStatus, type PaymentEntryMode } from '@/core/trade';
+import { ProjectFilter } from '@/components/ProjectFilter';
 import { ProjectSelect } from '@/components/ProjectSelect';
 import { uuid } from '@/lib/id';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
@@ -87,14 +89,22 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
   const accounts = useAccounts();
   const products = useProducts();
   const parties = useParties();
+  const projects = useProjects();
   const primaryCode = usePrimaryCurrency();
   const primary = primaryCode ?? 'XOF';
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TradeForm | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [projectFilter, setProjectFilter] = useState('');
 
-  const documents = (kind === 'sale' ? sales : purchases) ?? [];
+  const projectName = (id?: string) => (projects ?? []).find((project) => project.id === id)?.name;
+  const allDocuments = (kind === 'sale' ? sales : purchases) ?? [];
+  // Le filtre s'applique aussi aux chiffres affichés en haut : on lit alors
+  // ceux du chantier choisi, pas ceux de toute l'activité.
+  const documents = projectFilter
+    ? allDocuments.filter((document) => document.projectId === projectFilter)
+    : allDocuments;
   const activeBusinesses = (businesses ?? []).filter((business) => !business.archived);
   const activeProducts = (products ?? []).filter((product) => !product.archived);
   const accountList = (accounts ?? []).filter((account) => !account.archived);
@@ -287,6 +297,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
       title={title}
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          <ProjectFilter value={projectFilter} onChange={setProjectFilter} />
           {kind === 'purchase' && (
             <Link to="/suppliers" className={btnGhost}>
               🏭 {t('nav.suppliers')}
@@ -312,18 +323,22 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
         <Card className="border-amber-200 bg-amber-50/60">
           <p className="text-sm text-amber-900">{t('trade.noBusiness')}</p>
         </Card>
-      ) : documents.length === 0 ? (
+      ) : allDocuments.length === 0 ? (
         <EmptyState
           label={t(kind === 'sale' ? 'trade.emptySales' : 'trade.emptyPurchases')}
           icon={kind === 'sale' ? '🛒' : '📥'}
         />
       ) : (
         <Card className="overflow-x-auto">
+          {documents.length === 0 ? (
+            <p className="py-6 text-center text-sm text-sage-600">{t('projects.noMatch')}</p>
+          ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
+              <tr className="border-b border-forest-200 whitespace-nowrap text-left text-[11px] uppercase text-sage-600">
                 <th className="py-1.5">{t('common.date')}</th>
                 <th className="py-1.5">{t(kind === 'sale' ? 'trade.client' : 'trade.supplier')}</th>
+                <th className="py-1.5">{t('projects.choose')}</th>
                 <th className="py-1.5 text-right">{t('trade.total')}</th>
                 <th className="py-1.5 text-right">
                   {t(kind === 'sale' ? 'trade.paid' : 'trade.paidPurchase')}
@@ -344,6 +359,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                         `${document.lines.length} ${t('trade.product').toLowerCase()}`}
                     </div>
                   </td>
+                  <td className="py-1.5 text-xs text-sage-700">{projectName(document.projectId) ?? '—'}</td>
                   <td className="py-1.5 text-right font-semibold">{fmt(document.total)}</td>
                   <td className="py-1.5 text-right">{fmt(document.paid)}</td>
                   <td className={`py-1.5 text-right ${document.due > 0 ? 'font-semibold text-amber-700' : ''}`}>
@@ -373,6 +389,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
               ))}
             </tbody>
           </table>
+          )}
         </Card>
       )}
 
