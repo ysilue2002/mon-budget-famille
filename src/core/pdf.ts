@@ -38,6 +38,15 @@ export function pdfSupportsLanguage(language: string): boolean {
   return !language.toLowerCase().startsWith('ar');
 }
 
+/**
+ * jsPDF écrit avec les polices standard (WinAnsi) : les espaces fines ou
+ * insécables des montants formatés (U+202F, U+00A0, U+2009) y sortent en
+ * caractères parasites. On les ramène à une espace ordinaire avant l'écriture.
+ */
+export function pdfSafeText(value: string): string {
+  return value.replace(/[\u202f\u00a0\u2009]/g, ' ');
+}
+
 /** Imprime la feuille A4 affichée (le navigateur propose « Enregistrer en PDF »). */
 export function printDocument(): void {
   window.print();
@@ -60,14 +69,14 @@ export function downloadPdf(input: PdfInput): void {
   if (input.business) {
     doc.setFontSize(16);
     doc.setTextColor(20, 83, 45);
-    doc.text(input.business.name || '—', margin, y + 6);
+    doc.text(pdfSafeText(input.business.name || '—'), margin, y + 6);
     doc.setFontSize(9);
     doc.setTextColor(90, 100, 90);
     const contact = [input.business.ownerName, input.business.phone, input.business.email, input.business.address]
       .filter(Boolean)
       .join(' · ');
-    if (contact) doc.text(contact, margin, y + 20);
-    if (input.business.taxId) doc.text(`N° fiscal : ${input.business.taxId}`, margin, y + 32);
+    if (contact) doc.text(pdfSafeText(contact), margin, y + 20);
+    if (input.business.taxId) doc.text(pdfSafeText(`N° fiscal : ${input.business.taxId}`), margin, y + 32);
     y += 44;
   }
 
@@ -75,37 +84,37 @@ export function downloadPdf(input: PdfInput): void {
     let partyY = margin + 6;
     doc.setFontSize(8);
     doc.setTextColor(120, 128, 120);
-    doc.text(input.party.label.toUpperCase(), width - margin, partyY, { align: 'right' });
+    doc.text(pdfSafeText(input.party.label.toUpperCase()), width - margin, partyY, { align: 'right' });
     partyY += 13;
     doc.setFontSize(10);
     doc.setTextColor(20, 40, 25);
-    doc.text(input.party.name ?? '—', width - margin, partyY, { align: 'right' });
+    doc.text(pdfSafeText(input.party.name ?? '—'), width - margin, partyY, { align: 'right' });
     doc.setFontSize(8);
     doc.setTextColor(90, 100, 90);
     if (input.party.address) {
       partyY += 11;
-      doc.text(input.party.address, width - margin, partyY, { align: 'right' });
+      doc.text(pdfSafeText(input.party.address), width - margin, partyY, { align: 'right' });
     }
     if (input.party.phone) {
       partyY += 11;
-      doc.text(input.party.phone, width - margin, partyY, { align: 'right' });
+      doc.text(pdfSafeText(input.party.phone), width - margin, partyY, { align: 'right' });
     }
   }
 
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(15);
-  doc.text(input.title, margin, y);
+  doc.text(pdfSafeText(input.title), margin, y);
   if (input.reference) {
     doc.setFontSize(9);
     doc.setTextColor(90, 100, 90);
-    doc.text(input.reference, width - margin, y, { align: 'right' });
+    doc.text(pdfSafeText(input.reference), width - margin, y, { align: 'right' });
   }
   y += 16;
 
   if (input.meta.length > 0) {
     autoTable(doc, {
       startY: y,
-      body: input.meta.map(([label, value]) => [label, value]),
+      body: input.meta.map(([label, value]) => [pdfSafeText(label), pdfSafeText(value)]),
       theme: 'plain',
       styles: { fontSize: 9, cellPadding: 2 },
       columnStyles: { 0: { textColor: [90, 100, 90], cellWidth: 130 }, 1: { fontStyle: 'bold' } },
@@ -117,8 +126,8 @@ export function downloadPdf(input: PdfInput): void {
   if (input.head && input.body) {
     autoTable(doc, {
       startY: y,
-      head: [input.head],
-      body: input.body,
+      head: [input.head.map(pdfSafeText)],
+      body: input.body.map((row) => row.map((cell) => (typeof cell === 'string' ? pdfSafeText(cell) : cell))),
       theme: 'striped',
       styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: [20, 83, 45], textColor: 255 },
@@ -131,7 +140,7 @@ export function downloadPdf(input: PdfInput): void {
   if (input.totals && input.totals.length > 0) {
     autoTable(doc, {
       startY: y,
-      body: input.totals.map(([label, value]) => [label, value]),
+      body: input.totals.map(([label, value]) => [pdfSafeText(label), pdfSafeText(value)]),
       theme: 'grid',
       styles: { fontSize: 10, cellPadding: 4 },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 220 }, 1: { halign: 'right', fontStyle: 'bold' } },
@@ -143,12 +152,12 @@ export function downloadPdf(input: PdfInput): void {
   if (input.extra && input.extra.body.length > 0) {
     doc.setFontSize(12);
     doc.setTextColor(20, 40, 25);
-    doc.text(input.extra.title, margin, y + 4);
+    doc.text(pdfSafeText(input.extra.title), margin, y + 4);
     y += 10;
     autoTable(doc, {
       startY: y,
-      head: [input.extra.head],
-      body: input.extra.body,
+      head: [input.extra.head.map(pdfSafeText)],
+      body: input.extra.body.map((row) => row.map((cell) => (typeof cell === 'string' ? pdfSafeText(cell) : cell))),
       theme: 'striped',
       styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: [20, 83, 45], textColor: 255 },
@@ -162,7 +171,7 @@ export function downloadPdf(input: PdfInput): void {
     doc.setPage(page);
     doc.setFontSize(8);
     doc.setTextColor(120, 128, 120);
-    const footer = input.footer ? `${input.footer} · ` : '';
+    const footer = input.footer ? `${pdfSafeText(input.footer)} · ` : '';
     doc.text(`${footer}${page} / ${pages}`, width - margin, doc.internal.pageSize.getHeight() - 20, { align: 'right' });
   }
 

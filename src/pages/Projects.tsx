@@ -15,6 +15,7 @@ import {
 import { createProject, deleteProject, updateProject } from '@/core/repo';
 import { projectEntries, projectReportEntries, projectTotals, sortedProjects } from '@/core/projects';
 import { formatAmount } from '@/core/currencies';
+import { downloadPdf, pdfFileName, pdfSupportsLanguage } from '@/core/pdf';
 import { todayISO } from '@/lib/date';
 import type { Project } from '@/core/types';
 import {
@@ -83,8 +84,10 @@ export default function Projects() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<ProjectForm>(emptyForm());
   const [error, setError] = useState<string | null>(null);
-  // Chantier dont on affiche (et imprime) l'état de rentabilité.
-  const [reportId, setReportId] = useState<string | null>(null);
+  // État de rentabilité affiché : un chantier (`id`) ou tous ceux en cours.
+  const [reportScope, setReportScope] = useState<'all' | string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const lang = i18n.language;
 
   const fmt = (minor: number) => formatAmount(minor, primary, i18n.language);
 
@@ -104,7 +107,8 @@ export default function Projects() {
   const rows = sortedProjects(projects ?? []);
   const summary = (id: string) => projectTotals(id, books);
 
-  const reportProject = reportId ? rows.find((project) => project.id === reportId) : undefined;
+  const reportProject =
+    reportScope && reportScope !== 'all' ? rows.find((project) => project.id === reportScope) : undefined;
   const report = useMemo(() => {
     if (!reportProject) return null;
     return {
@@ -113,6 +117,62 @@ export default function Projects() {
       business: (businesses ?? []).find((row) => row.id === reportProject.businessId),
     };
   }, [reportProject, books, businesses]);
+
+  const showAll = reportScope === 'all';
+  const running = rows.filter((project) => !project.archived && project.status === 'open');
+  const runningLines = running.map((project) => ({ project, totals: projectTotals(project.id, books) }));
+  const runningTotals = runningLines.reduce(
+    (acc, line) => ({
+      salesHt: acc.salesHt + line.totals.salesHt,
+      purchasesHt: acc.purchasesHt + line.totals.purchasesHt,
+      expenses: acc.expenses + line.totals.expenses,
+      margin: acc.margin + line.totals.margin,
+      due: acc.due + line.totals.due,
+    }),
+    { salesHt: 0, purchasesHt: 0, expenses: 0, margin: 0, due: 0 },
+  );
+  const printView = reportScope !== null;
+
+  const exportPdf = () => {
+    if (!report || !reportProject) return;
+    if (!pdfSupportsLanguage(lang)) {
+      setNotice(t('documents.arabicUsesPrint'));
+      return;
+    }
+    downloadPdf({
+      fileName: pdfFileName('etat-chantier', reportProject.name),
+      title: t('projects.reportTitle'),
+      business: report.business,
+      reference: reportProject.name,
+      meta: [
+        [t('projects.clientLabel'), reportProject.partyName || '—'],
+        [
+          t('projects.startDate'),
+          `${reportProject.startDate}${reportProject.endDate ? ` → ${reportProject.endDate}` : ''}`,
+        ],
+        [
+          t('projects.status'),
+          reportProject.status === 'done' ? t('projects.statusDone') : t('projects.statusOpen'),
+        ],
+      ],
+      head: [t('common.date'), t('projects.type'), t('projects.document'), t('projects.amount')],
+      body: report.entries.map((entry) => [
+        entry.date,
+        t(`projects.kinds.${entry.kind}`),
+        entry.label || '—',
+        fmt(entry.amount),
+      ]),
+      totals: [
+        [t('projects.sales'), fmt(report.totals.salesHt)],
+        [t('projects.purchases'), fmt(report.totals.purchasesHt)],
+        [t('projects.expenses'), fmt(report.totals.expenses)],
+        [t('projects.margin'), fmt(report.totals.margin)],
+        [t('projects.advancesReceived'), fmt(report.totals.advancesReceived)],
+        [t('projects.due'), fmt(report.totals.due)],
+      ],
+      footer: t('documents.footer'),
+    });
+  };
 
   const totals = rows.reduce(
     (acc, project) => {
@@ -183,22 +243,50 @@ export default function Projects() {
     <Page
       title={t('projects.title')}
       actions={
-        <button type="button" className={btnPrimary} onClick={openCreate}>
-          ＋ {t('projects.new')}
-        </button>
+        <>
+          <button
+            type="button"
+            className={btnGhost}
+            onClick={() => {
+              setNotice(null);
+              setReportScope('all');
+            }}
+            disabled={running.length === 0}
+          >
+            🖨 {t('projects.reportAll')}
+          </button>
+          <button type="button" className={btnPrimary} onClick={openCreate}>
+            ＋ {t('projects.new')}
+          </button>
+        </>
       }
     >
+      {printView && (
+        <div className="no-print mb-3 flex flex-wrap gap-2">
+          <button type="button" className={btnPrimary} onClick={() => window.print()}>
+            🖨 {t('documents.print')}
+          </button>
+          {report && (
+            <button type="button" className={btnGhost} onClick={exportPdf}>
+              ⬇ {t('documents.pdf')}
+            </button>
+          )}
+          <button
+            type="button"
+            className={btnGhost}
+            onClick={() => {
+              setReportScope(null);
+              setNotice(null);
+            }}
+          >
+            {t('documents.close')}
+          </button>
+        </div>
+      )}
+      {notice && <p className="no-print mb-3 max-w-2xl text-xs text-sage-600">{notice}</p>}
+
       {report && reportProject && (
         <>
-          <div className="no-print mb-3 flex flex-wrap gap-2">
-            <button type="button" className={btnPrimary} onClick={() => window.print()}>
-              🖨 {t('documents.print')}
-            </button>
-            <button type="button" className={btnGhost} onClick={() => setReportId(null)}>
-              {t('documents.close')}
-            </button>
-          </div>
-
           <article className="print-sheet mb-4 rounded-xl border border-forest-100 bg-white p-5 shadow-sm sm:p-8">
             <header className="mb-4 flex flex-wrap items-start justify-between gap-2 border-b border-forest-200 pb-3">
               <div>
@@ -285,7 +373,71 @@ export default function Projects() {
         </>
       )}
 
-      <div className={report ? 'no-print' : undefined}>
+      {showAll && (
+        <article className="print-sheet mb-4 rounded-xl border border-forest-100 bg-white p-5 shadow-sm sm:p-8">
+          <header className="mb-4 flex flex-wrap items-start justify-between gap-2 border-b border-forest-200 pb-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sage-600">Mon Budget Famille</p>
+              <h2 className="text-xl font-bold text-forest-950">{t('projects.reportAllTitle')}</h2>
+              <p className="text-xs text-sage-600">{t('projects.reportAllHint')}</p>
+            </div>
+            <div className="text-right text-xs text-sage-600">
+              <p>{primary}</p>
+              <p>{t('projects.generatedAt', { date: todayISO() })}</p>
+            </div>
+          </header>
+
+          <div className="overflow-x-auto print:overflow-visible">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-forest-200 whitespace-nowrap text-left text-[11px] uppercase text-sage-600">
+                <th className="py-1.5 pe-2">{t('projects.choose')}</th>
+                <th className="py-1.5 pe-2">{t('projects.clientLabel')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('projects.sales')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('projects.purchases')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('projects.expenses')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('projects.margin')}</th>
+                <th className="py-1.5 pe-2 text-right">{t('projects.due')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runningLines.map(({ project, totals: value }) => (
+                <tr key={project.id} className="border-b border-forest-50">
+                  <td className="py-1.5 pe-2 font-medium text-forest-900">{project.name}</td>
+                  <td className="py-1.5 pe-2 text-sage-700">{project.partyName || '—'}</td>
+                  <td className="py-1.5 pe-2 whitespace-nowrap text-right">{fmt(value.salesHt)}</td>
+                  <td className="py-1.5 pe-2 whitespace-nowrap text-right">{fmt(value.purchasesHt)}</td>
+                  <td className="py-1.5 pe-2 whitespace-nowrap text-right">{fmt(value.expenses)}</td>
+                  <td
+                    className={`py-1.5 pe-2 whitespace-nowrap text-right font-semibold ${
+                      value.margin >= 0 ? 'text-forest-800' : 'text-red-600'
+                    }`}
+                  >
+                    {fmt(value.margin)}
+                  </td>
+                  <td className="py-1.5 pe-2 whitespace-nowrap text-right">{fmt(value.due)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-forest-300 font-bold text-forest-950">
+                <td className="py-2 pe-2" colSpan={2}>
+                  {t('projects.total')}
+                </td>
+                <td className="py-2 pe-2 whitespace-nowrap text-right">{fmt(runningTotals.salesHt)}</td>
+                <td className="py-2 pe-2 whitespace-nowrap text-right">{fmt(runningTotals.purchasesHt)}</td>
+                <td className="py-2 pe-2 whitespace-nowrap text-right">{fmt(runningTotals.expenses)}</td>
+                <td className="py-2 pe-2 whitespace-nowrap text-right">{fmt(runningTotals.margin)}</td>
+                <td className="py-2 pe-2 whitespace-nowrap text-right">{fmt(runningTotals.due)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          </div>
+          <p className="mt-3 border-t border-forest-100 pt-2 text-[11px] text-sage-500">{t('projects.reportHint')}</p>
+        </article>
+      )}
+
+      <div className={printView ? 'no-print' : undefined}>
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <StatCard
           label={t('projects.openCount')}
@@ -333,7 +485,8 @@ export default function Projects() {
                       type="button"
                       className="rounded px-2 py-1 text-xs font-medium text-forest-800 hover:bg-forest-50"
                       onClick={() => {
-                        setReportId(project.id);
+                        setNotice(null);
+                        setReportScope(project.id);
                         window.scrollTo({ top: 0 });
                       }}
                     >

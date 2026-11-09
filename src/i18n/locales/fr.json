@@ -646,6 +646,11 @@
     "type": "Type",
     "document": "Document",
     "amount": "Montant",
+    "reportAll": "État global",
+    "reportAllTitle": "Chantiers en cours",
+    "reportAllHint": "Comparaison des chantiers en cours : ventes, achats, dépenses, marge et reste à encaisser.",
+    "clientLabel": "Client",
+    "total": "Total",
     "kinds": {
       "sale": "Vente",
       "purchase": "Achat",

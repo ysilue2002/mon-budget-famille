@@ -646,6 +646,11 @@
     "type": "Type",
     "document": "Document",
     "amount": "Amount",
+    "reportAll": "All projects",
+    "reportAllTitle": "Projects in progress",
+    "reportAllHint": "Comparison of projects in progress: sales, purchases, expenses, margin and still to collect.",
+    "clientLabel": "Client",
+    "total": "Total",
     "kinds": {
       "sale": "Sale",
       "purchase": "Purchase",
