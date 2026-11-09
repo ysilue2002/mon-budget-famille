@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useBusinesses, useParties, usePrimaryCurrency, useSales } from '@/hooks/useData';
+import { useBusinesses, useParties, usePrimaryCurrency, useProjects, useSales } from '@/hooks/useData';
 import { formatAmount } from '@/core/currencies';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/core/pdf';
 import { isOverdue } from '@/core/documents';
 import { taxBreakdown } from '@/core/trade';
 import { todayISO } from '@/lib/date';
 import DocumentSheet from '@/components/DocumentSheet';
+import { ProjectFilter } from '@/components/ProjectFilter';
 import type { TradeDocument } from '@/core/types';
 import { Card, EmptyState, Page, StatCard, Tag, btnGhost, btnPrimary } from '@/components/common';
 
@@ -47,11 +48,20 @@ export default function Invoices() {
   const sales = useSales();
   const businesses = useBusinesses();
   const parties = useParties();
+  const projects = useProjects();
   const primary = usePrimaryCurrency() ?? 'XOF';
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
-  const rows = (sales ?? []).filter((sale) => sale.number);
+  // Filtre dans l'adresse (`?chantier=…`), comme les ventes.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const projectFilter = searchParams.get('chantier') ?? '';
+  const setProjectFilter = (value: string) =>
+    setSearchParams(value ? { chantier: value } : {}, { replace: true });
+
+  const invoiced = (sales ?? []).filter((sale) => sale.number);
+  const rows = projectFilter ? invoiced.filter((sale) => sale.projectId === projectFilter) : invoiced;
+  const projectName = (id?: string) => (projects ?? []).find((project) => project.id === id)?.name;
   const activeBusinesses = (businesses ?? []).filter((business) => !business.archived);
   const lang = i18n.language;
   const fmt = (minor: number) => formatAmount(minor, primary, lang);
@@ -94,7 +104,8 @@ export default function Invoices() {
     <Page
       title={t('invoices.title')}
       actions={
-        <div className="no-print flex flex-wrap gap-2">
+        <div className="no-print flex flex-wrap items-center gap-2">
+          <ProjectFilter value={projectFilter} onChange={setProjectFilter} />
           <Link to="/sales" className={btnPrimary}>
             ＋ {t('invoices.new')}
           </Link>
@@ -109,19 +120,24 @@ export default function Invoices() {
 
       {flash && <p className="no-print mb-3 text-sm font-medium text-forest-700">✓ {flash}</p>}
 
-      {rows.length === 0 ? (
+      {invoiced.length === 0 ? (
         <Card>
           <EmptyState label={t('invoices.empty')} icon="🧾" />
           <p className="mt-2 text-center text-xs text-sage-600">{t('invoices.emptyHint')}</p>
+        </Card>
+      ) : rows.length === 0 ? (
+        <Card>
+          <p className="py-6 text-center text-sm text-sage-600">{t('projects.noMatch')}</p>
         </Card>
       ) : (
         <Card className="no-print overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
+              <tr className="border-b border-forest-200 whitespace-nowrap text-left text-[11px] uppercase text-sage-600">
                 <th className="py-1.5 pe-2">{t('invoices.number')}</th>
                 <th className="py-1.5 pe-2">{t('documents.date')}</th>
                 <th className="py-1.5 pe-2">{t('invoices.client')}</th>
+                <th className="py-1.5 pe-2">{t('projects.choose')}</th>
                 <th className="py-1.5 pe-2 text-right">{t('documents.total')}</th>
                 <th className="py-1.5 pe-2 text-right">{t('invoices.paid')}</th>
                 <th className="py-1.5 pe-2 text-right">{t('invoices.due')}</th>
@@ -135,6 +151,7 @@ export default function Invoices() {
                   <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">{invoice.number}</td>
                   <td className="whitespace-nowrap py-1.5">{invoice.date}</td>
                   <td className="py-1.5 pe-2">{invoice.partyName || '—'}</td>
+                  <td className="py-1.5 pe-2 text-xs text-sage-700">{projectName(invoice.projectId) ?? '—'}</td>
                   <td className="py-1.5 pe-2 text-right font-semibold">{fmt(invoice.total)}</td>
                   <td className="py-1.5 pe-2 text-right">{fmt(invoice.paid)}</td>
                   <td className={`py-1.5 pe-2 text-right ${invoice.due > 0 ? 'font-semibold text-amber-700' : ''}`}>{fmt(invoice.due)}</td>

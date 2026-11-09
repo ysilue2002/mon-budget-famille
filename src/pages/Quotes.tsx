@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   useAccounts,
@@ -6,6 +7,7 @@ import {
   useParties,
   usePrimaryCurrency,
   useProducts,
+  useProjects,
   useQuotes,
 } from '@/hooks/useData';
 import { convertQuoteToSale, createQuote, deleteQuote, setQuoteStatus, updateQuote } from '@/core/repo';
@@ -17,6 +19,7 @@ import { lineTotal, taxBreakdown } from '@/core/trade';
 import { uuid } from '@/lib/id';
 import { todayISO } from '@/lib/date';
 import DocumentSheet from '@/components/DocumentSheet';
+import { ProjectFilter } from '@/components/ProjectFilter';
 import { ProjectSelect } from '@/components/ProjectSelect';
 import type { PaymentMethod, Quote } from '@/core/types';
 import {
@@ -104,6 +107,7 @@ export default function Quotes() {
   const parties = useParties();
   const products = useProducts();
   const accounts = useAccounts();
+  const projects = useProjects();
   const primary = usePrimaryCurrency() ?? 'XOF';
 
   const [open, setOpen] = useState(false);
@@ -115,8 +119,15 @@ export default function Quotes() {
   const [convertPaid, setConvertPaid] = useState(0);
   const [convertMethod, setConvertMethod] = useState<PaymentMethod>('cash');
   const [convertAccount, setConvertAccount] = useState('');
+  // Filtre dans l'adresse (`?chantier=…`), comme les ventes et les achats.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const projectFilter = searchParams.get('chantier') ?? '';
+  const setProjectFilter = (value: string) =>
+    setSearchParams(value ? { chantier: value } : {}, { replace: true });
 
-  const rows = quotes ?? [];
+  const allRows = quotes ?? [];
+  const rows = projectFilter ? allRows.filter((quote) => quote.projectId === projectFilter) : allRows;
+  const projectName = (id?: string) => (projects ?? []).find((project) => project.id === id)?.name;
   const activeBusinesses = (businesses ?? []).filter((business) => !business.archived);
   const activeProducts = (products ?? []).filter((product) => !product.archived);
   const accountList = (accounts ?? []).filter((account) => !account.archived);
@@ -297,7 +308,8 @@ export default function Quotes() {
     <Page
       title={t('quotes.title')}
       actions={
-        <div className="no-print flex flex-wrap gap-2">
+        <div className="no-print flex flex-wrap items-center gap-2">
+          <ProjectFilter value={projectFilter} onChange={setProjectFilter} />
           <button type="button" className={btnPrimary} onClick={openCreate}>
             ＋ {t('quotes.new')}
           </button>
@@ -313,19 +325,24 @@ export default function Quotes() {
       {flash && <p className="no-print mb-3 text-sm font-medium text-forest-700">✓ {flash}</p>}
       {error && !open && <p className="no-print mb-3 text-sm font-semibold text-red-600">{error}</p>}
 
-      {rows.length === 0 ? (
+      {allRows.length === 0 ? (
         <Card>
           <EmptyState label={t('quotes.empty')} icon="🧾" />
           <p className="mt-2 text-center text-xs text-sage-600">{t('quotes.emptyHint')}</p>
+        </Card>
+      ) : rows.length === 0 ? (
+        <Card>
+          <p className="py-6 text-center text-sm text-sage-600">{t('projects.noMatch')}</p>
         </Card>
       ) : (
         <Card className="no-print overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-forest-200 text-left text-[11px] uppercase text-sage-600">
+              <tr className="border-b border-forest-200 whitespace-nowrap text-left text-[11px] uppercase text-sage-600">
                 <th className="py-1.5 pe-2">{t('quotes.number')}</th>
                 <th className="py-1.5 pe-2">{t('documents.date')}</th>
                 <th className="py-1.5 pe-2">{t('quotes.client')}</th>
+                <th className="py-1.5 pe-2">{t('projects.choose')}</th>
                 <th className="py-1.5 pe-2 text-right">{t('documents.total')}</th>
                 <th className="py-1.5 pe-2">{t('quotes.status')}</th>
                 <th className="py-1.5 pe-2 text-right">{t('common.actions')}</th>
@@ -337,6 +354,7 @@ export default function Quotes() {
                   <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">{quote.number}</td>
                   <td className="whitespace-nowrap py-1.5">{quote.date}</td>
                   <td className="py-1.5 pe-2">{quote.partyName || '—'}</td>
+                  <td className="py-1.5 pe-2 text-xs text-sage-700">{projectName(quote.projectId) ?? '—'}</td>
                   <td className="py-1.5 pe-2 text-right font-semibold">{fmt(quote.total)}</td>
                   <td className="py-1.5 pe-2">
                     <Tag tone={statusTone(quote.status)}>{t(QUOTE_STATUS_KEY[quote.status])}</Tag>

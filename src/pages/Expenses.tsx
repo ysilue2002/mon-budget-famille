@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import {
   useAccounts,
   useBusinesses,
@@ -62,7 +63,11 @@ export default function Expenses() {
   const [form, setForm] = useState<ExpenseForm | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
-  const [projectFilter, setProjectFilter] = useState('');
+  // Filtre dans l'adresse : la fiche d'un chantier peut ouvrir ses dépenses.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const projectFilter = searchParams.get('chantier') ?? '';
+  const setProjectFilter = (value: string) =>
+    setSearchParams(value ? { chantier: value } : {}, { replace: true });
 
   const projectName = (id?: string) => (projects ?? []).find((project) => project.id === id)?.name;
 

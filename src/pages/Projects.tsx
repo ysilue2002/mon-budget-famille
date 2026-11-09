@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   useAdvances,
@@ -263,6 +264,22 @@ export default function Projects() {
                       {value.due > 0 ? t('projects.dueShort', { value: fmt(value.due) }) : t('projects.paidUp')}
                     </p>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ['sales', '🛒'],
+                    ['purchases', '📥'],
+                    ['expenses', '🧾'],
+                  ] as const).map(([route, icon]) => (
+                    <Link
+                      key={route}
+                      to={`/${route}?chantier=${project.id}`}
+                      className="rounded-lg border border-forest-200 px-2 py-1 text-xs font-medium capitalize text-forest-800 hover:bg-forest-50"
+                    >
+                      {icon} {t(`nav.${route}`)}
+                    </Link>
+                  ))}
                 </div>
 
                 {project.note && <p className="text-xs text-sage-600">{project.note}</p>}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   useAccounts,
@@ -96,7 +96,12 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TradeForm | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [projectFilter, setProjectFilter] = useState('');
+  // Le chantier filtré vit dans l'adresse (`?chantier=…`) : un lien depuis la
+  // fiche du chantier ouvre donc la liste déjà filtrée, et le rechargement la garde.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const projectFilter = searchParams.get('chantier') ?? '';
+  const setProjectFilter = (value: string) =>
+    setSearchParams(value ? { chantier: value } : {}, { replace: true });
 
   const projectName = (id?: string) => (projects ?? []).find((project) => project.id === id)?.name;
   const allDocuments = (kind === 'sale' ? sales : purchases) ?? [];
