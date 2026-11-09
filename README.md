@@ -178,8 +178,10 @@ peut aussi être archivée sans perdre son historique.
   puis ventes, achats, dépenses, marge, acomptes et reste à encaisser ; le même
   état s'exporte en PDF (`downloadPdf`, avec bascule vers l'impression en
   arabe). « État global » compare tous les chantiers en cours dans un tableau
-  unique avec ligne de totaux. Le profil de l'activité reste à un clic depuis
-  l'accueil : le menu garde treize entrées.
+  unique avec ligne de totaux, imprimable et exportable en PDF ; sur téléphone
+  le tableau laisse place à une fiche par chantier, sans défilement latéral.
+  Le profil de l'activité reste à un clic depuis l'accueil : le menu garde
+  treize entrées.
 - La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.
   `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
   TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle

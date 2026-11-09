@@ -133,6 +133,44 @@ export default function Projects() {
   );
   const printView = reportScope !== null;
 
+  const exportGlobalPdf = () => {
+    if (!pdfSupportsLanguage(lang)) {
+      setNotice(t('documents.arabicUsesPrint'));
+      return;
+    }
+    downloadPdf({
+      fileName: pdfFileName('etat-chantiers', todayISO()),
+      title: t('projects.reportAllTitle'),
+      meta: [],
+      head: [
+        t('projects.choose'),
+        t('projects.clientLabel'),
+        t('projects.sales'),
+        t('projects.purchases'),
+        t('projects.expenses'),
+        t('projects.margin'),
+        t('projects.due'),
+      ],
+      body: runningLines.map(({ project, totals: value }) => [
+        project.name,
+        project.partyName || '—',
+        fmt(value.salesHt),
+        fmt(value.purchasesHt),
+        fmt(value.expenses),
+        fmt(value.margin),
+        fmt(value.due),
+      ]),
+      totals: [
+        [t('projects.sales'), fmt(runningTotals.salesHt)],
+        [t('projects.purchases'), fmt(runningTotals.purchasesHt)],
+        [t('projects.expenses'), fmt(runningTotals.expenses)],
+        [t('projects.margin'), fmt(runningTotals.margin)],
+        [t('projects.due'), fmt(runningTotals.due)],
+      ],
+      footer: t('documents.footer'),
+    });
+  };
+
   const exportPdf = () => {
     if (!report || !reportProject) return;
     if (!pdfSupportsLanguage(lang)) {
@@ -271,6 +309,11 @@ export default function Projects() {
               ⬇ {t('documents.pdf')}
             </button>
           )}
+          {showAll && (
+            <button type="button" className={btnGhost} onClick={exportGlobalPdf}>
+              ⬇ {t('documents.pdf')}
+            </button>
+          )}
           <button
             type="button"
             className={btnGhost}
@@ -387,8 +430,7 @@ export default function Projects() {
             </div>
           </header>
 
-          <div className="overflow-x-auto print:overflow-visible">
-          <table className="w-full text-sm">
+          <table className="hidden w-full text-sm sm:table print:table">
             <thead>
               <tr className="border-b border-forest-200 whitespace-nowrap text-left text-[11px] uppercase text-sage-600">
                 <th className="py-1.5 pe-2">{t('projects.choose')}</th>
@@ -432,7 +474,47 @@ export default function Projects() {
               </tr>
             </tfoot>
           </table>
-          </div>
+
+          <ul className="flex flex-col divide-y divide-forest-100 text-sm sm:hidden print:hidden">
+            {runningLines.map(({ project, totals: value }) => (
+              <li key={project.id} className="py-2">
+                <p className="font-medium text-forest-900">{project.name}</p>
+                <p className="text-xs text-sage-600">{project.partyName || '—'}</p>
+                <dl className="mt-1 grid grid-cols-2 gap-x-3 text-xs">
+                  {[
+                    [t('projects.sales'), fmt(value.salesHt)],
+                    [t('projects.purchases'), fmt(value.purchasesHt)],
+                    [t('projects.expenses'), fmt(value.expenses)],
+                    [t('projects.margin'), fmt(value.margin)],
+                    [t('projects.due'), fmt(value.due)],
+                  ].map(([label, amount], index) => (
+                    <div key={label} className={`flex justify-between gap-2 ${index === 3 ? 'font-bold text-forest-950' : ''}`}>
+                      <dt className="text-sage-600">{label}</dt>
+                      <dd className="text-forest-900">{amount}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            ))}
+            <li className="py-2">
+              <p className="font-bold text-forest-950">{t('projects.total')}</p>
+              <dl className="mt-1 grid grid-cols-2 gap-x-3 text-xs font-semibold">
+                {[
+                  [t('projects.sales'), fmt(runningTotals.salesHt)],
+                  [t('projects.purchases'), fmt(runningTotals.purchasesHt)],
+                  [t('projects.expenses'), fmt(runningTotals.expenses)],
+                  [t('projects.margin'), fmt(runningTotals.margin)],
+                  [t('projects.due'), fmt(runningTotals.due)],
+                ].map(([label, amount]) => (
+                  <div key={label} className="flex justify-between gap-2">
+                    <dt className="text-sage-600">{label}</dt>
+                    <dd className="text-forest-900">{amount}</dd>
+                  </div>
+                ))}
+              </dl>
+            </li>
+          </ul>
+
           <p className="mt-3 border-t border-forest-100 pt-2 text-[11px] text-sage-500">{t('projects.reportHint')}</p>
         </article>
       )}
