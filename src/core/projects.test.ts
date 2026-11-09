@@ -1,0 +1,204 @@
+import { describe, expect, it } from 'vitest';
+import { projectEntries, projectTotals, sortedProjects } from '@/core/projects';
+import type {
+  Advance,
+  Product,
+  Project,
+  SyncFields,
+  TradeDocument,
+  Transaction,
+} from '@/core/types';
+
+const sync: SyncFields = {
+  baseRev: 0,
+  rev: 0,
+  updatedAt: 0,
+  deviceId: 'test',
+  syncStatus: 'synced',
+};
+
+function product(id: string, kind: Product['kind'], name = id): Product {
+  return {
+    id,
+    familyId: 'f',
+    name,
+    kind,
+    unit: 'pcs',
+    buyPrice: 0,
+    sellPrice: 0,
+    stockQty: 0,
+    alertQty: 0,
+    archived: false,
+    createdAt: 0,
+    ...sync,
+  };
+}
+
+function project(id: string, overrides: Partial<Project> = {}): Project {
+  return {
+    id,
+    familyId: 'f',
+    name: id,
+    startDate: '2026-01-01',
+    status: 'open',
+    archived: false,
+    createdAt: 0,
+    ...sync,
+    ...overrides,
+  };
+}
+
+function document_(id: string, kind: 'sale' | 'purchase', projectId: string | undefined, lines: [number, number][], total = 0, due = 0): TradeDocument {
+  return {
+    id,
+    familyId: 'f',
+    businessId: 'b',
+    kind,
+    date: '2026-03-01',
+    projectId,
+    lines: lines.map(([qty, unitPrice], index) => ({
+      id: `${id}-${index}`,
+      productId: index === 0 ? 'ciment' : 'main',
+      label: index === 0 ? 'Ciment' : 'Main d’œuvre',
+      qty,
+      unitPrice,
+      lineTotal: Math.round(qty * unitPrice),
+    })),
+    total,
+    paid: total - due,
+    due,
+    paymentMethod: 'cash',
+    accountId: 'a',
+    createdAt: 0,
+    ...sync,
+  };
+}
+
+function expense(id: string, projectId: string | undefined, amount: number): Transaction {
+  return {
+    id,
+    familyId: 'f',
+    accountId: 'a',
+    authorId: 'u',
+    authorName: 'Test',
+    type: 'expense',
+    amountOriginal: amount,
+    currencyOriginal: 'XOF',
+    exchangeRate: 1,
+    amountInPrimary: amount,
+    businessId: 'b',
+    projectId,
+    settled: true,
+    date: '2026-03-02',
+    ...sync,
+  };
+}
+
+function advance(id: string, projectId: string | undefined, amount: number, status: Advance['status']): Advance {
+  return {
+    id,
+    familyId: 'f',
+    projectId,
+    subject: 'Acompte',
+    amount,
+    receivedOn: '2026-02-01',
+    direction: 'received',
+    status,
+    createdAt: 0,
+    ...sync,
+  };
+}
+
+describe('projectTotals', () => {
+  const books = {
+    products: [product('ciment', 'goods'), product('main', 'service')],
+    // Vente : 5 sacs à 1 000 + 2 m² de main d'œuvre à 2 500 = 10 000 HT.
+    sales: [
+      document_('s1', 'sale', 'p1', [
+        [5, 1000],
+        [2, 2500],
+      ], 10_000, 4000),
+      document_('s2', 'sale', 'p2', [[1, 99_000]]),
+      document_('s3', 'sale', undefined, [[1, 5000]]),
+    ],
+    purchases: [
+      document_('a1', 'purchase', 'p1', [[3, 800]], 2400),
+      document_('a2', 'purchase', 'p2', [[1, 50_000]], 50_000),
+    ],
+    transactions: [
+      expense('t1', 'p1', 1000),
+      // Opération générée par la vente s1 : déjà comptée comme vente.
+      expense('sale-s1', 'p1', 10_000),
+      expense('t2', 'p2', 2000),
+      expense('t3', undefined, 7000),
+    ],
+    advances: [
+      advance('av1', 'p1', 3000, 'open'),
+      advance('av2', 'p1', 2500, 'refunded'),
+      advance('av3', 'p2', 11_000, 'open'),
+    ],
+  };
+
+  it('isole les documents du chantier et sépare main d’œuvre et fournitures', () => {
+    const totals = projectTotals('p1', books);
+    expect(totals.salesHt).toBe(10_000);
+    expect(totals.laborHt).toBe(5000);
+    expect(totals.suppliesHt).toBe(5000);
+    expect(totals.purchasesHt).toBe(2400);
+    expect(totals.due).toBe(4000);
+    expect(totals.salesCount).toBe(1);
+    expect(totals.purchasesCount).toBe(1);
+  });
+
+  it('compte les dépenses rattachées sans doubler la vente du document', () => {
+    const totals = projectTotals('p1', books);
+    expect(totals.expenses).toBe(1000);
+    expect(totals.expenseCount).toBe(1);
+    expect(totals.margin).toBe(10_000 - 2400 - 1000);
+  });
+
+  it('retient les acomptes reçus non remboursés', () => {
+    const totals = projectTotals('p1', books);
+    expect(totals.advancesReceived).toBe(3000);
+    expect(totals.advanceCount).toBe(1);
+  });
+
+  it('ne compte rien pour un chantier vide', () => {
+    const totals = projectTotals('inconnu', books);
+    expect(totals.salesHt).toBe(0);
+    expect(totals.margin).toBe(0);
+    expect(totals.advancesReceived).toBe(0);
+  });
+
+  it('considère les lignes libres comme des fournitures', () => {
+    const totals = projectTotals('p2', books);
+    expect(totals.laborHt).toBe(0);
+    expect(totals.suppliesHt).toBe(99_000);
+  });
+});
+
+describe('projectEntries', () => {
+  it('liste ventes, achats, dépenses et acomptes du plus récent au plus ancien', () => {
+    const books = {
+      products: [product('ciment', 'goods'), product('main', 'service')],
+      sales: [document_('s1', 'sale', 'p1', [[1, 1000]], 1000)],
+      purchases: [document_('a1', 'purchase', 'p1', [[1, 500]], 500)],
+      transactions: [expense('t1', 'p1', 250), expense('sale-s1', 'p1', 1000)],
+      advances: [advance('av1', 'p1', 300, 'open')],
+    };
+    const entries = projectEntries('p1', books);
+    expect(entries.map((entry) => entry.kind)).toEqual(['expense', 'sale', 'purchase', 'advance']);
+    expect(entries.map((entry) => entry.amount)).toEqual([250, 1000, 500, 300]);
+  });
+});
+
+describe('sortedProjects', () => {
+  it('place les chantiers ouverts et récents en premier', () => {
+    const rows = [
+      project('vieux-fini', { status: 'done', startDate: '2026-01-01' }),
+      project('recent', { startDate: '2026-05-01' }),
+      project('archive', { archived: true, startDate: '2026-06-01' }),
+    ];
+    expect(sortedProjects(rows).map((row) => row.id)).toEqual(['recent', 'vieux-fini', 'archive']);
+  });
+});

@@ -40,6 +40,10 @@ function tableFor(entity: SyncEntity): Table<unknown, string> | null {
       return db.settlements;
     case 'quote':
       return db.quotes;
+    case 'project':
+      return db.projects;
+    case 'stockMovement':
+      return db.stockMovements;
     default:
       return null;
   }

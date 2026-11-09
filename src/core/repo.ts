@@ -28,6 +28,7 @@ import type {
   PaymentMethod,
   Product,
   ProductKind,
+  Project,
   Quote,
   RecurrenceFrequency,
   TradeDocument,
@@ -64,6 +65,7 @@ type SyncedEntity =
   | 'advance'
   | 'settlement'
   | 'quote'
+  | 'project'
   | 'stockMovement';
 
 async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<string, unknown> | null> {
@@ -101,6 +103,8 @@ async function baseSnapshotOf(entity: SyncedEntity, id: string): Promise<Record<
         return db.settlements;
       case 'quote':
         return db.quotes;
+      case 'project':
+        return db.projects;
       case 'stockMovement':
         return db.stockMovements;
     }
@@ -206,6 +210,8 @@ export interface TransactionInput {
   member?: string;
   /** Activité professionnelle rattachée (ignorée pour un transfert). */
   businessId?: string;
+  /** Chantier rattaché (facultatif). */
+  projectId?: string;
   /** Facture professionnelle non encore encaissée / payée. */
   settled?: boolean;
   /** Part déjà réglée d'une facture non soldée. */
@@ -255,6 +261,7 @@ export async function createTransaction(input: TransactionInput, id?: string): P
     categoryId: input.categoryId,
     member: memberName,
     businessId,
+    projectId: businessId ? input.projectId : undefined,
     settled,
     settledAmount: businessId ? input.settledAmount : undefined,
     date: input.date,
@@ -628,6 +635,76 @@ export async function archiveBusiness(id: string): Promise<void> {
   await enqueueUpsert('business', id, recordOf(updated), current.rev, base);
 }
 
+// ----------------------------------------------------------------------------- chantiers
+
+export interface ProjectInput {
+  /** Activité à laquelle le chantier appartient (facultatif). */
+  businessId?: string;
+  name: string;
+  partyId?: string;
+  partyName?: string;
+  startDate: string;
+  endDate?: string;
+  status: Project['status'];
+  note?: string;
+}
+
+/**
+ * Crée un chantier : un simple regroupement, sans aucune conséquence sur la
+ * trésorerie, le stock ou le résultat. Les documents s'y rattachent ensuite.
+ */
+export async function createProject(input: ProjectInput): Promise<string> {
+  const family = await getActiveFamily();
+  if (!family) throw new Error('no-family');
+  const project: Project = {
+    id: uuid(),
+    familyId: family.id,
+    businessId: input.businessId || undefined,
+    name: input.name.trim(),
+    partyId: input.partyId,
+    partyName: input.partyName?.trim() || undefined,
+    startDate: input.startDate,
+    endDate: input.endDate || undefined,
+    status: input.status,
+    note: input.note?.trim() || undefined,
+    archived: false,
+    createdAt: Date.now(),
+    ...newSyncFields(),
+  };
+  await db.projects.put(project);
+  await enqueue('project', project.id, 'upsert', recordOf(project));
+  return project.id;
+}
+
+export async function updateProject(id: string, input: ProjectInput): Promise<void> {
+  const base = await baseSnapshotOf('project', id);
+  const current = await db.projects.get(id);
+  if (!current) throw new Error('not-found');
+  const updated: Project = {
+    ...current,
+    businessId: input.businessId || undefined,
+    name: input.name.trim(),
+    partyId: input.partyId,
+    partyName: input.partyName?.trim() || undefined,
+    startDate: input.startDate,
+    endDate: input.endDate || undefined,
+    status: input.status,
+    note: input.note?.trim() || undefined,
+    ...(updatedSyncFields(current) as object),
+  };
+  await db.projects.put(updated);
+  await enqueueUpsert('project', id, recordOf(updated), current.rev, base);
+}
+
+/**
+ * Supprime un chantier : ses documents restent, simplement détachés (aucun
+ * montant ne bouge, seule l'étiquette du chantier disparaît).
+ */
+export async function deleteProject(id: string): Promise<void> {
+  await db.projects.delete(id);
+  await enqueue('project', id, 'delete', null);
+}
+
 // ----------------------------------------------------------------------------- marchandises
 
 export interface ProductInput {
@@ -850,6 +927,8 @@ export interface TradeInput {
   /** Fiche client/fournisseur rattachée (facultatif). */
   partyId?: string;
   partyName?: string;
+  /** Chantier auquel le document se rattache (facultatif). */
+  projectId?: string;
   lines: TradeLineInput[];
   /** Montant déjà reçu (vente) ou payé (achat), en sous-unités. */
   paid: number;
@@ -926,6 +1005,7 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
     date: input.date,
     partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
+    projectId: input.projectId || undefined,
     lines: documentLines,
     total,
     taxRate: tax.rate > 0 ? tax.rate : undefined,
@@ -949,6 +1029,7 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
       currencyOriginal: family.primaryCurrency,
       categoryId: kind === 'sale' ? 'cat-activite' : 'cat-autres',
       businessId: input.businessId,
+      projectId: input.projectId || undefined,
       settled: due === 0,
       settledAmount: paid,
       date: input.date,
@@ -988,6 +1069,7 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
     date: input.date,
     partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
+    projectId: input.projectId || undefined,
     lines: documentLines,
     total,
     taxRate: tax.rate > 0 ? tax.rate : undefined,
@@ -1020,6 +1102,7 @@ export async function updateTrade(kind: 'sale' | 'purchase', id: string, input: 
       currencyOriginal: existingTx.currencyOriginal,
       categoryId: kind === 'sale' ? 'cat-activite' : 'cat-autres',
       businessId: input.businessId,
+      projectId: input.projectId || undefined,
       settled: due === 0,
       settledAmount: paid,
       date: input.date,
@@ -1208,6 +1291,8 @@ export interface QuoteInput {
   validUntil?: string;
   partyId?: string;
   partyName?: string;
+  /** Chantier prévu pour les travaux du devis (facultatif). */
+  projectId?: string;
   lines: QuoteLineInput[];
   status: Quote['status'];
   note?: string;
@@ -1232,6 +1317,7 @@ function quoteFields(input: QuoteInput) {
     validUntil: input.validUntil || undefined,
     partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
+    projectId: input.projectId || undefined,
     note: input.note?.trim() || undefined,
     status: input.status,
   };
@@ -1313,6 +1399,7 @@ export async function convertQuoteToSale(id: string, options: QuoteConversionInp
     date: options.date ?? todayISO(),
     partyId: quote.partyId,
     partyName: quote.partyName,
+    projectId: quote.projectId,
     lines: quote.lines.map((line) => ({
       productId: line.productId,
       label: line.label,
@@ -1342,6 +1429,8 @@ export async function convertQuoteToSale(id: string, options: QuoteConversionInp
 export interface AdvanceInput {
   partyId?: string;
   partyName?: string;
+  /** Chantier auquel l'acompte se rattache (facultatif). */
+  projectId?: string;
   subject: string;
   amount: number;
   expected?: number;
@@ -1360,6 +1449,7 @@ export async function createAdvance(input: AdvanceInput): Promise<string> {
     familyId: family.id,
     partyId: input.partyId,
     partyName: input.partyName?.trim() || undefined,
+    projectId: input.projectId || undefined,
     subject: input.subject.trim(),
     amount: Math.max(0, Math.round(input.amount)),
     expected: input.expected && input.expected > 0 ? Math.round(input.expected) : undefined,
@@ -1384,6 +1474,7 @@ export async function updateAdvance(id: string, patch: Partial<AdvanceInput>): P
     ...patch,
     ...(patch.subject !== undefined ? { subject: patch.subject.trim() } : {}),
     ...(patch.partyName !== undefined ? { partyName: patch.partyName.trim() || undefined } : {}),
+    ...(patch.projectId !== undefined ? { projectId: patch.projectId || undefined } : {}),
     ...(patch.amount !== undefined ? { amount: Math.max(0, Math.round(patch.amount)) } : {}),
     ...(patch.direction !== undefined
       ? { direction: patch.direction === 'paid' ? ('paid' as const) : ('received' as const) }

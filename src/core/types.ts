@@ -113,6 +113,8 @@ export interface Transaction extends SyncFields {
   member?: string;
   /** Activité professionnelle à laquelle l'opération se rattache (facultatif). */
   businessId?: string;
+  /** Chantier auquel la dépense se rattache (facultatif). */
+  projectId?: string;
   /**
    * Règlement d'une opération professionnelle : `false` = facture émise non
    * encaissée (créance) ou facture reçue non payée (dette). Absent = réglée.
@@ -150,6 +152,32 @@ export interface Business extends SyncFields {
   /** Identifiant fiscal / RCCM (facultatif). */
   taxId?: string;
   notes?: string;
+  archived: boolean;
+  createdAt: number;
+}
+
+/**
+ * Chantier (ou dossier) d'une activité : un travail avec son client, ses
+ * achats, sa main d'œuvre, ses dépenses et ses acomptes. Ce n'est pas un
+ * document comptable : il ne crée aucun mouvement, il regroupe l'existant.
+ */
+export type ProjectStatus = 'open' | 'done';
+
+export interface Project extends SyncFields {
+  id: string;
+  familyId: string;
+  /** Activité à laquelle le chantier appartient (facultatif). */
+  businessId?: string;
+  name: string;
+  /** Fiche client du chantier (facultatif). */
+  partyId?: string;
+  /** Nom du client, recopié à la saisie. */
+  partyName?: string;
+  startDate: string;
+  /** Date de fin (vide tant que le chantier est en cours). */
+  endDate?: string;
+  status: ProjectStatus;
+  note?: string;
   archived: boolean;
   createdAt: number;
 }
@@ -259,6 +287,8 @@ export interface TradeDocument extends SyncFields {
   partyId?: string;
   /** Nom du client ou fournisseur, recopié à la saisie. */
   partyName?: string;
+  /** Chantier auquel le document se rattache (facultatif). */
+  projectId?: string;
   lines: TradeLine[];
   /** Numéro du document : FAC-2026-0001 pour une vente, ACH-… pour un achat. */
   number?: string;
@@ -289,6 +319,8 @@ export interface Advance extends SyncFields {
   familyId: string;
   partyId?: string;
   partyName?: string;
+  /** Chantier auquel l'avance se rattache (facultatif). */
+  projectId?: string;
   /** Objet de l'avance (commande, prestation…). */
   subject: string;
   /** Montant effectivement reçu, en sous-unités du foyer. */
@@ -350,6 +382,8 @@ export interface Quote extends SyncFields {
   validUntil?: string;
   partyId?: string;
   partyName?: string;
+  /** Chantier prévu pour les travaux du devis (facultatif). */
+  projectId?: string;
   lines: TradeLine[];
   /** Taux de TVA du devis (prix HT, total TTC). */
   taxRate?: number;
@@ -491,6 +525,7 @@ export type SyncEntity =
   | 'advance'
   | 'settlement'
   | 'quote'
+  | 'project'
   | 'stockMovement';
 
 export interface OutboxOperation {

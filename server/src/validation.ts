@@ -76,6 +76,8 @@ export const syncEntitySchema = z.enum([
   'advance',
   'settlement',
   'quote',
+  'project',
+  'stockMovement',
 ]);
 
 export const pushOpSchema = z.object({

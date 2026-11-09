@@ -9,7 +9,7 @@ import {
 } from '@/hooks/useData';
 import { computeAccountBalance } from '@/core/selectors';
 import { formatAmount } from '@/core/currencies';
-import { lowStockProducts, stockValue } from '@/core/stock';
+import { lowStockProducts, stockProducts, stockValue } from '@/core/stock';
 import { currentMonth, endOfMonth } from '@/lib/date';
 import { Card, Page, StatCard, btnGhost, btnPrimary } from '@/components/common';
 
@@ -68,6 +68,7 @@ export default function ActivityHome() {
     { to: '/purchases', icon: '📥', label: t('activity.newPurchase'), tone: 'ghost' as const },
     { to: '/transactions', icon: '🧾', label: t('activity.newExpense'), tone: 'ghost' as const },
     { to: '/products', icon: '📦', label: t('activity.openProducts'), tone: 'ghost' as const },
+    { to: '/projects', icon: '🏗️', label: t('activity.openProjects'), tone: 'ghost' as const },
     { to: '/balances', icon: '📈', label: t('activity.openStatements'), tone: 'ghost' as const },
     { to: '/states', icon: '📄', label: t('activity.openDocuments'), tone: 'ghost' as const },
     { to: '/settings', icon: '⚙️', label: t('activity.openSettings'), tone: 'ghost' as const },
@@ -76,7 +77,16 @@ export default function ActivityHome() {
   return (
     <Page
       title={t('activity.title')}
-      actions={<span className="text-sm text-sage-600">{t('activity.greeting')}</span>}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-sage-600">{t('activity.greeting')}</span>
+          {/* Le profil de l'activité quitte le menu (place prise par les
+              chantiers) : il reste à un clic depuis l'accueil. */}
+          <Link to="/profile" className={btnGhost}>
+            🧑‍💼 {t('nav.profile')}
+          </Link>
+        </div>
+      }
     >
       {activeBusinesses.length === 0 && (
         <Card className="mb-4 border-amber-200 bg-amber-50/60">
@@ -102,7 +112,7 @@ export default function ActivityHome() {
         <StatCard
           label={t('activity.stockValue')}
           value={fmt(stock)}
-          hint={t('activity.stockHint', { count: (products ?? []).filter((p) => !p.archived).length })}
+          hint={t('activity.stockHint', { count: stockProducts(products ?? []).length })}
         />
         <StatCard
           label={t('activity.lowStock')}

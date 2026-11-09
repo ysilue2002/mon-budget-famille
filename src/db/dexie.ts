@@ -11,6 +11,7 @@ import type {
   HouseholdMember,
   Party,
   Product,
+  Project,
   Quote,
   Settlement,
   StockMovement,
@@ -35,6 +36,7 @@ export class BudgetFamilyDB extends Dexie {
   accounts!: Table<FinancialAccount, string>;
   businesses!: Table<Business, string>;
   products!: Table<Product, string>;
+  projects!: Table<Project, string>;
   sales!: Table<TradeDocument, string>;
   purchases!: Table<TradeDocument, string>;
   parties!: Table<Party, string>;
@@ -137,6 +139,13 @@ export class BudgetFamilyDB extends Dexie {
     // le stock d'une date passée sans le reconstituer.
     this.version(13).stores({
       stockMovements: 'id, familyId, productId, date, documentId, syncStatus',
+    });
+    // v14 : chantiers (regroupement des ventes, achats, dépenses et acomptes
+    // d'un même travail). Le rattachement est un simple champ, sans table.
+    this.version(14).stores({
+      projects: 'id, familyId, name, status, syncStatus',
+      sales: 'id, familyId, businessId, projectId, date, syncStatus',
+      purchases: 'id, familyId, businessId, projectId, date, syncStatus',
     });
   }
 }

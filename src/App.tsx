@@ -26,6 +26,7 @@ import Statements from '@/pages/Statements';
 import { NAV_BUSINESS, NAV_FAMILY, type NavItem } from '@/navigation';
 import ActivityHome from '@/pages/ActivityHome';
 import Products from '@/pages/Products';
+import Projects from '@/pages/Projects';
 import Trades from '@/pages/Trades';
 import Parties from '@/pages/Parties';
 import Advances from '@/pages/Advances';
@@ -165,6 +166,7 @@ function Layout() {
             <Routes>
               <Route path="/" element={business ? <ActivityHome /> : <Dashboard />} />
               <Route path="/products" element={<Products />} />
+              <Route path="/projects" element={<Projects />} />
               <Route path="/sales" element={<Trades kind="sale" />} />
               <Route path="/purchases" element={<Trades kind="purchase" />} />
               <Route path="/expenses" element={<Expenses />} />

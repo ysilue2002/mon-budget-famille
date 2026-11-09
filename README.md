@@ -159,6 +159,17 @@ peut aussi être archivée sans perdre son historique.
   du stock et ne déclenche pas d'alerte de réapprovisionnement. C'est ce qui rend
   l'espace Activité utilisable par un maçon, un menuisier, un mécanicien ou un
   prestataire de services, et pas seulement par un commerce.
+- **Chantiers** (`Project`, écran `/projects`) : une vente, un achat, un devis,
+  une dépense et un acompte peuvent porter un `projectId`. L'écran additionne
+  alors, par chantier, les ventes hors taxe (séparées en main d'œuvre et
+  fournitures), les achats hors taxe, les dépenses, les acomptes reçus et le
+  reste à encaisser, et en déduit la **marge** (`projectTotals` dans
+  `src/core/projects.ts`). Un chantier ne crée aucune écriture : il étiquette
+  des documents existants, et le supprimer ne touche ni aux montants ni au
+  stock. L'opération de journal générée par une vente ou un achat est exclue du
+  calcul des dépenses (`isDocumentTransaction`), sinon elle doublerait le
+  document. Le profil de l'activité reste à un clic depuis l'accueil : le menu
+  garde treize entrées.
 - La **TVA facturée n'est pas un gain** : elle est reversée, jamais gagnée.
   `documentsTax` relit la TVA sur les lignes et le taux de chaque document ; la
   TVA collectée moins la TVA déductible donne la **TVA à payer** (négative, elle

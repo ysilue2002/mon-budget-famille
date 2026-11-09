@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAdvances, useParties, usePrimaryCurrency } from '@/hooks/useData';
 import { createAdvance, deleteAdvance, updateAdvance } from '@/core/repo';
+import { ProjectSelect } from '@/components/ProjectSelect';
 import { formatAmount } from '@/core/currencies';
 import {
   advanceDirection,
@@ -33,6 +34,7 @@ interface AdvanceForm {
   id?: string;
   direction: AdvanceDirection;
   partyName: string;
+  projectId: string;
   subject: string;
   amount: number;
   expected: number;
@@ -45,6 +47,7 @@ function emptyForm(): AdvanceForm {
   return {
     direction: 'received',
     partyName: '',
+    projectId: '',
     subject: '',
     amount: 0,
     expected: 0,
@@ -101,6 +104,7 @@ export default function Advances() {
       id: advance.id,
       direction: advanceDirection(advance),
       partyName: advance.partyName ?? '',
+      projectId: advance.projectId ?? '',
       subject: advance.subject,
       amount: advance.amount,
       expected: advance.expected ?? 0,
@@ -123,6 +127,7 @@ export default function Advances() {
     const input = {
       partyId: matched?.id,
       partyName: form.partyName,
+      projectId: form.projectId || undefined,
       subject: form.subject,
       amount: form.amount,
       expected: form.expected,
@@ -272,6 +277,10 @@ export default function Advances() {
               ))}
             </datalist>
           </Field>
+          <ProjectSelect
+            value={form.projectId}
+            onChange={(value) => setForm({ ...form, projectId: value })}
+          />
           <Field label={t('advances.subject')}>
             <TextInput
               value={form.subject}

@@ -8,6 +8,7 @@ import {
   useTransactions,
 } from '@/hooks/useData';
 import { createTransaction, deleteTransaction } from '@/core/repo';
+import { ProjectSelect } from '@/components/ProjectSelect';
 import { formatAmount } from '@/core/currencies';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import type { Transaction } from '@/core/types';
@@ -31,6 +32,7 @@ interface ExpenseForm {
   categoryId: string;
   accountId: string;
   businessId: string;
+  projectId: string;
   date: string;
   note: string;
   paid: boolean;
@@ -99,6 +101,7 @@ export default function Expenses() {
       categoryId: expenseCategories[0]?.id ?? '',
       accountId: account.id,
       businessId: businessId || activeBusinesses[0].id,
+      projectId: '',
       date: todayISO(),
       note: '',
       paid: true,
@@ -123,11 +126,13 @@ export default function Expenses() {
       currencyOriginal: account.currency,
       categoryId: form.categoryId || undefined,
       businessId: form.businessId,
+      projectId: form.projectId || undefined,
       settled: form.paid,
       date: form.date,
       note: form.note.trim() || undefined,
     });
     setForm(null);
+    setError(null);
     setFlash(t('expenses.saved'));
   };
 
@@ -210,6 +215,11 @@ export default function Expenses() {
                     </Field>
                   )}
                 </div>
+                <ProjectSelect
+                  value={form.projectId}
+                  onChange={(value) => setForm({ ...form, projectId: value })}
+                  businessId={form.businessId}
+                />
                 <Field label={t('expenses.note')}>
                   <TextInput
                     value={form.note}

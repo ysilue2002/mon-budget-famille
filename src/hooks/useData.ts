@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { getRates } from '@/core/exchange';
 import type { RatesSource } from '@/core/exchange';
 import { db } from '@/db/dexie';
+import { sortedProjects } from '@/core/projects';
 import type { CurrencyCode, RateSnapshot } from '@/core/types';
 
 export function useRates(): {
@@ -86,6 +87,14 @@ export function useProducts() {
   return useLiveQuery(async () => {
     const rows = await db.products.toArray();
     return rows.sort((a, b) => Number(a.archived) - Number(b.archived) || a.name.localeCompare(b.name));
+  }, []);
+}
+
+/** Chantiers : les ouverts d'abord, puis les plus récents. */
+export function useProjects() {
+  return useLiveQuery(async () => {
+    const rows = await db.projects.toArray();
+    return sortedProjects(rows);
   }, []);
 }
 

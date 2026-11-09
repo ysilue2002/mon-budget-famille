@@ -17,6 +17,7 @@ import { lineTotal, taxBreakdown } from '@/core/trade';
 import { uuid } from '@/lib/id';
 import { todayISO } from '@/lib/date';
 import DocumentSheet from '@/components/DocumentSheet';
+import { ProjectSelect } from '@/components/ProjectSelect';
 import type { PaymentMethod, Quote } from '@/core/types';
 import {
   Card,
@@ -72,6 +73,7 @@ interface QuoteForm {
   date: string;
   validUntil: string;
   partyName: string;
+  projectId: string;
   status: Quote['status'];
   note: string;
   /** Taux de TVA saisi (pourcentage, texte libre). */
@@ -155,6 +157,7 @@ export default function Quotes() {
       date: todayISO(),
       validUntil: '',
       partyName: '',
+      projectId: '',
       status: 'draft',
       note: '',
       taxRate: '',
@@ -172,6 +175,7 @@ export default function Quotes() {
       date: quote.date,
       validUntil: quote.validUntil ?? '',
       partyName: quote.partyName ?? '',
+      projectId: quote.projectId ?? '',
       status: quote.status,
       note: quote.note ?? '',
       taxRate: quote.taxRate ? String(quote.taxRate) : '',
@@ -220,6 +224,7 @@ export default function Quotes() {
       validUntil: form.validUntil || undefined,
       partyId: matched?.id,
       partyName: form.partyName,
+      projectId: form.projectId || undefined,
       lines: cleanLines,
       status: form.status,
       note: form.note,
@@ -443,6 +448,12 @@ export default function Quotes() {
                 ))}
               </datalist>
             </Field>
+
+            <ProjectSelect
+              value={form.projectId}
+              onChange={(value) => setForm({ ...form, projectId: value })}
+              businessId={form.businessId}
+            />
 
             <div className="rounded-lg border border-forest-100 bg-forest-50/40 p-2">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-sage-600">{t('quotes.lines')}</p>

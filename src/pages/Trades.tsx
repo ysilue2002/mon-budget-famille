@@ -14,6 +14,7 @@ import { createParty, createTrade, deleteTrade, updateParty, updateTrade } from 
 import { formatAmount } from '@/core/currencies';
 import { parseAmountInput, toMajor } from '@/core/money';
 import { linesSummary, paidForMode, taxBreakdown, tradeDue, tradeStatus, type PaymentEntryMode } from '@/core/trade';
+import { ProjectSelect } from '@/components/ProjectSelect';
 import { uuid } from '@/lib/id';
 import { currentMonth, endOfMonth, todayISO } from '@/lib/date';
 import type { PaymentMethod, TradeDocument } from '@/core/types';
@@ -53,6 +54,7 @@ interface TradeForm {
   businessId: string;
   date: string;
   partyName: string;
+  projectId: string;
   paid: string;
   paymentMethod: PaymentMethod;
   accountId: string;
@@ -152,6 +154,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
         businessId: document.businessId,
         date: document.date,
         partyName: document.partyName ?? '',
+        projectId: document.projectId ?? '',
         partyPhone: savedParty?.phone ?? '',
         partyAddress: savedParty?.address ?? '',
         paymentMode: savedMode,
@@ -173,6 +176,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
         businessId: firstBusiness,
         date: todayISO(),
         partyName: '',
+        projectId: '',
         partyPhone: '',
         partyAddress: '',
         paymentMode: 'cash',
@@ -254,6 +258,7 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
       date: form.date,
       partyId,
       partyName: form.partyName,
+      projectId: form.projectId || undefined,
       lines: cleanLines,
       paid: effectivePaid,
       paymentMethod: form.paymentMethod,
@@ -400,6 +405,14 @@ export default function Trades({ kind }: { kind: 'sale' | 'purchase' }) {
                 </datalist>
               </Field>
             </div>
+
+            {activeBusinesses.length > 0 && (
+              <ProjectSelect
+                value={form.projectId}
+                onChange={(value) => setForm({ ...form, projectId: value })}
+                businessId={form.businessId}
+              />
+            )}
 
             {kind === 'purchase' && (
               <>

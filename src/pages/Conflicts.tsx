@@ -21,6 +21,7 @@ const ENTITY_ICONS: Record<SyncConflict['entity'], string> = {
   party: 'Fiche client/fournisseur',
   advance: 'Avance reçue',
   quote: 'Devis',
+  project: 'Chantier',
   settlement: 'Règlement',
   stockMovement: 'Mouvement de stock',
 };
