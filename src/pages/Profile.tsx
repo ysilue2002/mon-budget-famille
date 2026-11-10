@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBusinesses, useFamily } from '@/hooks/useData';
 import { archiveBusiness, createBusiness, updateBusiness } from '@/core/repo';
 import { currencyLabel } from '@/core/currencies';
-import { ACTIVITY_PROFILES, isActivityProfile, suggestActivityProfile, type ActivityProfile } from '@/core/profiles';
+import { SECTORS, isActivityProfile, suggestActivityProfile, type ActivityProfile } from '@/core/profiles';
 import {
   Card,
   ConfirmButton,
@@ -59,6 +60,11 @@ export default function ProfilePage() {
   const businesses = useBusinesses();
   const family = useFamily();
 
+  // La bienvenue peut ouvrir la fiche avec un profil déjà choisi (?profil=artisan).
+  const [searchParams] = useSearchParams();
+  const wanted = searchParams.get('profil');
+  const wantedProfile = isActivityProfile(wanted) ? wanted : null;
+
   const active = (businesses ?? []).filter((business) => !business.archived);
   const [selectedId, setSelectedId] = useState('');
   const selected = active.find((business) => business.id === selectedId) ?? active[0] ?? null;
@@ -66,10 +72,21 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
+  const [autoOpened, setAutoOpened] = useState(false);
+
+  // La bienvenue mène ici avec le profil déjà choisi : la fiche s'ouvre d'elle-même
+  // quand aucune activité n'existe encore, une seule fois par visite.
+  useEffect(() => {
+    if (autoOpened || !wantedProfile || businesses === undefined) return;
+    if (active.length > 0) return;
+    setForm({ ...EMPTY_FORM, profile: wantedProfile });
+    setEditing(true);
+    setAutoOpened(true);
+  }, [autoOpened, wantedProfile, businesses, active.length]);
 
   const openEdit = () => {
     if (!selected) {
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, profile: wantedProfile ?? 'other' });
     } else {
       setForm({
         name: selected.name,
@@ -192,18 +209,24 @@ export default function ProfilePage() {
               </Field>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
+              {/* Le secteur d'abord : c'est lui qui décide du menu. Le métier
+                  précis s'écrit ensuite, librement, dans ce secteur. */}
+              <Field label={t('profile.activityProfile')} hint={t('profile.activityProfileHint')}>
+                <SelectInput
+                  value={form.profile}
+                  onChange={(value) => setForm({ ...form, profile: isActivityProfile(value) ? value : 'other' })}
+                  options={[
+                    { value: 'other', label: t('profile.chooseSector') },
+                    ...SECTORS.map((key) => ({ value: key, label: t(`profile.kinds.${key}`) })),
+                  ]}
+                />
+              </Field>
               <Field label={t('profile.activity')}>
                 <TextInput
                   value={form.activity}
                   onChange={(event) => setForm({ ...form, activity: event.target.value })}
                   maxLength={120}
-                />
-              </Field>
-              <Field label={t('profile.activityProfile')} hint={t('profile.activityProfileHint')}>
-                <SelectInput
-                  value={form.profile}
-                  onChange={(value) => setForm({ ...form, profile: isActivityProfile(value) ? value : 'other' })}
-                  options={ACTIVITY_PROFILES.map((key) => ({ value: key, label: t(`profile.kinds.${key}`) }))}
+                  placeholder={t(`profile.activityExamples.${form.profile}`)}
                 />
               </Field>
             </div>

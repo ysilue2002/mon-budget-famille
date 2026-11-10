@@ -123,8 +123,8 @@ L'espace **Activité** suit les recettes et charges d'une ou plusieurs activité
 à côté du budget du foyer. L'identité de l'activité (nom, gérant, coordonnées,
 identifiant fiscal) se règle dans **Profil** (`src/pages/Profile.tsx`), où elle
 peut aussi être archivée sans perdre son historique.
-- Le **profil de l'activité** (commerce, artisan, services, autre) se choisit à
-  l'inscription — pré-rempli d'après la nature saisie — et se change dans
+- Le **secteur d'activité** (commerce, artisan, prestation de service) se choisit
+  à l'inscription — pré-rempli d'après le métier saisi — et se change dans
   **Profil**. Il décide des écrans proposés dans le menu (table
   `src/core/screens.ts`, `businessNav` dans `src/navigation.ts`) : un commerce
   garde **Articles** et perd **Chantiers**, un artisan l'inverse, un prestataire
@@ -138,6 +138,11 @@ peut aussi être archivée sans perdre son historique.
   (`HiddenScreensBanner`), et la case « Afficher toutes les options » des
   réglages rétablit le menu complet. Ces deux derniers choix sont gardés sur
   l'appareil (`src/lib/navPrefs.ts`), jamais synchronisés.
+- À la première ouverture de l'espace Activité, la carte de bienvenue
+  (`ActivityWelcome`) demande le métier une seule fois : la réponse complète le
+  profil de l'activité, ou ouvre la fiche avec ce profil pré-choisi
+  (`/profile?profil=artisan`). « Plus tard » écarte la question sur l'appareil
+  (`src/lib/welcome.ts`) et laisse le menu complet.
 
 - Une opération s'y rattache via `Transaction.businessId` (champ « Activité pro »
   du formulaire d'opération, jamais pour un transfert). Le drapeau

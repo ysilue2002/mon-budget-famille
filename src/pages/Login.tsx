@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch, clearAuth, setAuth, type Session } from '@/lib/api';
 import { adoptInvitedFamily, type InvitedFamily } from '@/core/join';
 import { businessProfilesFromRegistration } from '@/core/onboarding';
-import { ACTIVITY_PROFILES, isActivityProfile, suggestActivityProfile, type ActivityProfile } from '@/core/profiles';
+import { SECTORS, isActivityProfile, suggestActivityProfile, type ActivityProfile } from '@/core/profiles';
 import { createBusiness, updateFamilyProfile } from '@/core/repo';
 import type { CurrencyCode } from '@/core/types';
 import { runSync } from '@/sync/sync';
@@ -286,7 +286,10 @@ export default function Login() {
                     <SelectInput
                       value={profile}
                       onChange={(value) => setProfileChoice(isActivityProfile(value) ? value : null)}
-                      options={ACTIVITY_PROFILES.map((key) => ({ value: key, label: t(`profile.kinds.${key}`) }))}
+                      options={[
+                        { value: 'other', label: t('profile.chooseSector') },
+                        ...SECTORS.map((key) => ({ value: key, label: t(`profile.kinds.${key}`) })),
+                      ]}
                     />
                   </Field>
                 </>

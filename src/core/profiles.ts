@@ -1,16 +1,20 @@
 /**
- * Profil d'activité : ce que l'entrepreneur fait pour vivre (commerce,
- * artisanat, services…). Il est choisi à l'inscription, puis modifiable dans le
- * profil de l'activité, et servira à ne proposer que les écrans utiles.
+ * Secteur d'activité : commerce, artisanat ou prestation de service. C'est lui
+ * qui décide du menu ; le métier précis (boutique de tomates, mécanicien,
+ * location de bâche…) s'écrit ensuite en texte libre, dans le secteur choisi.
+ * Il se choisit à l'inscription, puis se change dans le profil de l'activité.
  *
- * Rien n'est deviné en silence : la nature saisie en texte libre ne sert qu'à
- * pré-remplir le choix, que l'entrepreneur voit et peut changer.
+ * Rien n'est deviné en silence : le métier saisi ne sert qu'à pré-remplir le
+ * secteur, que l'entrepreneur voit et peut changer.
  */
 
 export type ActivityProfile = 'commerce' | 'artisan' | 'services' | 'other';
 
-/** Profils proposés, dans l'ordre d'affichage. */
+/** Tous les profils connus, « autre » compris (activité sans secteur choisi). */
 export const ACTIVITY_PROFILES: readonly ActivityProfile[] = ['commerce', 'artisan', 'services', 'other'];
+
+/** Les trois secteurs proposés à l'utilisateur, dans l'ordre d'affichage. */
+export const SECTORS: readonly ActivityProfile[] = ['commerce', 'artisan', 'services'];
 
 export function isActivityProfile(value: unknown): value is ActivityProfile {
   return typeof value === 'string' && (ACTIVITY_PROFILES as readonly string[]).includes(value);
@@ -41,6 +45,13 @@ const KEYWORDS: Record<Exclude<ActivityProfile, 'other'>, readonly string[]> = {
     'vendeuse',
     'bijoux',
     'chaussures',
+    'tomate',
+    'tomates',
+    'legumes',
+    'fruits',
+    'poisson',
+    'viande',
+    'cereales',
   ],
   artisan: [
     'chantier',
@@ -68,6 +79,10 @@ const KEYWORDS: Record<Exclude<ActivityProfile, 'other'>, readonly string[]> = {
     'travaux',
     'forage',
     'mecanique',
+    'mecanicien',
+    'mecano',
+    'garage',
+    'soudeur',
   ],
   services: [
     'couture',
@@ -99,6 +114,14 @@ const KEYWORDS: Record<Exclude<ActivityProfile, 'other'>, readonly string[]> = {
     'soins',
     'photographie',
     'animation',
+    'hotel',
+    'auberge',
+    'location',
+    'bache',
+    'tente',
+    'salle',
+    'evenementiel',
+    'hebergement',
   ],
 };
 
@@ -113,8 +136,8 @@ function comparable(value: string): string {
 }
 
 /**
- * Profil suggéré d'après la nature saisie (« vente de tissus » → commerce,
- * « maçonnerie » → artisan, « prestation de couture » → services). Le métier
+ * Secteur suggéré d'après le métier saisi (« vente de tissus » → commerce,
+ * « maçonnerie » → artisan, « location de bâche » → prestation de service). Le métier
  * qui reconnaît le plus de mots-clés l'emporte ; sans indice, « autre », pour
  * ne rien restreindre par erreur. Une espace précède chaque mot-clé comparé,
  * si bien que « tissu » reconnaît « tissus » mais pas « concours » pour « cours ».

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVITY_PROFILES, isActivityProfile, suggestActivityProfile } from './profiles';
+import { ACTIVITY_PROFILES, SECTORS, isActivityProfile, suggestActivityProfile } from './profiles';
 
 describe('profils d’activité — suggestion', () => {
   it('reconnaît un commerce', () => {
@@ -39,6 +39,19 @@ describe('profils d’activité — suggestion', () => {
   it('départage un métier mixte par le nombre de mots reconnus', () => {
     expect(suggestActivityProfile('boutique de tissus et couture')).toBe('commerce');
     expect(suggestActivityProfile('retouches et couture')).toBe('services');
+  });
+
+  it('reconnaît les métiers saisis dans les trois secteurs', () => {
+    expect(suggestActivityProfile('vente de tomate')).toBe('commerce');
+    expect(suggestActivityProfile('mécanicien')).toBe('artisan');
+    expect(suggestActivityProfile('maçon')).toBe('artisan');
+    expect(suggestActivityProfile('location de bâche')).toBe('services');
+    expect(suggestActivityProfile('hôtel')).toBe('services');
+  });
+
+  it('propose trois secteurs, « autre » restant le repli interne', () => {
+    expect(SECTORS).toEqual(['commerce', 'artisan', 'services']);
+    expect(suggestActivityProfile('élevage de poulets')).toBe('other');
   });
 
   it('expose les quatre profils et les reconnaît', () => {

@@ -11,7 +11,8 @@ import { computeAccountBalance } from '@/core/selectors';
 import { formatAmount } from '@/core/currencies';
 import { lowStockProducts, stockProducts, stockValue } from '@/core/stock';
 import { currentMonth, endOfMonth } from '@/lib/date';
-import { Card, Page, StatCard, btnGhost, btnPrimary } from '@/components/common';
+import { Page, StatCard, btnGhost, btnPrimary } from '@/components/common';
+import { ActivityWelcome } from '@/components/ActivityWelcome';
 
 /**
  * Accueil de l'assistant Activité : huit chiffres compréhensibles d'un coup
@@ -88,14 +89,7 @@ export default function ActivityHome() {
         </div>
       }
     >
-      {activeBusinesses.length === 0 && (
-        <Card className="mb-4 border-amber-200 bg-amber-50/60">
-          <p className="text-sm text-amber-900">{t('activity.noBusiness')}</p>
-          <Link to="/profile" className={`${btnPrimary} mt-3`}>
-            ＋ {t('activity.createBusiness')}
-          </Link>
-        </Card>
-      )}
+      <ActivityWelcome />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label={t('activity.moneyAvailable')} value={fmt(moneyAvailable)} hint={t('activity.moneyHint')} />

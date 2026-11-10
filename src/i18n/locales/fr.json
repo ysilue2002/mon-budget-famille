@@ -476,8 +476,8 @@
     "currencyHint": "Montants, devis et factures utilisent cette devise.",
     "activities": "Nature des activités",
     "activitiesHint": "Une ligne par activité. Laissez vide pour les préciser au fur et à mesure.",
-    "activityProfile": "Profil de l’activité",
-    "activityProfileHint": "Suggéré d’après la nature saisie ; modifiable à tout moment dans votre profil.",
+    "activityProfile": "Secteur d’activité",
+    "activityProfileHint": "Il décide des menus ; votre métier précis s’écrit juste en dessous.",
     "activityPlaceholder": "Ex. vente de tissus, prestation de couture",
     "addActivity": "Ajouter une activité",
     "removeActivity": "Retirer cette activité",
@@ -539,6 +539,9 @@
     "error": "Enregistrement impossible (16 caractères minimum)."
   },
   "activity": {
+    "welcomeTitle": "Bienvenue dans votre espace activité",
+    "welcomeHint": "Que faites-vous ? Le menu s'adapte à votre métier ; vous pourrez le changer à tout moment dans votre profil.",
+    "welcomeLater": "Plus tard, je découvre",
     "title": "Mon activité",
     "greeting": "Ma petite entreprise, bien organisée !",
     "moneyAvailable": "Mon argent disponible",
@@ -811,13 +814,20 @@
     "name": "Nom de l'activité",
     "ownerName": "Nom de l'entrepreneur",
     "activity": "Activité exercée",
-    "activityProfile": "Profil de l’activité",
-    "activityProfileHint": "Il décide des écrans proposés : commerce, artisan, services ou tout afficher.",
+    "activityProfile": "Secteur d’activité",
+    "activityProfileHint": "Le secteur décide des menus ; votre activité précise le métier.",
+    "chooseSector": "Choisir un secteur",
+    "activityExamples": {
+      "commerce": "Ex. boutique, vente de tomates, quincaillerie",
+      "artisan": "Ex. mécanicien, maçon, menuisier",
+      "services": "Ex. location de bâche, hôtel, couture",
+      "other": "Ex. boutique, mécanicien, location de bâche"
+    },
     "kinds": {
-      "commerce": "Commerce / boutique",
-      "artisan": "Artisan / chantier",
-      "services": "Services / prestations",
-      "other": "Autre / tout afficher"
+      "commerce": "Commerce",
+      "artisan": "Artisan",
+      "services": "Prestation de service",
+      "other": "Non précisé"
     },
     "phone": "Téléphone",
     "email": "E-mail professionnel",

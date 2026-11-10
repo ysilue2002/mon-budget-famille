@@ -476,8 +476,8 @@
     "currencyHint": "Amounts, quotes and invoices use this currency.",
     "activities": "Nature of your activities",
     "activitiesHint": "One line per activity. Leave empty to add them as you go.",
-    "activityProfile": "Activity profile",
-    "activityProfileHint": "Suggested from the nature you typed; you can change it anytime in your profile.",
+    "activityProfile": "Business sector",
+    "activityProfileHint": "It decides the menus; your precise trade goes just below.",
     "activityPlaceholder": "e.g. fabric sales, tailoring service",
     "addActivity": "Add an activity",
     "removeActivity": "Remove this activity",
@@ -539,6 +539,9 @@
     "error": "Could not save (16 characters minimum)."
   },
   "activity": {
+    "welcomeTitle": "Welcome to your business space",
+    "welcomeHint": "What do you do? The menu adapts to your trade; you can change it anytime in your profile.",
+    "welcomeLater": "Later, I'll explore",
     "title": "My business",
     "greeting": "My small business, well organised!",
     "moneyAvailable": "My available money",
@@ -811,13 +814,20 @@
     "name": "Business name",
     "ownerName": "Owner name",
     "activity": "Activity",
-    "activityProfile": "Activity profile",
-    "activityProfileHint": "It decides which screens are offered: shop, trades, services or everything.",
+    "activityProfile": "Business sector",
+    "activityProfileHint": "The sector decides the menus; your activity says which trade.",
+    "chooseSector": "Choose a sector",
+    "activityExamples": {
+      "commerce": "e.g. shop, tomato sales, hardware",
+      "artisan": "e.g. mechanic, mason, carpenter",
+      "services": "e.g. tarpaulin rental, hotel, tailoring",
+      "other": "e.g. shop, mechanic, tarpaulin rental"
+    },
     "kinds": {
-      "commerce": "Shop / retail",
-      "artisan": "Trades / job sites",
-      "services": "Services",
-      "other": "Other / show everything"
+      "commerce": "Commerce",
+      "artisan": "Artisan",
+      "services": "Service business",
+      "other": "Not specified"
     },
     "phone": "Phone",
     "email": "Business email",
