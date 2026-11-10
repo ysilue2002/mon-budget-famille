@@ -1,3 +1,6 @@
+import type { ActivityProfile } from './core/profiles';
+import { screenPlacement } from './core/screens';
+
 /**
  * Menus des deux assistants. Un écran n'apparaît qu'à un seul endroit : les
  * pages partagées par les deux espaces (réglages, profil) restent accessibles
@@ -46,3 +49,23 @@ export const NAV_BUSINESS: readonly NavItem[] = [
   { to: '/states', key: 'nav.states', icon: '📋' },
   { to: '/settings', key: 'nav.settings', icon: '⚙️' },
 ];
+
+const RANK = { essential: 0, useful: 1, hidden: 2 } as const;
+
+/**
+ * Menu de l'assistant Activité pour une ou plusieurs activités : les écrans
+ * inutiles au métier disparaissent, l'essentiel passe devant le second rang.
+ * Avec plusieurs profils, le menu réunit leurs besoins (voir `screenPlacement`).
+ * Sans aucune activité, le menu reste complet.
+ */
+export function businessNav(profiles: readonly ActivityProfile[]): readonly NavItem[] {
+  if (profiles.length === 0) return NAV_BUSINESS;
+  return NAV_BUSINESS.map((item, position) => ({
+    item,
+    position,
+    placement: screenPlacement(item.to, profiles),
+  }))
+    .filter((row) => row.placement !== 'hidden')
+    .sort((a, b) => RANK[a.placement] - RANK[b.placement] || a.position - b.position)
+    .map((row) => row.item);
+}

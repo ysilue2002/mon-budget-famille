@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { NAV_BUSINESS, NAV_FAMILY } from './navigation';
+import { NAV_BUSINESS, NAV_FAMILY, businessNav } from './navigation';
+import { SCREEN_PLACEMENTS, screenPlacement } from './core/screens';
+import type { ActivityProfile } from './core/profiles';
 
 /**
  * Le menu est la première chose qu'un utilisateur voit : il doit tenir sur un
@@ -64,6 +66,74 @@ describe('menus', () => {
         expect(item.to.startsWith('/'), item.to).toBe(true);
         expect(item.icon.length, item.key).toBeGreaterThan(0);
       }
+    }
+  });
+});
+
+describe('menu selon le profil d’activité', () => {
+  const paths = (profiles: ActivityProfile[]) => businessNav(profiles).map((item) => item.to);
+  const full = NAV_BUSINESS.map((item) => item.to);
+
+  it('chaque écran du menu a un placement décidé dans la table', () => {
+    for (const item of NAV_BUSINESS) {
+      expect(SCREEN_PLACEMENTS[item.to], item.to).toBeDefined();
+    }
+  });
+
+  it('un commerce garde son stock et perd les chantiers', () => {
+    const menu = paths(['commerce']);
+    expect(menu).toContain('/products');
+    expect(menu).not.toContain('/projects');
+    // La facture reste utile, mais au second rang (pas dans la barre du bas).
+    expect(menu.indexOf('/invoices')).toBeGreaterThanOrEqual(5);
+  });
+
+  it('un artisan garde ses chantiers et perd le stock séparé', () => {
+    const menu = paths(['artisan']);
+    expect(menu).toContain('/projects');
+    expect(menu).not.toContain('/products');
+  });
+
+  it('les services n’ont ni stock ni chantier, mais devis et factures', () => {
+    const menu = paths(['services']);
+    expect(menu).not.toContain('/products');
+    expect(menu).not.toContain('/projects');
+    expect(menu).toContain('/quotes');
+    expect(menu).toContain('/invoices');
+  });
+
+  it('« autre » et l’absence d’activité gardent le menu complet', () => {
+    expect(paths(['other'])).toEqual(full);
+    expect(paths([])).toEqual(full);
+  });
+
+  it('bilans et résultat passent au second rang hors « autre »', () => {
+    for (const profile of ['commerce', 'artisan', 'services'] as const) {
+      expect(screenPlacement('/balances', [profile]), profile).toBe('useful');
+      expect(screenPlacement('/income', [profile]), profile).toBe('useful');
+    }
+    expect(screenPlacement('/balances', ['other'])).toBe('essential');
+  });
+
+  it('deux métiers : le menu réunit leurs besoins', () => {
+    const menu = paths(['commerce', 'artisan']);
+    expect(menu).toContain('/products');
+    expect(menu).toContain('/projects');
+    expect(menu).toHaveLength(full.length);
+  });
+
+  it('l’essentiel passe devant le second rang', () => {
+    const menu = businessNav(['commerce']);
+    const placements = menu.map((item) => screenPlacement(item.to, ['commerce']));
+    const lastEssential = placements.lastIndexOf('essential');
+    const firstUseful = placements.indexOf('useful');
+    expect(firstUseful).toBeGreaterThan(lastEssential);
+  });
+
+  it('le menu filtré ne propose jamais deux fois le même écran', () => {
+    for (const profile of ['commerce', 'artisan', 'services', 'other'] as const) {
+      const menu = paths([profile]);
+      expect(new Set(menu).size, profile).toBe(menu.length);
     }
   });
 });

@@ -23,7 +23,8 @@ import Recurring from '@/pages/Recurring';
 import Converter from '@/pages/Converter';
 import Reports from '@/pages/Reports';
 import Statements from '@/pages/Statements';
-import { NAV_BUSINESS, NAV_FAMILY, type NavItem } from '@/navigation';
+import { NAV_FAMILY, businessNav, type NavItem } from '@/navigation';
+import { useBusinesses } from '@/hooks/useData';
 import ActivityHome from '@/pages/ActivityHome';
 import Products from '@/pages/Products';
 import Projects from '@/pages/Projects';
@@ -75,12 +76,18 @@ function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const session = getAuth();
+  const businesses = useBusinesses();
   // Sans session ni choix explicite « sans compte », l'espace choisi impose la
   // connexion : les écrans de compte restent évidemment accessibles.
   const publicPaths = ['/login', '/join', '/reset'];
   const needsLogin = !session && !isOfflineMode() && !publicPaths.includes(location.pathname);
   const business = space === 'business';
-  const navItems: readonly NavItem[] = business ? NAV_BUSINESS : NAV_FAMILY;
+  // Le menu de l'activité suit le profil des activités en cours : une activité
+  // sans profil (créée avant son arrivée) compte comme « tout afficher ».
+  const profiles = (businesses ?? [])
+    .filter((row) => !row.archived)
+    .map((row) => row.profile ?? 'other');
+  const navItems: readonly NavItem[] = business ? businessNav(profiles) : NAV_FAMILY;
   const spaceLabel = business ? t('spaces.businessShort') : t('spaces.familyShort');
   const meta = t('app.meta', { languages: LANGUAGES.length, currencies: SUPPORTED_CURRENCIES.length });
 

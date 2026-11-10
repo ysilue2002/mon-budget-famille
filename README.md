@@ -123,6 +123,15 @@ L'espace **Activité** suit les recettes et charges d'une ou plusieurs activité
 à côté du budget du foyer. L'identité de l'activité (nom, gérant, coordonnées,
 identifiant fiscal) se règle dans **Profil** (`src/pages/Profile.tsx`), où elle
 peut aussi être archivée sans perdre son historique.
+- Le **profil de l'activité** (commerce, artisan, services, autre) se choisit à
+  l'inscription — pré-rempli d'après la nature saisie — et se change dans
+  **Profil**. Il décide des écrans proposés dans le menu (table
+  `src/core/screens.ts`, `businessNav` dans `src/navigation.ts`) : un commerce
+  garde **Articles** et perd **Chantiers**, un artisan l'inverse, un prestataire
+  perd les deux, et l'essentiel passe devant le second rang (devis, factures,
+  bilans et résultat pour un commerce). Les écrans masqués restent joignables
+  par leur adresse et leurs données continuent d'alimenter l'accueil, les bilans
+  et les états ; avec plusieurs activités, le menu réunit leurs besoins.
 
 - Une opération s'y rattache via `Transaction.businessId` (champ « Activité pro »
   du formulaire d'opération, jamais pour un transfert). Le drapeau
