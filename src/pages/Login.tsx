@@ -30,7 +30,7 @@ const MAX_ACTIVITIES = 6;
  */
 export default function Login() {
   const { t } = useTranslation();
-  const { space } = useSpace();
+  const { space, setSpace } = useSpace();
   const navigate = useNavigate();
   const isBusiness = space === 'business';
 
@@ -160,7 +160,34 @@ export default function Login() {
   return (
     <Page title={isBusiness ? t('login.businessTitle') : t('login.familyTitle')}>
       <Card className="mx-auto max-w-2xl">
-        <p className="mb-4 text-sm text-sage-600">{isBusiness ? t('login.businessIntro') : t('login.familyIntro')}</p>
+        <p className="mb-3 text-sm text-sage-600">{isBusiness ? t('login.businessIntro') : t('login.familyIntro')}</p>
+
+        {/* L'adresse de connexion s'ouvre parfois directement, sans passer par
+            l'accueil : on rappelle donc ici le choix de l'assistant, sans
+            quitter l'écran ni ressaisir quoi que ce soit. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-sage-600">
+          <span className="font-semibold uppercase tracking-wide">{t('spaces.switch')}</span>
+          {(
+            [
+              ['family', t('spaces.familyShort')],
+              ['business', t('spaces.businessShort')],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setSpace(value)}
+              aria-pressed={space === value}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                space === value
+                  ? 'border-forest-600 bg-forest-600 text-white'
+                  : 'border-forest-200 bg-white text-forest-700 hover:bg-forest-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         <div className="mb-4 flex rounded-lg border border-forest-200 bg-white text-sm font-semibold">
           {(
