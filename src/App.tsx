@@ -5,6 +5,9 @@ import { SyncProvider, SyncBadge } from '@/sync/SyncProvider';
 import { LANGUAGES } from '@/i18n';
 import { SUPPORTED_CURRENCIES } from '@/core/currencies';
 import { SpaceProvider, useSpace } from '@/spaces/space';
+import { RecoveryReminder } from '@/components/RecoveryReminder';
+// Applique le mode d'affichage mémorisé sur l'appareil dès le démarrage.
+import '@/lib/displayPrefs';
 import { LangSwitcher } from '@/components/LangSwitcher';
 import { clearAuth, getAuth } from '@/lib/api';
 import { clearOfflineMode, isOfflineMode } from '@/lib/session';
@@ -190,6 +193,7 @@ function Layout() {
                 <HiddenScreensBanner hidden={hidden} />
               </div>
             )}
+            <RecoveryReminder />
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={business ? <ActivityHome /> : <Dashboard />} />

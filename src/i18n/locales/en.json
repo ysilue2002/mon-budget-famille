@@ -252,6 +252,9 @@
     "hint": "Exports include transactions converted to the household currency."
   },
   "settings": {
+    "simpleDisplay": "Simplified display",
+    "simpleDisplayHint": "Bigger buttons, larger text and secondary details hidden. This setting applies to this device only.",
+    "simpleDisplayLabel": "Simple mode (easier to read and tap)",
     "title": "Settings",
     "activityMenu": "Activity menu",
     "activityMenuHint": "The menu follows the activity profile: useful screens first, the rest under “More”. Tick to show every screen on this device, whatever the profile.",
@@ -524,6 +527,9 @@
     "errorPhrase": "Phrase refused: check the address and the exact phrase saved in your Settings."
   },
   "recovery": {
+    "remindTitle": "No recovery phrase yet: if you lose your password, nobody will be able to unlock you.",
+    "remindAction": "Set my phrase",
+    "remindLater": "Later",
     "title": "Recovery phrase",
     "hint": "If your password is lost, this phrase replaces the administrator's code (no e-mail is sent). It also lets you resume a family whose account was deleted, for 30 days. The server never sees it in clear: write it down physically.",
     "set": "Recovery phrase saved",
@@ -751,6 +757,19 @@
     "address": "Address (optional)",
     "notes": "Notes",
     "totalDue": "Total owed",
+    "call": "Call",
+    "whatsapp": "WhatsApp",
+    "directions": "Directions",
+    "whatsappDue": "Hello {{name}}, {{amount}} is still due. Thank you!",
+    "whatsappClear": "Hello {{name}}, your account is up to date. Thank you!",
+    "dueLabel": "Still due",
+    "paidLabel": "Paid",
+    "advancesOpen": "Advances received so far: {{amount}}",
+    "advanceAmount": "Advance amount",
+    "advanceButton": "Advance received",
+    "advanceSubject": "Advance on order",
+    "advanceSaved": "Advance saved: {{amount}}",
+    "advanceHint": "An advance is money received before delivery: it is not counted as a sale and stays tracked separately.",
     "count": "{{count}} record(s)",
     "detail": "Record",
     "amount": "Amount",
@@ -960,6 +979,7 @@
     "paymentTerms": "Late payment may incur recovery costs."
   },
   "quotes": {
+    "duplicate": "Duplicate this quote",
     "title": "Quotes",
     "new": "New quote",
     "number": "Number",

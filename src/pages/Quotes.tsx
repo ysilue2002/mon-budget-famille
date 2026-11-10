@@ -202,6 +202,33 @@ export default function Quotes() {
     setOpen(true);
   };
 
+  /**
+   * Copie d'un devis : mêmes lignes, mêmes coordonnées, date du jour et statut
+   * brouillon. Le numéro reste libre : il est attribué à l'enregistrement.
+   */
+  const duplicate = (quote: Quote) => {
+    setForm({
+      businessId: quote.businessId,
+      date: todayISO(),
+      validUntil: '',
+      partyName: quote.partyName ?? '',
+      projectId: quote.projectId ?? '',
+      status: 'draft',
+      note: quote.note ?? '',
+      taxRate: quote.taxRate ? String(quote.taxRate) : '',
+      lines: quote.lines.map((line) => ({
+        key: uuid(),
+        productId: line.productId ?? '',
+        label: line.label,
+        qty: String(line.qty),
+        price: String(toMajor(line.unitPrice, primary)),
+      })),
+    });
+    setError(null);
+    setFlash(null);
+    setOpen(true);
+  };
+
   const patchLine = (key: string, patch: Partial<LineForm>) => {
     setForm((current) =>
       current ? { ...current, lines: current.lines.map((line) => (line.key === key ? { ...line, ...patch } : line)) } : current,
@@ -366,6 +393,15 @@ export default function Quotes() {
                       </button>
                       <button type="button" className="rounded p-1 text-sm hover:bg-forest-50" onClick={() => exportPdf(quote)} aria-label={t('documents.pdf')}>
                         ⬇
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-1 text-sm hover:bg-forest-50"
+                        onClick={() => duplicate(quote)}
+                        aria-label={t('quotes.duplicate')}
+                        title={t('quotes.duplicate')}
+                      >
+                        ⧉
                       </button>
                       {quoteIsEditable(quote) && (
                         <button type="button" className="rounded p-1 text-sm hover:bg-forest-50" onClick={() => openEdit(quote)} aria-label={t('common.edit')}>

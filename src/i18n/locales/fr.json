@@ -252,6 +252,9 @@
     "hint": "Les exports incluent les opérations converties dans la devise du foyer."
   },
   "settings": {
+    "simpleDisplay": "Affichage simplifié",
+    "simpleDisplayHint": "Gros boutons, texte plus grand et détails secondaires masqués. Ce réglage ne concerne que cet appareil.",
+    "simpleDisplayLabel": "Mode simple (plus facile à lire et à toucher)",
     "title": "Réglages",
     "activityMenu": "Menu de l'activité",
     "activityMenuHint": "Le menu suit le profil de l'activité : les écrans utiles d'abord, les autres dans « Plus ». Cochez pour afficher tous les écrans sur cet appareil, quel que soit le profil.",
@@ -524,6 +527,9 @@
     "errorPhrase": "Phrase refusée : vérifiez l'adresse et la phrase exacte enregistrée dans vos réglages."
   },
   "recovery": {
+    "remindTitle": "Aucune phrase de secours : si vous perdez votre mot de passe, personne ne pourra vous débloquer.",
+    "remindAction": "Définir ma phrase",
+    "remindLater": "Plus tard",
     "title": "Phrase de secours",
     "hint": "En cas de mot de passe perdu, cette phrase remplace le code de l'administrateur (aucun e-mail n'est envoyé). Elle sert aussi à reprendre un foyer dont le compte a été supprimé pendant 30 jours. Elle n'est pas connue du serveur : notez-la physiquement.",
     "set": "Phrase de secours définie",
@@ -751,6 +757,19 @@
     "address": "Adresse (facultatif)",
     "notes": "Notes",
     "totalDue": "Total dû",
+    "call": "Appeler",
+    "whatsapp": "WhatsApp",
+    "directions": "Itinéraire",
+    "whatsappDue": "Bonjour {{name}}, il reste {{amount}} à régler. Merci !",
+    "whatsappClear": "Bonjour {{name}}, votre compte est à jour. Merci !",
+    "dueLabel": "Reste à payer",
+    "paidLabel": "Payé",
+    "advancesOpen": "Avances reçues en cours : {{amount}}",
+    "advanceAmount": "Montant de l’avance",
+    "advanceButton": "Avance reçue",
+    "advanceSubject": "Avance sur commande",
+    "advanceSaved": "Avance enregistrée : {{amount}}",
+    "advanceHint": "L’avance est de l’argent reçu avant la livraison : elle n’est pas comptée comme une vente et reste suivie à part.",
     "count": "{{count}} fiche(s)",
     "detail": "Fiche",
     "amount": "Montant",
@@ -960,6 +979,7 @@
     "paymentTerms": "En cas de non-paiement, des frais de recouvrement peuvent être exigés."
   },
   "quotes": {
+    "duplicate": "Dupliquer ce devis",
     "title": "Devis",
     "new": "Nouveau devis",
     "number": "Numéro",

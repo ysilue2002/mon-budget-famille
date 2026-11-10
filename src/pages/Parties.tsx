@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParties, usePrimaryCurrency, usePurchases, useSales } from '@/hooks/useData';
-import { archiveParty, createParty, recordPartyPayment, updateParty } from '@/core/repo';
+import { useAdvances, useParties, usePrimaryCurrency, usePurchases, useSales } from '@/hooks/useData';
+import { archiveParty, createAdvance, createParty, recordPartyPayment, updateParty } from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
-import { parseAmountInput } from '@/core/money';
+import { parseAmountInput, toMajor } from '@/core/money';
+import { todayISO } from '@/lib/date';
 import { partyBalance } from '@/core/payments';
 import type { Party, TradeDocument } from '@/core/types';
 import {
@@ -31,6 +32,16 @@ interface PartyForm {
 
 const EMPTY_FORM: PartyForm = { name: '', phone: '', address: '', notes: '' };
 
+/** Chiffres seuls : « 07 12 34 56 78 » devient « 0712345678 » pour l'appel. */
+function digitsOf(phone: string): string {
+  return phone.replace(/\D+/g, '');
+}
+
+/** Lien WhatsApp avec un message déjà écrit (solde dû ou compte à jour). */
+function whatsappUrl(phone: string, message: string): string {
+  return `https://wa.me/${digitsOf(phone)}?text=${encodeURIComponent(message)}`;
+}
+
 /**
  * Fiches clients / fournisseurs : coordonnées, historique des documents,
  * solde dû et encaissement (ou paiement) partiel imputé du plus ancien au plus
@@ -39,6 +50,7 @@ const EMPTY_FORM: PartyForm = { name: '', phone: '', address: '', notes: '' };
 export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
   const { t, i18n } = useTranslation();
   const parties = useParties();
+  const advances = useAdvances() ?? [];
   const sales = useSales();
   const purchases = usePurchases();
   const primary = usePrimaryCurrency() ?? 'XOF';
@@ -50,6 +62,9 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
   const [payAmount, setPayAmount] = useState('');
   const [payMessage, setPayMessage] = useState<string | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
+  const [advanceAmount, setAdvanceAmount] = useState('');
+  const [advanceMessage, setAdvanceMessage] = useState<string | null>(null);
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
 
   const documents = (kind === 'client' ? sales : purchases) ?? [];
   const rows = (parties ?? []).filter((party) => party.kind === kind && !party.archived);
@@ -68,6 +83,19 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
   const selectedDue = selected ? balanceOf(selected) : 0;
 
   const fmt = (minor: number) => formatAmount(minor, primary, i18n.language);
+
+  // Avances reçues du client et non remboursées : de l'argent déjà encaissé,
+  // mais pas encore du chiffre d'affaires.
+  const openAdvancesOf = (party: Party) =>
+    advances
+      .filter((row) => row.partyId === party.id && row.status === 'open' && row.direction !== 'paid')
+      .reduce((sum, row) => sum + Math.max(0, row.amount), 0);
+
+  const whatsappMessage = selected
+    ? selectedDue > 0
+      ? t('parties.whatsappDue', { name: selected.name, amount: fmt(selectedDue) })
+      : t('parties.whatsappClear', { name: selected.name })
+    : '';
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
@@ -121,6 +149,30 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
     setPayMessage(t('parties.recorded', { amount: fmt(applied) }));
   };
 
+  /** Avance reçue avant livraison : suivie à part, jamais comptée en vente. */
+  const recordAdvance = async () => {
+    if (!selected) return;
+    setAdvanceMessage(null);
+    setAdvanceError(null);
+    const amount = parseAmountInput(advanceAmount, primary) ?? 0;
+    if (amount <= 0) {
+      setAdvanceError(t('validation.invalidAmount'));
+      return;
+    }
+    await createAdvance({
+      partyId: selected.id,
+      partyName: selected.name,
+      subject: t('parties.advanceSubject'),
+      amount,
+      expected: Math.max(amount, selectedDue),
+      receivedOn: todayISO(),
+      direction: 'received',
+      status: 'open',
+    });
+    setAdvanceAmount('');
+    setAdvanceMessage(t('parties.advanceSaved', { amount: fmt(amount) }));
+  };
+
   const title = t(kind === 'client' ? 'parties.clients' : 'parties.suppliers');
   const newLabel = t(kind === 'client' ? 'parties.newClient' : 'parties.newSupplier');
   const collectLabel = t(kind === 'client' ? 'parties.collect' : 'parties.pay');
@@ -165,7 +217,17 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
                     }`}
                   >
                     <span className="truncate font-medium">{party.name}</span>
-                    <span className="shrink-0 text-xs">{balanceOf(party) > 0 ? fmt(balanceOf(party)) : '✓'}</span>
+                    <span
+                      className={`shrink-0 text-xs font-semibold ${
+                        party.id === selected?.id
+                          ? 'text-white'
+                          : balanceOf(party) > 0
+                            ? 'text-red-700'
+                            : 'text-forest-700'
+                      }`}
+                    >
+                      {balanceOf(party) > 0 ? fmt(balanceOf(party)) : '✓'}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -182,6 +244,35 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
                     {selected.address ? ` · ${selected.address}` : ''}
                   </p>
                   {selected.notes && <p className="mt-1 text-xs text-sage-500">{selected.notes}</p>}
+                  {/* Les trois gestes du quotidien, sans rien retaper : appeler,
+                      envoyer le solde sur WhatsApp, rejoindre le chantier. */}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {selected.phone && (
+                      <>
+                        <a href={`tel:${digitsOf(selected.phone)}`} className={`${btnGhost} px-3 py-1 text-xs`}>
+                          📞 {t('parties.call')}
+                        </a>
+                        <a
+                          href={whatsappUrl(selected.phone, whatsappMessage)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={`${btnGhost} px-3 py-1 text-xs`}
+                        >
+                          💬 {t('parties.whatsapp')}
+                        </a>
+                      </>
+                    )}
+                    {selected.address && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.address)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`${btnGhost} px-3 py-1 text-xs`}
+                      >
+                        🗺 {t('parties.directions')}
+                      </a>
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-1">
                   <button type="button" className="rounded p-1 text-sm hover:bg-forest-50" onClick={() => openEdit(selected)} aria-label={t('common.edit')}>
@@ -195,6 +286,25 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
                     danger
                   />
                 </div>
+              </div>
+
+              {/* Rouge : on me doit de l'argent. Vert : c'est réglé. */}
+              <div
+                className={`mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 ${
+                  selectedDue > 0 ? 'border-red-200 bg-red-50/60' : 'border-forest-200 bg-forest-50/60'
+                }`}
+              >
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-sage-600">{t('parties.dueLabel')}</p>
+                  <p className={`text-2xl font-bold ${selectedDue > 0 ? 'text-red-700' : 'text-forest-700'}`}>
+                    {selectedDue > 0 ? fmt(selectedDue) : `✓ ${t('parties.paidLabel')}`}
+                  </p>
+                </div>
+                {openAdvancesOf(selected) > 0 && (
+                  <p className="text-xs font-semibold text-forest-700">
+                    {t('parties.advancesOpen', { amount: fmt(openAdvancesOf(selected)) })}
+                  </p>
+                )}
               </div>
 
               <div className="mb-4 rounded-lg border border-forest-100 bg-forest-50/40 p-3">
@@ -215,6 +325,26 @@ export default function Parties({ kind }: { kind: 'client' | 'supplier' }) {
                 {payMessage && <p className="mt-2 text-xs font-semibold text-forest-700">{payMessage}</p>}
                 {payError && <p className="mt-2 text-xs font-semibold text-red-600">{payError}</p>}
                 <p className="mt-2 text-[11px] text-sage-500">{t('parties.historyHint')}</p>
+
+                <div className="mt-3 border-t border-forest-100 pt-3">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <Field label={t('parties.advanceAmount')}>
+                      <TextInput
+                        inputMode="decimal"
+                        value={advanceAmount}
+                        onChange={(event) => setAdvanceAmount(event.target.value)}
+                        placeholder={selectedDue > 0 ? String(toMajor(selectedDue, primary)) : '0'}
+                        className="w-32"
+                      />
+                    </Field>
+                    <button type="button" className={btnGhost} onClick={() => void recordAdvance()}>
+                      ＋ {t('parties.advanceButton')}
+                    </button>
+                  </div>
+                  {advanceMessage && <p className="mt-2 text-xs font-semibold text-forest-700">{advanceMessage}</p>}
+                  {advanceError && <p className="mt-2 text-xs font-semibold text-red-600">{advanceError}</p>}
+                  <p className="mt-2 text-[11px] text-sage-500">{t('parties.advanceHint')}</p>
+                </div>
               </div>
 
               <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-forest-900">{t('parties.documents')}</h3>

@@ -307,7 +307,17 @@ export default function Products() {
               value={form.unit}
               onChange={(event) => setForm({ ...form, unit: event.target.value })}
               maxLength={20}
+              list="product-units"
+              autoComplete="off"
             />
+            {/* Unités du bâtiment et des services : proposées d'un clic pour
+                éviter la saisie, sans interdire les mots du métier (« sac »,
+                « voyage », « bâche »…). */}
+            <datalist id="product-units">
+              {['pcs', 'h', 'j', 'm²', 'm³', 'kg', 'L', 'sac', 'forfait'].map((unit) => (
+                <option key={unit} value={unit} />
+              ))}
+            </datalist>
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <MoneyInput

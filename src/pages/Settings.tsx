@@ -17,6 +17,7 @@ import {
 import { setLanguage, LANGUAGES, LANGUAGE_LABELS, type Language } from '@/i18n';
 import { currencyLabel } from '@/core/currencies';
 import { useSpace } from '@/spaces/space';
+import { useSimpleDisplay } from '@/lib/displayPrefs';
 import { useNavPrefs } from '@/hooks/useNavPrefs';
 import { setNavShowAll } from '@/lib/navPrefs';
 import { RATES_API_URL } from '@/core/exchange';
@@ -239,6 +240,31 @@ function MenuCard() {
   );
 }
 
+/**
+ * Carte « Affichage simplifié » : un réglage propre à l'appareil, pour ceux qui
+ * lisent mal, travaillent avec des gants ou ont un petit téléphone.
+ */
+function DisplayCard() {
+  const { t } = useTranslation();
+  const { simple, setSimple } = useSimpleDisplay();
+
+  return (
+    <Card>
+      <h2 className="mb-4 font-semibold text-forest-950">{t('settings.simpleDisplay')}</h2>
+      <p className="text-sm text-sage-600">{t('settings.simpleDisplayHint')}</p>
+      <label className="mt-3 flex items-start gap-2 text-sm text-forest-900">
+        <input
+          type="checkbox"
+          className="mt-1 h-4 w-4 accent-forest-600"
+          checked={simple}
+          onChange={(event) => setSimple(event.target.checked)}
+        />
+        <span>{t('settings.simpleDisplayLabel')}</span>
+      </label>
+    </Card>
+  );
+}
+
 function Settings() {
   const { t, i18n } = useTranslation();
   const family = useFamily();
@@ -440,6 +466,8 @@ function Settings() {
             </p>
           )}
         </Card>
+
+        <DisplayCard />
 
         <MenuCard />
 

@@ -108,3 +108,23 @@
   margin-right: 0;
   margin-left: auto;
 }
+
+/* ----------------------------------------------------------- mode simple
+ * Réglage par appareil (Réglages → Affichage simplifié) : texte plus grand,
+ * zones tactiles plus hautes et détails secondaires masqués. Rien n'est
+ * supprimé des écrans : seuls les repères fins (notes de 11 px) s'effacent,
+ * pour laisser de la place aux chiffres et aux boutons. */
+html.display-simple {
+  font-size: 18px;
+}
+
+html.display-simple .app-main button,
+html.display-simple .app-main input,
+html.display-simple .app-main select,
+html.display-simple .app-main a[role='button'] {
+  min-height: 2.5rem;
+}
+
+html.display-simple .app-main p.text-\[11px\] {
+  display: none;
+}
