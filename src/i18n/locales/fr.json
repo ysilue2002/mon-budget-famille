@@ -466,6 +466,8 @@
     "currencyHint": "Montants, devis et factures utilisent cette devise.",
     "activities": "Nature des activités",
     "activitiesHint": "Une ligne par activité. Laissez vide pour les préciser au fur et à mesure.",
+    "activityProfile": "Profil de l’activité",
+    "activityProfileHint": "Suggéré d’après la nature saisie ; modifiable à tout moment dans votre profil.",
     "activityPlaceholder": "Ex. vente de tissus, prestation de couture",
     "addActivity": "Ajouter une activité",
     "removeActivity": "Retirer cette activité",
@@ -799,6 +801,14 @@
     "name": "Nom de l'activité",
     "ownerName": "Nom de l'entrepreneur",
     "activity": "Activité exercée",
+    "activityProfile": "Profil de l’activité",
+    "activityProfileHint": "Il décide des écrans proposés : commerce, artisan, services ou tout afficher.",
+    "kinds": {
+      "commerce": "Commerce / boutique",
+      "artisan": "Artisan / chantier",
+      "services": "Services / prestations",
+      "other": "Autre / tout afficher"
+    },
     "phone": "Téléphone",
     "email": "E-mail professionnel",
     "address": "Adresse",

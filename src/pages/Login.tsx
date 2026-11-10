@@ -4,12 +4,13 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch, clearAuth, setAuth, type Session } from '@/lib/api';
 import { adoptInvitedFamily, type InvitedFamily } from '@/core/join';
 import { businessProfilesFromRegistration } from '@/core/onboarding';
+import { ACTIVITY_PROFILES, isActivityProfile, suggestActivityProfile, type ActivityProfile } from '@/core/profiles';
 import { createBusiness, updateFamilyProfile } from '@/core/repo';
 import type { CurrencyCode } from '@/core/types';
 import { runSync } from '@/sync/sync';
 import { clearOfflineMode, setOfflineMode } from '@/lib/session';
 import { useSpace } from '@/spaces/space';
-import { Card, CurrencySelect, Field, Page, TextInput, btnGhost, btnPrimary } from '@/components/common';
+import { Card, CurrencySelect, Field, Page, SelectInput, TextInput, btnGhost, btnPrimary } from '@/components/common';
 
 type Mode = 'login' | 'register';
 
@@ -48,6 +49,8 @@ export default function Login() {
   const [taxId, setTaxId] = useState('');
   const [currency, setCurrency] = useState<CurrencyCode>('XOF');
   const [activities, setActivities] = useState<string[]>(['']);
+  // Profil choisi à la main ; tant qu'il est vide, la suggestion suit la nature.
+  const [profileChoice, setProfileChoice] = useState<ActivityProfile | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,6 +68,10 @@ export default function Login() {
     setActivities((rows) => (rows.length <= 1 ? [''] : rows.filter((_, position) => position !== index)));
   };
 
+  const firstNature = activities.find((row) => row.trim() !== '') ?? '';
+  const suggestedProfile = suggestActivityProfile(firstNature);
+  const profile = profileChoice ?? suggestedProfile;
+
   /** Applique localement le profil et l'activité issus de l'inscription. */
   const applyLocalProfile = async () => {
     // Le compte est créé : un souci purement local ne doit pas faire échouer
@@ -81,6 +88,7 @@ export default function Login() {
       address,
       taxId,
       activities,
+      profile,
     });
     for (const profile of profiles) {
       await createBusiness(profile).catch((error: unknown) => console.error('activité locale', error));
@@ -272,6 +280,14 @@ export default function Login() {
                         ＋ {t('login.addActivity')}
                       </button>
                     </div>
+                  </Field>
+
+                  <Field label={t('login.activityProfile')} hint={t('login.activityProfileHint')}>
+                    <SelectInput
+                      value={profile}
+                      onChange={(value) => setProfileChoice(isActivityProfile(value) ? value : null)}
+                      options={ACTIVITY_PROFILES.map((key) => ({ value: key, label: t(`profile.kinds.${key}`) }))}
+                    />
                   </Field>
                 </>
               )}

@@ -60,3 +60,38 @@ describe('inscription activité — profils créés', () => {
     expect(businessProfilesFromRegistration({ ...base, company: '   ' })).toEqual([]);
   });
 });
+
+describe('inscription activité — profil retenu', () => {
+  it('suggère le profil d’après la nature déclarée', () => {
+    const [shop] = businessProfilesFromRegistration({ ...base, activities: ['Vente de tissus'] });
+    expect(shop.profile).toBe('commerce');
+    const [trade] = businessProfilesFromRegistration({ ...base, activities: ['Maçonnerie'] });
+    expect(trade.profile).toBe('artisan');
+    const [service] = businessProfilesFromRegistration({ ...base, activities: ['Prestation de couture'] });
+    expect(service.profile).toBe('services');
+  });
+
+  it('reste sur « autre » sans nature ou sans indice reconnu', () => {
+    const [empty] = businessProfilesFromRegistration(base);
+    expect(empty.profile).toBe('other');
+    const [other] = businessProfilesFromRegistration({ ...base, activities: ['Élevage de poulets'] });
+    expect(other.profile).toBe('other');
+  });
+
+  it('respecte le profil choisi, même si la nature suggère autre chose', () => {
+    const profiles = businessProfilesFromRegistration({
+      ...base,
+      activities: ['Vente de tissus', 'Maçonnerie'],
+      profile: 'services',
+    });
+    expect(profiles.map((row) => row.profile)).toEqual(['services', 'services']);
+  });
+
+  it('suggère un profil par activité quand plusieurs natures sont déclarées', () => {
+    const profiles = businessProfilesFromRegistration({
+      ...base,
+      activities: ['Vente de tissus', 'Maçonnerie'],
+    });
+    expect(profiles.map((row) => row.profile)).toEqual(['commerce', 'artisan']);
+  });
+});

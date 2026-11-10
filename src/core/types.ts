@@ -5,6 +5,8 @@
  * cents pour USD/EUR/GBP/CHF/EGP/MAD/AED, unités entières pour XOF/XAF/NGN.
  */
 
+import type { ActivityProfile } from './profiles';
+
 export const CURRENCY_CODES = [
   'XOF',
   'XAF',
@@ -143,6 +145,12 @@ export interface Business extends SyncFields {
   ownerName?: string;
   /** Activité exercée (texte libre : vente, prestation, élevage…). */
   activity: string;
+  /**
+   * Profil retenu (commerce, artisan, services, autre). Absent pour les
+   * activités créées avant son arrivée : elles restent traitées comme
+   * « autre », donc sans aucune restriction d'écran.
+   */
+  profile?: ActivityProfile;
   /** Téléphone professionnel. */
   phone?: string;
   /** Adresse e-mail professionnelle. */

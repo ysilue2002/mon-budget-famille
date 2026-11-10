@@ -11,6 +11,7 @@ import {
   ensureStockLedger,
   partyDocuments,
   recordPartyPayment,
+  updateBusiness,
   updateTrade,
 } from '@/core/repo';
 import { partyBalance } from '@/core/payments';
@@ -415,5 +416,30 @@ describe('conservation des données', () => {
     expect(await db.purchases.count()).toBe(1);
     expect(await db.parties.count()).toBe(1);
     expect((await db.products.get(productId))?.stockQty).toBe(11);
+  });
+});
+
+describe('profil d’activité', () => {
+  it('enregistre le profil choisi et le retrouve après réouverture', async () => {
+    const id = await createBusiness({ name: 'Atelier Diallo', activity: 'menuiserie', profile: 'artisan' });
+    db.close();
+    await db.open();
+    expect((await db.businesses.get(id))?.profile).toBe('artisan');
+  });
+
+  it('permet de changer de profil sans toucher au reste de la fiche', async () => {
+    await updateBusiness(businessId, { name: 'Boutique Awa', activity: 'commerce', profile: 'commerce' });
+    expect((await db.businesses.get(businessId))?.profile).toBe('commerce');
+
+    await updateBusiness(businessId, { name: 'Boutique Awa', activity: 'commerce', profile: 'services' });
+    const saved = await db.businesses.get(businessId);
+    expect(saved?.profile).toBe('services');
+    expect(saved?.name).toBe('Boutique Awa');
+    expect(saved?.activity).toBe('commerce');
+  });
+
+  it('laisse le profil absent quand il n’est pas fourni', async () => {
+    const id = await createBusiness({ name: 'Ancienne activité', activity: 'divers' });
+    expect((await db.businesses.get(id))?.profile).toBeUndefined();
   });
 });

@@ -13,6 +13,7 @@ import { allocatePayment } from '@/core/payments';
 import { nextDocumentNumber, quoteCanConvert, quoteIsEditable, yearOf } from '@/core/documents';
 import { todayISO, toISODate } from '@/lib/date';
 import { firstRecurringDue } from '@/lib/recurrence';
+import type { ActivityProfile } from '@/core/profiles';
 import type {
   Budget,
   Business,
@@ -579,6 +580,8 @@ export interface BusinessInput {
   name: string;
   ownerName?: string;
   activity: string;
+  /** Profil retenu (commerce, artisan, services, autre). */
+  profile?: ActivityProfile;
   phone?: string;
   email?: string;
   address?: string;
@@ -591,6 +594,7 @@ function cleanBusinessFields(input: Partial<BusinessInput>): Partial<Business> {
   const out: Partial<Business> = {};
   if (input.name !== undefined) out.name = input.name.trim();
   if (input.activity !== undefined) out.activity = input.activity.trim();
+  if (input.profile !== undefined) out.profile = input.profile;
   for (const key of ['ownerName', 'phone', 'email', 'address', 'taxId', 'notes'] as const) {
     if (input[key] !== undefined) out[key] = input[key]?.trim() || undefined;
   }
@@ -603,7 +607,7 @@ export async function createBusiness(input: BusinessInput): Promise<string> {
   const business: Business = {
     id: uuid(),
     familyId: family.id,
-    ...(cleanBusinessFields(input) as Pick<Business, 'name' | 'activity'>),
+    ...(cleanBusinessFields(input) as Pick<Business, 'name' | 'activity'> & Partial<Pick<Business, 'profile'>>),
     archived: false,
     createdAt: Date.now(),
     ...newSyncFields(),

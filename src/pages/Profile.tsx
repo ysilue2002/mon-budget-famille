@@ -3,12 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { useBusinesses, useFamily } from '@/hooks/useData';
 import { archiveBusiness, createBusiness, updateBusiness } from '@/core/repo';
 import { currencyLabel } from '@/core/currencies';
+import { ACTIVITY_PROFILES, isActivityProfile, suggestActivityProfile, type ActivityProfile } from '@/core/profiles';
 import {
   Card,
   ConfirmButton,
   EmptyState,
   Field,
   Page,
+  SelectInput,
   Tag,
   TextArea,
   TextInput,
@@ -20,6 +22,7 @@ interface ProfileForm {
   name: string;
   ownerName: string;
   activity: string;
+  profile: ActivityProfile;
   phone: string;
   email: string;
   address: string;
@@ -31,6 +34,7 @@ const EMPTY_FORM: ProfileForm = {
   name: '',
   ownerName: '',
   activity: '',
+  profile: 'other',
   phone: '',
   email: '',
   address: '',
@@ -71,6 +75,8 @@ export default function ProfilePage() {
         name: selected.name,
         ownerName: selected.ownerName ?? '',
         activity: selected.activity,
+        // Profil déjà choisi, sinon la suggestion tirée de la nature saisie.
+        profile: selected.profile ?? suggestActivityProfile(selected.activity),
         phone: selected.phone ?? '',
         email: selected.email ?? '',
         address: selected.address ?? '',
@@ -91,6 +97,7 @@ export default function ProfilePage() {
       name: form.name,
       ownerName: form.ownerName,
       activity: form.activity,
+      profile: form.profile,
       phone: form.phone,
       email: form.email,
       address: form.address,
@@ -184,13 +191,22 @@ export default function ProfilePage() {
                 />
               </Field>
             </div>
-            <Field label={t('profile.activity')}>
-              <TextInput
-                value={form.activity}
-                onChange={(event) => setForm({ ...form, activity: event.target.value })}
-                maxLength={120}
-              />
-            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t('profile.activity')}>
+                <TextInput
+                  value={form.activity}
+                  onChange={(event) => setForm({ ...form, activity: event.target.value })}
+                  maxLength={120}
+                />
+              </Field>
+              <Field label={t('profile.activityProfile')} hint={t('profile.activityProfileHint')}>
+                <SelectInput
+                  value={form.profile}
+                  onChange={(value) => setForm({ ...form, profile: isActivityProfile(value) ? value : 'other' })}
+                  options={ACTIVITY_PROFILES.map((key) => ({ value: key, label: t(`profile.kinds.${key}`) }))}
+                />
+              </Field>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t('profile.phone')}>
                 <TextInput
@@ -281,6 +297,7 @@ export default function ProfilePage() {
                   { label: t('profile.email'), value: selected.email },
                   { label: t('profile.address'), value: selected.address },
                   { label: t('profile.taxId'), value: selected.taxId },
+                  { label: t('profile.activityProfile'), value: t(`profile.kinds.${selected.profile ?? 'other'}`) },
                 ].map((row) => (
                   <div key={row.label} className="rounded-lg border border-forest-100 bg-forest-50/40 px-3 py-2">
                     <dt className="text-[11px] font-medium uppercase tracking-wide text-sage-600">{row.label}</dt>

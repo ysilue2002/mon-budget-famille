@@ -9,6 +9,8 @@
  * immédiatement établir devis et factures, puis la compléter.
  */
 
+import { suggestActivityProfile, type ActivityProfile } from './profiles';
+
 /** Coordonnées recueillies à l'inscription, communes aux activités déclarées. */
 export interface RegistrationCompanyInput {
   /** Nom commercial — il s'imprime sur les devis et factures. */
@@ -22,12 +24,18 @@ export interface RegistrationCompanyInput {
   taxId?: string;
   /** Natures déclarées ; les entrées vides sont ignorées. */
   activities: readonly string[];
+  /**
+   * Profil choisi à l'inscription. Absent : il est suggéré d'après la nature
+   * (et reste « autre », donc sans restriction, si rien n'est reconnu).
+   */
+  profile?: ActivityProfile;
 }
 
 /** Profil prêt pour `createBusiness`. */
 export interface RegistrationBusinessProfile {
   name: string;
   activity: string;
+  profile: ActivityProfile;
   ownerName?: string;
   phone?: string;
   email?: string;
@@ -76,12 +84,20 @@ export function businessProfilesFromRegistration(
     taxId: input.taxId?.trim() || undefined,
   };
   const natures = normalizeActivities(input.activities);
+  // Le profil retenu par l'utilisateur prime ; sinon chaque activité reçoit la
+  // suggestion tirée de sa propre nature.
+  const profileFor = (nature: string) => input.profile ?? suggestActivityProfile(nature);
 
   if (natures.length === 0) {
-    return [{ name: company, activity: '', ...shared }];
+    return [{ name: company, activity: '', profile: profileFor(''), ...shared }];
   }
   if (natures.length === 1) {
-    return [{ name: company, activity: natures[0], ...shared }];
+    return [{ name: company, activity: natures[0], profile: profileFor(natures[0]), ...shared }];
   }
-  return natures.map((nature) => ({ name: `${company} — ${nature}`, activity: nature, ...shared }));
+  return natures.map((nature) => ({
+    name: `${company} — ${nature}`,
+    activity: nature,
+    profile: profileFor(nature),
+    ...shared,
+  }));
 }

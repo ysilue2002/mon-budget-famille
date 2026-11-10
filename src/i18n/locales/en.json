@@ -466,6 +466,8 @@
     "currencyHint": "Amounts, quotes and invoices use this currency.",
     "activities": "Nature of your activities",
     "activitiesHint": "One line per activity. Leave empty to add them as you go.",
+    "activityProfile": "Activity profile",
+    "activityProfileHint": "Suggested from the nature you typed; you can change it anytime in your profile.",
     "activityPlaceholder": "e.g. fabric sales, tailoring service",
     "addActivity": "Add an activity",
     "removeActivity": "Remove this activity",
@@ -799,6 +801,14 @@
     "name": "Business name",
     "ownerName": "Owner name",
     "activity": "Activity",
+    "activityProfile": "Activity profile",
+    "activityProfileHint": "It decides which screens are offered: shop, trades, services or everything.",
+    "kinds": {
+      "commerce": "Shop / retail",
+      "artisan": "Trades / job sites",
+      "services": "Services",
+      "other": "Other / show everything"
+    },
     "phone": "Phone",
     "email": "Business email",
     "address": "Address",
