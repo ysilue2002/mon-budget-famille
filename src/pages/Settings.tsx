@@ -16,6 +16,9 @@ import {
 } from '@/core/backup';
 import { setLanguage, LANGUAGES, LANGUAGE_LABELS, type Language } from '@/i18n';
 import { currencyLabel } from '@/core/currencies';
+import { useSpace } from '@/spaces/space';
+import { useNavPrefs } from '@/hooks/useNavPrefs';
+import { setNavShowAll } from '@/lib/navPrefs';
 import { RATES_API_URL } from '@/core/exchange';
 import type { CurrencyCode } from '@/core/types';
 import { Card, CurrencySelect, Field, Page, Tag, TextInput, btnPrimary } from '@/components/common';
@@ -205,6 +208,33 @@ function RecoveryCard() {
         {message && <p className="text-sm font-medium text-forest-600" role="status">✔ {message}</p>}
         {error && <p className="text-sm font-medium text-red-600" role="alert">{error}</p>}
       </div>
+    </Card>
+  );
+}
+
+/**
+ * Carte « Menu de l'activité » : le profil propose un menu, cette case rétablit
+ * le menu complet sur l'appareil, sans toucher au profil ni aux données.
+ */
+function MenuCard() {
+  const { t } = useTranslation();
+  const { space } = useSpace();
+  const prefs = useNavPrefs();
+  if (space !== 'business') return null;
+
+  return (
+    <Card>
+      <h2 className="mb-4 font-semibold text-forest-950">{t('settings.activityMenu')}</h2>
+      <p className="text-sm text-sage-600">{t('settings.activityMenuHint')}</p>
+      <label className="mt-3 flex items-start gap-2 text-sm text-forest-900">
+        <input
+          type="checkbox"
+          className="mt-1 h-4 w-4 accent-forest-600"
+          checked={prefs.showAll}
+          onChange={(event) => setNavShowAll(event.target.checked)}
+        />
+        <span>{t('settings.showAllOptions')}</span>
+      </label>
     </Card>
   );
 }
@@ -410,6 +440,8 @@ function Settings() {
             </p>
           )}
         </Card>
+
+        <MenuCard />
 
         <RecoveryCard />
 

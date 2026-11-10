@@ -18,6 +18,13 @@
     "sameAccount": "Une seule connexion pour les deux assistants."
   },
   "nav": {
+    "more": "Plus",
+    "moreTitle": "Autres écrans",
+    "bannerShow": "Afficher",
+    "bannerProjectsOne": "1 chantier est enregistré.",
+    "bannerProjectsMany": "{{count}} chantiers sont enregistrés.",
+    "bannerProductsOne": "1 article est enregistré.",
+    "bannerProductsMany": "{{count}} articles sont enregistrés.",
     "dashboard": "Tableau de bord",
     "transactions": "Opérations",
     "accounts": "Comptes",
@@ -246,6 +253,9 @@
   },
   "settings": {
     "title": "Réglages",
+    "activityMenu": "Menu de l'activité",
+    "activityMenuHint": "Le menu suit le profil de l'activité : les écrans utiles d'abord, les autres dans « Plus ». Cochez pour afficher tous les écrans sur cet appareil, quel que soit le profil.",
+    "showAllOptions": "Afficher toutes les options",
     "family": "Foyer",
     "familyName": "Nom du foyer",
     "primaryCurrency": "Devise de référence du foyer",

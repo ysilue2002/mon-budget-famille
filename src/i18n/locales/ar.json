@@ -18,6 +18,13 @@
     "sameAccount": "تسجيل دخول واحد للمساعدين."
   },
   "nav": {
+    "more": "المزيد",
+    "moreTitle": "شاشات أخرى",
+    "bannerShow": "إظهار",
+    "bannerProjectsOne": "تم تسجيل مشروع واحد.",
+    "bannerProjectsMany": "تم تسجيل {{count}} مشاريع.",
+    "bannerProductsOne": "تم تسجيل مادة واحدة.",
+    "bannerProductsMany": "تم تسجيل {{count}} مواد.",
     "dashboard": "لوحة التحكم",
     "transactions": "العمليات",
     "accounts": "الحسابات",
@@ -246,6 +253,9 @@
   },
   "settings": {
     "title": "الإعدادات",
+    "activityMenu": "قائمة النشاط",
+    "activityMenuHint": "تتبع القائمة نمط النشاط: الشاشات المفيدة أولًا والباقي في «المزيد». فعّل الخيار لعرض كل الشاشات على هذا الجهاز مهما كان النمط.",
+    "showAllOptions": "إظهار كل الخيارات",
     "family": "الأسرة",
     "familyName": "اسم الأسرة",
     "primaryCurrency": "العملة المرجعية للأسرة",

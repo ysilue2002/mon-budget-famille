@@ -14,6 +14,17 @@ import type { ActivityProfile } from './profiles';
 
 export type ScreenPlacement = 'essential' | 'useful' | 'hidden';
 
+/**
+ * Les quatre entrées de la barre du bas sur téléphone, dans l'ordre du document
+ * de répartition ; « Plus » ouvre le reste.
+ */
+export const BAR_PRIORITY: Readonly<Record<ActivityProfile, readonly string[]>> = {
+  commerce: ['/', '/sales', '/purchases', '/products'],
+  artisan: ['/', '/projects', '/sales', '/quotes'],
+  services: ['/', '/sales', '/quotes', '/invoices'],
+  other: ['/', '/sales', '/purchases', '/expenses'],
+};
+
 /** Placement de chaque écran, profil par profil. */
 export const SCREEN_PLACEMENTS: Readonly<
   Record<string, Readonly<Record<ActivityProfile, ScreenPlacement>>>

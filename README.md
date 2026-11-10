@@ -132,6 +132,12 @@ peut aussi être archivée sans perdre son historique.
   bilans et résultat pour un commerce). Les écrans masqués restent joignables
   par leur adresse et leurs données continuent d'alimenter l'accueil, les bilans
   et les états ; avec plusieurs activités, le menu réunit leurs besoins.
+  Sur téléphone, la barre du bas garde quatre entrées propres au métier
+  (`BAR_PRIORITY`) et « Plus » ouvre le reste ; un écran masqué qui contient
+  déjà des données est signalé par un bandeau qui le réaffiche en un clic
+  (`HiddenScreensBanner`), et la case « Afficher toutes les options » des
+  réglages rétablit le menu complet. Ces deux derniers choix sont gardés sur
+  l'appareil (`src/lib/navPrefs.ts`), jamais synchronisés.
 
 - Une opération s'y rattache via `Transaction.businessId` (champ « Activité pro »
   du formulaire d'opération, jamais pour un transfert). Le drapeau

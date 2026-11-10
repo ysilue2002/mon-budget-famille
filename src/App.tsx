@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { SyncProvider, SyncBadge } from '@/sync/SyncProvider';
@@ -23,8 +23,10 @@ import Recurring from '@/pages/Recurring';
 import Converter from '@/pages/Converter';
 import Reports from '@/pages/Reports';
 import Statements from '@/pages/Statements';
-import { NAV_FAMILY, businessNav, type NavItem } from '@/navigation';
+import { NAV_FAMILY, businessNav, hiddenScreens, mobileBarItems, type NavItem } from '@/navigation';
 import { useBusinesses } from '@/hooks/useData';
+import { useNavPrefs } from '@/hooks/useNavPrefs';
+import { HiddenScreensBanner } from '@/components/HiddenScreensBanner';
 import ActivityHome from '@/pages/ActivityHome';
 import Products from '@/pages/Products';
 import Projects from '@/pages/Projects';
@@ -77,6 +79,8 @@ function Layout() {
   const location = useLocation();
   const session = getAuth();
   const businesses = useBusinesses();
+  const prefs = useNavPrefs();
+  const [moreOpen, setMoreOpen] = useState(false);
   // Sans session ni choix explicite « sans compte », l'espace choisi impose la
   // connexion : les écrans de compte restent évidemment accessibles.
   const publicPaths = ['/login', '/join', '/reset'];
@@ -87,7 +91,13 @@ function Layout() {
   const profiles = (businesses ?? [])
     .filter((row) => !row.archived)
     .map((row) => row.profile ?? 'other');
-  const navItems: readonly NavItem[] = business ? businessNav(profiles) : NAV_FAMILY;
+  const navItems: readonly NavItem[] = business ? businessNav(profiles, prefs) : NAV_FAMILY;
+  // Sur téléphone : quatre entrées selon le métier, « Plus » ouvre le reste.
+  const barItems = business ? mobileBarItems(navItems, profiles) : navItems;
+  const moreItems = business ? navItems.filter((item) => !barItems.includes(item)) : [];
+  const moreActive = moreItems.some((item) => item.to === location.pathname);
+  // Le bandeau ne signale que les écrans masqués que l'utilisateur n'a pas réaffichés.
+  const hidden = business ? hiddenScreens(profiles, prefs) : [];
   const spaceLabel = business ? t('spaces.businessShort') : t('spaces.familyShort');
   const meta = t('app.meta', { languages: LANGUAGES.length, currencies: SUPPORTED_CURRENCIES.length });
 
@@ -95,6 +105,11 @@ function Layout() {
     clearSpace();
     void navigate('/', { replace: true });
   };
+
+  // Un changement d'écran referme toujours le panneau « Plus ».
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [location.pathname]);
 
   return (
     <div className="flex min-h-screen">
@@ -169,6 +184,12 @@ function Layout() {
           {needsLogin ? (
             <Login />
           ) : (
+          <>
+            {business && (
+              <div className="px-4 pt-3 lg:px-6 lg:pt-4">
+                <HiddenScreensBanner hidden={hidden} />
+              </div>
+            )}
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={business ? <ActivityHome /> : <Dashboard />} />
@@ -205,12 +226,57 @@ function Layout() {
               <Route path="*" element={business ? <ActivityHome /> : <Dashboard />} />
             </Routes>
           </ErrorBoundary>
+          </>
           )}
         </main>
 
         {/* Barre de navigation — mobile */}
+        {moreOpen && (
+          <>
+            <button
+              type="button"
+              aria-label={t('common.close')}
+              className="fixed inset-0 z-30 cursor-default bg-forest-950/20 lg:hidden"
+              onClick={() => setMoreOpen(false)}
+            />
+            <div
+              role="dialog"
+              aria-label={t('nav.moreTitle')}
+              className="fixed inset-x-2 bottom-16 z-50 max-h-[55vh] overflow-y-auto rounded-xl border border-forest-100 bg-white p-2 shadow-xl lg:hidden"
+            >
+              <div className="flex items-center justify-between px-2 py-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-sage-600">
+                  {t('nav.moreTitle')}
+                </p>
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-forest-700 underline"
+                  onClick={() => setMoreOpen(false)}
+                >
+                  {t('common.close')}
+                </button>
+              </div>
+              {moreItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => setMoreOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium ${
+                      isActive ? 'bg-forest-600 text-white' : 'text-forest-800 hover:bg-forest-50'
+                    }`
+                  }
+                >
+                  <span aria-hidden>{item.icon}</span>
+                  {t(item.key)}
+                </NavLink>
+              ))}
+            </div>
+          </>
+        )}
+
         <nav className="app-chrome no-scrollbar fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 overflow-x-auto border-t border-forest-100 bg-white/95 px-1 pb-[max(env(safe-area-inset-bottom),0.3rem)] pt-1 backdrop-blur lg:hidden">
-          {navItems.map((item) => (
+          {barItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -227,6 +293,21 @@ function Layout() {
               <span className="max-w-full truncate">{t(item.key)}</span>
             </NavLink>
           ))}
+          {moreItems.length > 0 && (
+            <button
+              type="button"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((open) => !open)}
+              className={`flex min-w-[4.5rem] shrink-0 flex-col items-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-medium ${
+                moreOpen || moreActive ? 'bg-forest-50 text-forest-700' : 'text-sage-600'
+              }`}
+            >
+              <span aria-hidden className="text-base">
+                ⋯
+              </span>
+              <span className="max-w-full truncate">{t('nav.more')}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={changeSpace}

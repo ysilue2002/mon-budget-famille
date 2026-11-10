@@ -18,6 +18,13 @@
     "sameAccount": "One login for both assistants."
   },
   "nav": {
+    "more": "More",
+    "moreTitle": "More screens",
+    "bannerShow": "Show it",
+    "bannerProjectsOne": "1 job site is saved.",
+    "bannerProjectsMany": "{{count}} job sites are saved.",
+    "bannerProductsOne": "1 item is saved.",
+    "bannerProductsMany": "{{count}} items are saved.",
     "dashboard": "Dashboard",
     "transactions": "Transactions",
     "accounts": "Accounts",
@@ -246,6 +253,9 @@
   },
   "settings": {
     "title": "Settings",
+    "activityMenu": "Activity menu",
+    "activityMenuHint": "The menu follows the activity profile: useful screens first, the rest under “More”. Tick to show every screen on this device, whatever the profile.",
+    "showAllOptions": "Show all options",
     "family": "Household",
     "familyName": "Household name",
     "primaryCurrency": "Household reference currency",

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { NAV_BUSINESS, NAV_FAMILY, businessNav } from './navigation';
+import { NAV_BUSINESS, NAV_FAMILY, businessNav, hiddenScreens, mobileBarItems } from './navigation';
 import { SCREEN_PLACEMENTS, screenPlacement } from './core/screens';
 import type { ActivityProfile } from './core/profiles';
 
@@ -135,5 +135,51 @@ describe('menu selon le profil d’activité', () => {
       const menu = paths([profile]);
       expect(new Set(menu).size, profile).toBe(menu.length);
     }
+  });
+
+  it('« afficher toutes les options » rétablit le menu complet', () => {
+    expect(businessNav(['commerce'], { showAll: true, revealed: [] }).map((item) => item.to)).toEqual(full);
+  });
+
+  it('un écran réaffiché revient, au second rang', () => {
+    const menu = businessNav(['commerce'], { showAll: false, revealed: ['/projects'] });
+    const menuPaths = menu.map((item) => item.to);
+    expect(menuPaths).toContain('/projects');
+    expect(menuPaths.indexOf('/projects')).toBeGreaterThan(menuPaths.indexOf('/products'));
+  });
+
+  it('le bandeau ne signale que les écrans masqués et non réaffichés', () => {
+    expect(hiddenScreens(['commerce']).map((item) => item.to)).toEqual(['/projects']);
+    expect(hiddenScreens(['commerce'], { showAll: false, revealed: ['/projects'] })).toEqual([]);
+    expect(hiddenScreens(['commerce'], { showAll: true, revealed: [] })).toEqual([]);
+    expect(hiddenScreens([])).toEqual([]);
+  });
+
+  it('la barre du bas suit l’ordre du métier, « Plus » prend le reste', () => {
+    expect(mobileBarItems(businessNav(['commerce']), ['commerce']).map((item) => item.to)).toEqual([
+      '/',
+      '/sales',
+      '/purchases',
+      '/products',
+    ]);
+    expect(mobileBarItems(businessNav(['artisan']), ['artisan']).map((item) => item.to)).toEqual([
+      '/',
+      '/projects',
+      '/sales',
+      '/quotes',
+    ]);
+    expect(mobileBarItems(businessNav(['services']), ['services']).map((item) => item.to)).toEqual([
+      '/',
+      '/sales',
+      '/quotes',
+      '/invoices',
+    ]);
+  });
+
+  it('avec deux métiers, la barre garde l’ordre du menu filtré', () => {
+    const menu = businessNav(['commerce', 'artisan']);
+    expect(mobileBarItems(menu, ['commerce', 'artisan']).map((item) => item.to)).toEqual(
+      menu.slice(0, 4).map((item) => item.to),
+    );
   });
 });
