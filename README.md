@@ -183,7 +183,10 @@ peut aussi être archivée sans perdre son historique.
   tableau unique avec ligne de totaux, imprimable et exportable en PDF ; il se
   restreint à un mois, à une année (`periodRange`), navigable avec les flèches,
   ou à deux dates saisies (« Dates », remises dans l'ordre si besoin), et le PDF
-  porte la période retenue jusque dans son nom de fichier. Sur téléphone le
+  porte la période retenue jusque dans son nom de fichier. Cette période est
+  mémorisée dans le navigateur (`mbf.projects.period`, relue par
+  `parsePeriodChoice`) : on la retrouve telle quelle en revenant sur l'écran, et
+  une valeur abîmée ramène simplement à « Tous les documents ». Sur téléphone le
   tableau laisse place à une fiche par chantier, sans défilement latéral.
   Le profil de l'activité reste à un clic depuis l'accueil : le menu garde
   treize entrées.

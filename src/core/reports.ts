@@ -201,6 +201,58 @@ export function previousAnchor(kind: PeriodKind, anchor: string): string {
   return shiftAnchor(kind, anchor, -1);
 }
 
+/** Période retenue par un état : tout, un mois, une année ou deux dates. */
+export type PeriodChoiceKind = 'all' | 'month' | 'year' | 'custom';
+
+export interface PeriodChoice {
+  kind: PeriodChoiceKind;
+  /** Mois (YYYY-MM) ou année (YYYY) quand la période n'est pas libre. */
+  anchor: string;
+  from: string;
+  to: string;
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Période par défaut : tous les documents, avec un intervalle prêt à saisir. */
+export function defaultPeriodChoice(today: string): PeriodChoice {
+  return {
+    kind: 'all',
+    anchor: anchorFor('month', today),
+    from: `${today.slice(0, 7)}-01`,
+    to: today,
+  };
+}
+
+/**
+ * Relit une période mémorisée (JSON) en écartant tout ce qui n'est pas une
+ * valeur connue : une entrée abîmée ramène la période par défaut plutôt que de
+ * casser l'écran.
+ */
+export function parsePeriodChoice(raw: string | null | undefined, today: string): PeriodChoice {
+  const fallback = defaultPeriodChoice(today);
+  if (!raw) return fallback;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+  if (!value || typeof value !== 'object') return fallback;
+  const stored = value as Partial<PeriodChoice>;
+  const kind = stored.kind;
+  if (kind !== 'all' && kind !== 'month' && kind !== 'year' && kind !== 'custom') return fallback;
+  return {
+    kind,
+    anchor:
+      typeof stored.anchor === 'string' && /^\d{4}(-\d{2})?$/.test(stored.anchor)
+        ? stored.anchor
+        : fallback.anchor,
+    from: typeof stored.from === 'string' && DAY.test(stored.from) ? stored.from : fallback.from,
+    to: typeof stored.to === 'string' && DAY.test(stored.to) ? stored.to : fallback.to,
+  };
+}
+
 /** Part effectivement réglée d'une opération (factures à crédit : part encaissée). */
 export function paidAmount(transaction: Pick<Transaction, 'amountInPrimary' | 'settled' | 'settledAmount'>): number {
   if (transaction.settled !== false) return Math.max(0, transaction.amountInPrimary);

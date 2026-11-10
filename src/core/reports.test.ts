@@ -3,7 +3,9 @@ import {
   anchorFor,
   buildIncomeStatement,
   buildPeriodReport,
+  defaultPeriodChoice,
   paidAmount,
+  parsePeriodChoice,
   periodRange,
   previousAnchor,
   shiftAnchor,
@@ -118,6 +120,37 @@ describe('bilans — bornes de période', () => {
     expect(anchorFor('month', '2026-11-05')).toBe('2026-11');
     expect(anchorFor('quarter', '2026-11-05')).toBe('2026-Q4');
     expect(anchorFor('year', '2026-11-05')).toBe('2026');
+  });
+});
+
+describe('bilans — période mémorisée', () => {
+  it('par défaut : tout, avec un intervalle prêt à saisir', () => {
+    expect(defaultPeriodChoice('2026-11-05')).toEqual({
+      kind: 'all',
+      anchor: '2026-11',
+      from: '2026-11-01',
+      to: '2026-11-05',
+    });
+  });
+
+  it('relit une période enregistrée telle quelle', () => {
+    const saved = { kind: 'custom', anchor: '2026-10', from: '2026-10-01', to: '2026-10-31' };
+    expect(parsePeriodChoice(JSON.stringify(saved), '2026-11-05')).toEqual(saved);
+  });
+
+  it('une entrée abîmée ramène la période par défaut', () => {
+    const fallback = defaultPeriodChoice('2026-11-05');
+    expect(parsePeriodChoice('pas du json', '2026-11-05')).toEqual(fallback);
+    expect(parsePeriodChoice(null, '2026-11-05')).toEqual(fallback);
+    expect(parsePeriodChoice(JSON.stringify({ kind: 'semaine' }), '2026-11-05')).toEqual(fallback);
+  });
+
+  it('écarte les bornes illisibles sans perdre le reste', () => {
+    const parsed = parsePeriodChoice(
+      JSON.stringify({ kind: 'custom', anchor: 'n-importe', from: '2026-10-01', to: '31/10/2026' }),
+      '2026-11-05',
+    );
+    expect(parsed).toEqual({ kind: 'custom', anchor: '2026-11', from: '2026-10-01', to: '2026-11-05' });
   });
 });
 

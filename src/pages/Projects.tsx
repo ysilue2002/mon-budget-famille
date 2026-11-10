@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -21,7 +21,16 @@ import {
   projectTotals,
   sortedProjects,
 } from '@/core/projects';
-import { anchorFor, periodRange, shiftAnchor, type PeriodKind } from '@/core/reports';
+import {
+  anchorFor,
+  defaultPeriodChoice,
+  parsePeriodChoice,
+  periodRange,
+  shiftAnchor,
+  type PeriodChoice,
+  type PeriodChoiceKind,
+  type PeriodKind,
+} from '@/core/reports';
 import { formatAmount } from '@/core/currencies';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage } from '@/core/pdf';
 import { todayISO } from '@/lib/date';
@@ -80,6 +89,26 @@ function periodText(kind: PeriodKind, anchor: string, from: string, language: st
   return date.toLocaleDateString(locale, { month: 'long', year: 'numeric' });
 }
 
+/** Période de l'état global retenue d'une visite à l'autre (localStorage). */
+const PERIOD_KEY = 'mbf.projects.period';
+
+function readPeriodChoice(): PeriodChoice {
+  try {
+    return parsePeriodChoice(localStorage.getItem(PERIOD_KEY), todayISO());
+  } catch {
+    // Stockage refusé (navigation privée) : la période reste celle de la visite.
+    return defaultPeriodChoice(todayISO());
+  }
+}
+
+function savePeriodChoice(choice: PeriodChoice): void {
+  try {
+    localStorage.setItem(PERIOD_KEY, JSON.stringify(choice));
+  } catch {
+    // Rien à faire : la période vaut pour la visite en cours.
+  }
+}
+
 /**
  * Chantiers : chaque travail (maison, toiture, réparation, commande) regroupe
  * ses ventes, ses achats, ses dépenses et ses acomptes pour dire s'il est
@@ -103,12 +132,18 @@ export default function Projects() {
   // État de rentabilité affiché : un chantier (`id`) ou tous ceux en cours.
   const [reportScope, setReportScope] = useState<'all' | string | null>(null);
   // Période de l'état global : tous les documents, un mois, une année ou deux dates.
-  const [globalKind, setGlobalKind] = useState<'all' | PeriodKind | 'custom'>('all');
-  const [globalAnchor, setGlobalAnchor] = useState(() => anchorFor('month', todayISO()));
-  const [customFrom, setCustomFrom] = useState(() => `${todayISO().slice(0, 7)}-01`);
-  const [customTo, setCustomTo] = useState(() => todayISO());
+  // Elle est mémorisée pour être retrouvée telle quelle en revenant sur l'écran.
+  const [period] = useState(readPeriodChoice);
+  const [globalKind, setGlobalKind] = useState<PeriodChoiceKind>(period.kind);
+  const [globalAnchor, setGlobalAnchor] = useState(period.anchor);
+  const [customFrom, setCustomFrom] = useState(period.from);
+  const [customTo, setCustomTo] = useState(period.to);
   const [notice, setNotice] = useState<string | null>(null);
   const lang = i18n.language;
+
+  useEffect(() => {
+    savePeriodChoice({ kind: globalKind, anchor: globalAnchor, from: customFrom, to: customTo });
+  }, [globalKind, globalAnchor, customFrom, customTo]);
 
   const fmt = (minor: number) => formatAmount(minor, primary, i18n.language);
 
