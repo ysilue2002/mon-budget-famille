@@ -61,6 +61,11 @@ nav button.on{color:var(--vert)}
 .adsBottom{position:fixed;left:8px;right:8px;bottom:76px;z-index:7;background:#fff;border-style:solid}
 .adsBottom button{position:absolute;top:6px;inset-inline-end:8px;background:#eef3ee;color:#334;border-radius:8px;padding:2px 9px;font-weight:800}
 html[dir="rtl"] .adsBottom button{inset-inline-end:auto;inset-inline-start:8px}
+.gate{position:fixed;inset:0;z-index:40;background:var(--creme);overflow:auto;padding:26px 18px 40px}
+.gate .wrap{max-width:520px;margin:0 auto}
+.gate h1{font-size:27px;color:var(--vert);margin:8px 0 4px}
+.gate .lang{font-size:21px;margin-top:12px}
+.gate .seg{margin:16px 0 12px}
 .qrbox{display:flex;justify-content:center;margin:14px 0;padding:10px;background:#fff;border:2px solid #d8e6da;border-radius:14px}
 .qrbox svg{width:220px;height:220px}
 #printArea{display:none}

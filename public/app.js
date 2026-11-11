@@ -833,7 +833,10 @@ function resetModal(token) {
 }
 
 /* ---------------- démarrage ---------------- */
-if (!db.shop) {
+const LANG_KEY = 'assistant-commercial.langChosen';
+let gateMode = 'signup';
+function askShop() {
+  if (db.shop) return;
   const d = modal(`<h2>${T('welcomeTitle')}</h2><p>${T('welcomeAsk')}</p><input id="wShop" placeholder="Chez Awa"><button class="btn" id="wOk">${T('start')}</button>`);
   d.querySelector('#wOk').onclick = () => {
     const v = d.querySelector('#wShop').value.trim();
@@ -841,13 +844,104 @@ if (!db.shop) {
     db.shop = v; saveDB(); d.remove(); render();
   };
 }
+function closeGate() { const g = document.getElementById('gate'); if (g) g.remove(); }
+function afterGate() { closeGate(); askShop(); render(); }
+function showLangGate() {
+  closeGate();
+  const g = document.createElement('div');
+  g.id = 'gate';
+  g.className = 'gate';
+  g.innerHTML = `<div class="wrap">
+    <h1>${T('app')}</h1>
+    <p class="hint">${T('chooseLang')}</p>
+    <button class="btn lang" data-lang="fr">Français</button>
+    <button class="btn out lang" data-lang="en">English</button>
+    <button class="btn out lang" data-lang="ar" dir="rtl">العربية</button>
+    <p class="hint">${T('chooseLangHint')}</p></div>`;
+  document.body.appendChild(g);
+  g.querySelectorAll('[data-lang]').forEach((b) => {
+    b.onclick = () => {
+      db.settings.lang = b.dataset.lang;
+      saveDB(false);
+      applyLang();
+      localStorage.setItem(LANG_KEY, b.dataset.lang);
+      render();
+      showAuthGate();
+    };
+  });
+}
+function showAuthGate() {
+  closeGate();
+  const g = document.createElement('div');
+  g.id = 'gate';
+  g.className = 'gate';
+  g.innerHTML = `<div class="wrap">
+    <h1>${T('app')}</h1>
+    <p class="hint">${T('gateHint')}</p>
+    <div class="seg"><button id="gSignup"></button><button id="gLogin"></button></div>
+    <div class="card" id="gForm"></div>
+    <button class="btn out" id="gLater">${T('continueNo')}</button>
+    <p class="hint">${T('gateNoAccountHint')}</p></div>`;
+  document.body.appendChild(g);
+  const tabs = { signup: g.querySelector('#gSignup'), login: g.querySelector('#gLogin') };
+  const form = g.querySelector('#gForm');
+  const setMode = (m) => {
+    gateMode = m;
+    tabs.signup.textContent = T('createAccount');
+    tabs.login.textContent = T('signIn');
+    tabs.signup.classList.toggle('on', m === 'signup');
+    tabs.login.classList.toggle('on', m === 'login');
+    drawForm();
+  };
+  function drawForm() {
+    form.innerHTML = gateMode === 'signup'
+      ? `<label>${T('email')}</label><input id="gEmail" type="email" autocomplete="email">
+         <label>${T('phoneNumber')}</label><input id="gPhone" type="tel" autocomplete="tel">
+         <label>${T('password')}</label><input id="gPass" type="password" autocomplete="new-password">
+         <button class="btn" id="gGo">${T('createAccount')}</button><p class="err" id="gErr"></p>`
+      : `<label>${T('email')}</label><input id="gEmail" type="email" autocomplete="email">
+         <label>${T('password')}</label><input id="gPass" type="password" autocomplete="current-password">
+         <button class="btn" id="gGo">${T('signIn')}</button><p class="err" id="gErr"></p>`;
+    const go = form.querySelector('#gGo');
+    go.onclick = async () => {
+      const err = form.querySelector('#gErr');
+      const email = form.querySelector('#gEmail').value.trim();
+      const pass = form.querySelector('#gPass').value;
+      err.textContent = '';
+      if (gateMode === 'signup') {
+        const phone = form.querySelector('#gPhone').value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) { err.textContent = T('badEmail'); return; }
+        if (phone.replace(/\D/g, '').length < 8) { err.textContent = T('badPhone'); return; }
+        if (pass.length < 8) { err.textContent = T('badPass'); return; }
+        go.disabled = true;
+        const e = await signup(email, phone, pass);
+        if (e) { go.disabled = false; err.textContent = e === 'exists' ? T('emailTaken') : e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
+      } else {
+        if (!email || !pass) { err.textContent = T('badCredentials'); return; }
+        go.disabled = true;
+        const e = await login(email, pass);
+        if (e) { go.disabled = false; err.textContent = e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
+      }
+      afterGate();
+    };
+  }
+  tabs.signup.onclick = () => setMode('signup');
+  tabs.login.onclick = () => setMode('login');
+  g.querySelector('#gLater').onclick = () => afterGate();
+  setMode(gateMode);
+}
 window.addEventListener('online', () => { render(); syncTick(); });
 window.addEventListener('offline', render);
 window.addEventListener('focus', syncTick);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncTick(); });
 setInterval(syncTick, 20000);
 render();
-bootAccount();
 const resetToken = new URLSearchParams(location.search).get('reset');
-if (resetToken) resetModal(resetToken);
+(async () => {
+  await bootAccount();
+  if (resetToken) { resetModal(resetToken); return; }
+  if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
+  if (!me && !db.shop) showAuthGate();
+  else askShop();
+})();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
