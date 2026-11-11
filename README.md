@@ -2,9 +2,13 @@
 
 Application unique : vendre, suivre le stock, savoir qui doit de l'argent.
 
-- Fonctionne hors ligne, données dans le téléphone (localStorage).
+- Fonctionne hors ligne (service worker), données dans le téléphone.
 - Onglets : Vendre, Stock, Clients, Documents, Bilans.
-- Relance WhatsApp avec les cinq variables.
-- Devis DEV-… transformables en facture FAC-…
+- Français, anglais, arabe inversé.
+- Ventes et dépenses, prélèvement personnel, stock avec marge et alertes,
+  crédits clients et dettes fournisseurs, relance WhatsApp à cinq variables.
+- Devis DEV-… transformables en facture FAC-…, impression A4 et ticket 58 mm.
+- Réglages : langue, texte de relance, sauvegarde et restauration, partage.
 
-Ouvrir index.html ou servir le dossier.
+Fichiers : index.html, app.js, i18n.js, style.css, sw.js, manifest.webmanifest.
+Ouvrir index.html ou servir ce dossier.
