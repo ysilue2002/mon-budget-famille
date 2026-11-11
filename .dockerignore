@@ -1,9 +1,0 @@
-node_modules
-dist
-server/node_modules
-server/dist
-.env
-.env.*
-!.env.example
-.git
-tsconfig.tsbuildinfo

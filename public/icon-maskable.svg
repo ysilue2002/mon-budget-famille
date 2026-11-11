@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Mon Budget Famille">
-  <rect width="128" height="128" fill="#14532d" />
-  <rect x="30" y="50" width="68" height="44" rx="9" fill="#f6fdf9" />
-  <rect x="30" y="50" width="68" height="12" rx="6" fill="#9dcdaa" />
-  <circle cx="84" cy="79" r="7" fill="#36784e" />
-  <path d="M39 98 L55 79 L67 89 L87 65" fill="none" stroke="#36784e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
-</svg>
