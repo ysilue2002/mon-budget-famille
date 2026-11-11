@@ -35,6 +35,9 @@ let period = 'mois';
 let draft = null;
 let adsClosed = false;
 let docQuery = '';
+let histQuery = '';
+let histMethod = 'all';
+let histPeriod = 'mois';
 
 function loadDB() {
   try {
@@ -105,7 +108,7 @@ function render() {
     const k = b.querySelector('[data-k]');
     if (k) k.textContent = T(k.dataset.k);
   });
-  const view = { vendre, stock, clients, docs, bilans }[tab]();
+  const view = { vendre, stock, clients, docs, bilans, hist }[tab]();
   const ads = adsHTML();
   document.getElementById('app').innerHTML = (tab === 'vendre' ? ads.top : '') + view + (tab === 'vendre' ? ads.bottom : '');
   if (draft) document.getElementById('app').insertAdjacentHTML('beforeend', docForm());
@@ -139,7 +142,7 @@ function vendre() {
       <button class="btn out" data-act="expense">− ${T('expense')}</button>
     </div>
     <button class="btn out" data-act="withdraw">${T('withdraw')}</button>
-    <div class="card" style="margin-top:16px"><h3>${T('today')}</h3>${list || `<p class="empty">${T('nothing')}</p>`}</div>`;
+    <div class="card" style="margin-top:16px"><h3 style="display:flex;justify-content:space-between;align-items:center;gap:8px">${T('today')}<button class="btn small out" data-act="hist">${T('history')}</button></h3>${list || `<p class="empty">${T('nothing')}</p>`}</div>`;
 }
 
 /* ---------------- Stock ---------------- */
@@ -230,6 +233,44 @@ function docs() {
       <div id="docList">${docsList(filterDocs(docQuery))}</div>
     </div>`;
 }
+/* ---------------- Historique des ventes ---------------- */
+function histSales() {
+  const term = String(histQuery || '').trim().toLowerCase();
+  return db.sales.filter((s) => inPeriod(s.date, histPeriod))
+    .filter((s) => histMethod === 'all' || s.method === histMethod)
+    .filter((s) => !term || [s.party, s.product, s.method, s.date, dayFR(s.date), String(s.total), money(s.total)].join(' ').toLowerCase().includes(term))
+    .sort((a, b) => (a.date === b.date ? (b.u || 0) - (a.u || 0) : a.date < b.date ? 1 : -1));
+}
+function histSummary(list) {
+  const ca = list.reduce((a, s) => a + (Number(s.total) || 0), 0);
+  const cash = list.reduce((a, s) => a + paidOf(s), 0);
+  return `<div class="kpi"><span>${T('saleCount')}</span><b>${list.length}</b></div>
+      <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
+      <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
+      <div class="kpi"><span>${T('remains')}</span><b>${money(Math.max(0, ca - cash))}</b></div>`;
+}
+function histRows(list) {
+  return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div><div class="s">${dayFR(s.date)} · ${esc(s.method)}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">
+      ${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
+      <button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button>
+      <button class="btn small pdf" data-act="receiptPdf" data-id="${s.id}">${T('pdf')}</button>
+    </div></div>`).join('') || `<p class="empty">${T('noSalesFound')}</p>`;
+}
+function hist() {
+  const list = histSales();
+  const chip = (p, label) => `<button class="btn ${histPeriod === p ? '' : 'out'}" data-act="histPeriod" data-p="${p}">${label}</button>`;
+  const methods = [...new Set(db.sales.map((s) => s.method).filter(Boolean))];
+  return `<button class="btn out" data-act="back">← ${T('back')}</button>
+    <h2 style="margin-top:12px">${T('history')}</h2>
+    <div class="card"><h3>${T('period')}</h3><div class="big">${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}</div></div>
+    <div class="card">
+      <input id="histSearch" type="search" placeholder="${T('searchSales')}" value="${esc(histQuery)}" autocomplete="off">
+      <label>${T('method')}</label>
+      <select id="histMethod"><option value="all">${T('allMethods')}</option>${methods.map((m) => `<option value="${esc(m)}" ${m === histMethod ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>
+    </div>
+    <div class="kpis" id="histSum">${histSummary(list)}</div>
+    <div class="card" id="histList">${histRows(list)}</div>`;
+}
 function docForm() {
   const rows = draft.lines.map((l, i) => `<div class="line-row">
     <input data-l="label" data-i="${i}" placeholder="${T('line')}" value="${esc(l.label)}">
@@ -261,7 +302,7 @@ function bilans() {
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
-    </div></div>
+    </div><button class="btn out" data-act="hist">${T('history')}</button></div>
     <div class="kpis">
       <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
@@ -366,12 +407,67 @@ function waSale(id) {
   const phone = (db.parties.find((p) => p.name === s.party) || {}).phone;
   waOpen(phone, receiptText(s));
 }
+async function receiptPdf(s) {
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'mm', format: [80, 140] });
+  const st = db.settings || {};
+  let y = 10;
+  if (st.logo) {
+    const dim = await imgSize(st.logo);
+    const w = 20;
+    const h = Math.min(16, w * dim.h / dim.w);
+    try { pdf.addImage(st.logo, st.logo.indexOf('image/png') === 0 ? 'PNG' : 'JPEG', (80 - w) / 2, y, w, h); y += h + 3; } catch {}
+  }
+  pdf.setTextColor(20, 83, 45);
+  pdf.setFontSize(12);
+  pdf.splitTextToSize(db.shop || T('app'), 66).forEach((line) => { pdf.text(line, 40, y, { align: 'center' }); y += 5; });
+  pdf.setTextColor(30, 30, 30);
+  pdf.setFontSize(9);
+  pdf.text(dayFR(s.date), 40, y, { align: 'center' }); y += 5;
+  if (s.party) { pdf.text(String(s.party).slice(0, 34), 40, y, { align: 'center' }); y += 5; }
+  y += 1; pdf.line(7, y, 73, y); y += 6;
+  pdf.setFontSize(10);
+  if (s.product) { pdf.text(`${String(s.product).slice(0, 26)} × ${s.qty}`, 7, y); y += 5; }
+  pdf.setFontSize(13);
+  pdf.text(`${T('total')} : ${money(s.total)}`, 73, y, { align: 'right' }); y += 7;
+  pdf.setFontSize(9);
+  if (creditOf(s) > 0) {
+    pdf.text(`${T('paid')} : ${money(paidOf(s))}`, 7, y); y += 4.5;
+    pdf.text(`${T('remains')} : ${money(creditOf(s))}`, 7, y); y += 4.5;
+  }
+  pdf.text(`${T('method')} : ${s.method || '—'}`, 7, y); y += 6;
+  pdf.line(7, y, 73, y); y += 6;
+  pdf.setFontSize(8); pdf.setTextColor(90, 90, 90);
+  pdf.text(T('thanks'), 40, y, { align: 'center' });
+  return pdf.output('blob');
+}
+async function shareReceiptPDF(id) {
+  const s = db.sales.find((x) => x.id === id);
+  if (!s) return;
+  try {
+    const blob = await receiptPdf(s);
+    const who = (s.party || '').normalize('NFD').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const file = new File([blob], `Recu-${s.date || todayISO()}${who ? '-' + who : ''}.pdf`, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: T('receipt'), text: `${db.shop || ''} · ${money(s.total)}` });
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = file.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 6000);
+    alert(T('pdfSaved'));
+    waSale(s.id);
+  } catch { alert(T('pdfFail')); }
+}
 function saleDone(sale) {
   const m = modal(`<h2>${T('saleSaved')}</h2>
     <p class="hint">${money(sale.total)}${sale.product ? ' · ' + esc(sale.product) + ' ×' + sale.qty : ''}${sale.party ? ' · ' + esc(sale.party) : ''}</p>
     <button class="btn whats" id="rdWa">${T('sendReceipt')}</button>
+    <button class="btn pdf" id="rdPdf">${T('receiptPdf')}</button>
     <button class="btn out" id="rdNo">${T('close')}</button>`);
   m.querySelector('#rdWa').onclick = () => { m.remove(); waSale(sale.id); };
+  m.querySelector('#rdPdf').onclick = () => { m.remove(); shareReceiptPDF(sale.id); };
   m.querySelector('#rdNo').onclick = () => m.remove();
 }
 function waOpen(phone, text) {
@@ -509,6 +605,9 @@ document.addEventListener('click', async (e) => {
   if (!b) return;
   const act = b.dataset.act;
   if (act === 'sale') saleModal();
+  if (act === 'hist') { tab = 'hist'; render(); }
+  if (act === 'histPeriod') { histPeriod = b.dataset.p; render(); }
+  if (act === 'back') { tab = 'vendre'; render(); }
   if (act === 'side') { side = b.dataset.s; render(); }
   if (act === 'period') { period = b.dataset.p; render(); }
   if (act === 'closeAds') { adsClosed = true; render(); }
@@ -592,6 +691,7 @@ document.addEventListener('click', async (e) => {
   if (act === 'print') previewDoc(b.dataset.id);
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
   if (act === 'waSale') waSale(b.dataset.id);
+  if (act === 'receiptPdf') shareReceiptPDF(b.dataset.id);
   if (act === 'duplicate') {
     const src = db.docs.find((x) => x.id === b.dataset.id);
     if (src) {
@@ -1204,6 +1304,17 @@ document.addEventListener('input', (e) => {
     const box = document.getElementById('docList');
     if (box) box.innerHTML = docsList(filterDocs(docQuery));
   }
+  if (e.target.id === 'histSearch') {
+    histQuery = e.target.value;
+    const list = histSales();
+    const box = document.getElementById('histList');
+    if (box) box.innerHTML = histRows(list);
+    const sum = document.getElementById('histSum');
+    if (sum) sum.innerHTML = histSummary(list);
+  }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'histMethod') { histMethod = e.target.value; render(); }
 });
 window.addEventListener('online', () => { render(); syncTick(); });
 window.addEventListener('offline', render);
