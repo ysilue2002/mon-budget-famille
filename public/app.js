@@ -213,6 +213,8 @@ function docs() {
       ${list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)}</div><div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(d.total)}</div></div><div class="right">
         <button class="btn small" data-act="print" data-id="${d.id}">${T('print')}</button>
         <button class="btn small whats" data-act="waDoc" data-id="${d.id}">${T('whatsapp')}</button>
+        <button class="btn small pdf" data-act="waPdf" data-id="${d.id}">${T('pdf')}</button>
+        <button class="btn small out" data-act="duplicate" data-id="${d.id}">${T('duplicate')}</button>
         <button class="btn small mail" data-act="mailDoc" data-id="${d.id}">${T('email')}</button>
         ${d.kind === 'DEV' ? `<button class="btn small out" data-act="toFacture" data-id="${d.id}">${T('toInvoice')}</button>` : ''}
       </div></div>`).join('') || `<p class="empty">${T('noDocs')}</p>`}
@@ -368,6 +370,87 @@ function printFormat(id, format) {
   area.innerHTML = docHTML(d);
   window.print();
 }
+function imgSize(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.width || 1, h: img.height || 1 });
+    img.onerror = () => resolve({ w: 1, h: 1 });
+    img.src = src;
+  });
+}
+async function docPdf(d) {
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const s = db.settings || {};
+  const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
+  const contact = [me && me.phone, me && me.email].filter(Boolean).join(' · ');
+  let y = 15;
+  if (s.logo) {
+    const dim = await imgSize(s.logo);
+    const w = 30;
+    const h = Math.min(24, w * dim.h / dim.w);
+    try { pdf.addImage(s.logo, s.logo.indexOf('image/png') === 0 ? 'PNG' : 'JPEG', 14, y, w, h); y += h + 4; } catch {}
+  }
+  pdf.setTextColor(20, 83, 45);
+  pdf.setFontSize(17);
+  pdf.text(db.shop || 'Assistant Commercial', 14, y);
+  y += 6;
+  pdf.setTextColor(40, 40, 40);
+  pdf.setFontSize(9);
+  [s.companyForm, place, contact].filter(Boolean).forEach((line) => { pdf.text(String(line), 14, y); y += 4.5; });
+  y += 3;
+  pdf.setFontSize(11);
+  pdf.setTextColor(20, 20, 20);
+  pdf.text(`${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)}`, 14, y);
+  y += 6;
+  pdf.setFontSize(10);
+  pdf.text(`${T('client')} : ${d.party || '—'}`, 14, y);
+  y += 8;
+  pdf.setFontSize(9);
+  pdf.text(T('line'), 14, y);
+  pdf.text(T('qty'), 118, y);
+  pdf.text(T('sellPrice'), 138, y);
+  pdf.text(T('total'), 196, y, { align: 'right' });
+  y += 3;
+  pdf.line(14, y, 196, y);
+  y += 5;
+  for (const l of d.lines) {
+    if (y > 268) { pdf.addPage(); y = 16; }
+    pdf.text(String(l.label).slice(0, 62), 14, y);
+    pdf.text(String(l.qty), 118, y);
+    pdf.text(money(+l.price), 138, y);
+    pdf.text(money((+l.qty || 1) * +l.price), 196, y, { align: 'right' });
+    y += 5.5;
+  }
+  y += 1;
+  pdf.line(14, y, 196, y);
+  y += 7;
+  pdf.setFontSize(13);
+  pdf.text(`${T('total')} : ${money(d.total)}`, 196, y, { align: 'right' });
+  y += 10;
+  pdf.setFontSize(8);
+  pdf.setTextColor(90, 90, 90);
+  pdf.text(T('thanks'), 14, y);
+  return pdf.output('blob');
+}
+async function shareDocPDF(id) {
+  const d = db.docs.find((x) => x.id === id);
+  if (!d) return;
+  try {
+    const blob = await docPdf(d);
+    const file = new File([blob], d.number + '.pdf', { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: d.number, text: `${db.shop || ''} · ${d.number} · ${money(d.total)}` });
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = d.number + '.pdf'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 6000);
+    alert(T('pdfSaved'));
+    waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(d.total)} — ${db.shop || ''}`);
+  } catch { alert(T('pdfFail')); }
+}
 function previewDoc(id) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
@@ -473,6 +556,19 @@ document.addEventListener('click', async (e) => {
     if (d && d.kind === 'DEV') { d.kind = 'FAC'; d.number = num('FAC'); d.u = Date.now(); saveDB(); render(); }
   }
   if (act === 'print') previewDoc(b.dataset.id);
+  if (act === 'waPdf') shareDocPDF(b.dataset.id);
+  if (act === 'duplicate') {
+    const src = db.docs.find((x) => x.id === b.dataset.id);
+    if (src) {
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = uid();
+      copy.number = num(copy.kind);
+      copy.date = todayISO();
+      copy.u = Date.now();
+      db.docs.push(copy);
+      saveDB(); render();
+    }
+  }
   if (act === 'waDoc') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (d) waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(d.total)} — ${db.shop || ''}`);

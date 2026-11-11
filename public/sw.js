@@ -1,5 +1,5 @@
-const CACHE = 'assistant-commercial-v10';
-const FILES = ['./', './index.html', './manifest.webmanifest', './qrcode.js', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'assistant-commercial-v11';
+const FILES = ['./', './index.html', './manifest.webmanifest', './qrcode.js', './jspdf.umd.min.js', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));

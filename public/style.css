@@ -23,6 +23,7 @@ button{font:inherit;cursor:pointer;border:0;border-radius:14px}
 .btn.small.out{background:#fff;color:var(--vert);border:2px solid var(--vert)}
 .btn.small.whats{background:#25d366;color:#06301a}
 .btn.small.mail{background:#1d4ed8;color:#fff}
+.btn.small.pdf{background:#f59e0b;color:#3b2200}
 .big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
 .big .btn{margin-top:0;padding:22px 10px;font-size:20px}
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
