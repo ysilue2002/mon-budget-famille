@@ -9,7 +9,7 @@ const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [],
   seq: { DEV: 0, FAC: 0 },
   settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS } },
-  meta: { lastSync: null },
+  meta: { lastSync: null, updated: 0 },
 });
 let db = loadDB();
 let tab = 'vendre';
@@ -27,7 +27,11 @@ function loadDB() {
     return Object.assign(base, parsed, { settings: Object.assign(base.settings, parsed.settings || {}) });
   } catch { return fresh(); }
 }
-function saveDB() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} }
+function saveDB(toucher = true) {
+  if (toucher) db.meta.updated = Date.now();
+  try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
+  if (toucher) queueSync();
+}
 const T = (k) => (I18N[db.settings.lang] || I18N.fr)[k] || I18N.fr[k] || k;
 const uid = () => Math.random().toString(36).slice(2, 10);
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -63,9 +67,7 @@ function render() {
   applyLang();
   document.getElementById('appName').textContent = T('app');
   document.getElementById('shopName').textContent = db.shop || T('shop');
-  const pill = document.getElementById('netState');
-  pill.textContent = navigator.onLine ? T('online') : T('offline');
-  pill.classList.toggle('on', navigator.onLine);
+  updatePill();
   document.querySelectorAll('#nav button').forEach((b) => {
     b.classList.toggle('on', b.dataset.tab === tab);
     const k = b.querySelector('[data-k]');
@@ -416,6 +418,13 @@ document.addEventListener('click', async (e) => {
     if (d) location.href = `mailto:?subject=${encodeURIComponent(`${d.kind} ${d.number}`)}&body=${encodeURIComponent(`${db.shop || ''}\n${d.kind} ${d.number} · ${dayFR(d.date)}\n${T('total')} : ${money(d.total)}`)}`;
   }
   if (act === 'openSettings') settingsModal();
+  if (act === 'syncNow') pushNow();
+  if (act === 'logout') {
+    await logout();
+    const m = document.querySelector('.modal');
+    if (m) m.remove();
+    render();
+  }
   if (act === 'shareApp') shareApp();
 });
 function syncDraft() {
@@ -436,6 +445,7 @@ function settingsModal() {
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
+    ${accountHTML()}
     <button class="btn" id="setOk">${T('save')}</button>
     <button class="btn out" id="setShare">${T('share')}</button>
     <button class="btn out" id="setExport">${T('exportData')}</button>
@@ -443,6 +453,7 @@ function settingsModal() {
     <p class="hint">${T('backupHint')}</p>
     <button class="btn out" id="setNo">${T('close')}</button>`);
   d.querySelector('#setNo').onclick = () => d.remove();
+  wireAccount(d);
   d.querySelector('#setShare').onclick = () => shareApp();
   d.querySelector('#setExport').onclick = exportDB;
   d.querySelector('#setImport').onclick = importDB;
@@ -490,6 +501,136 @@ async function shareApp() {
   try { await navigator.clipboard.writeText(url); alert(T('copied')); } catch { alert(url); }
 }
 
+/* ---------------- compte et synchronisation ---------------- */
+let me = null;
+let syncState = 'idle';
+let syncTimer = null;
+
+function updatePill() {
+  const pill = document.getElementById('netState');
+  if (!pill) return;
+  const synced = { synced: T('synced'), syncing: T('syncing'), pending: T('syncPending'), error: T('syncPending') }[syncState] || T('synced');
+  pill.textContent = !navigator.onLine ? T('offline') : me ? synced : T('online');
+  pill.classList.toggle('on', navigator.onLine && (!me || syncState === 'synced'));
+}
+function markSync(s) { syncState = s; updatePill(); }
+
+async function api(path, method = 'GET', body) {
+  try {
+    const r = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: body ? { 'content-type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await r.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+    return { ok: r.ok, status: r.status, data };
+  } catch { return { ok: false, status: 0, data: null }; }
+}
+async function refreshMe() {
+  const r = await api('/api/me');
+  me = r.ok && r.data ? r.data.user : null;
+  return me;
+}
+function applyRemote(text, updated) {
+  try {
+    const parsed = JSON.parse(text);
+    const base = fresh();
+    db = Object.assign(base, parsed, { settings: Object.assign(base.settings, parsed.settings || {}) });
+    db.meta.updated = updated || Date.now();
+    saveDB(false);
+    render();
+    markSync('synced');
+  } catch { markSync('error'); }
+}
+async function pushNow() {
+  if (!me) return;
+  markSync('syncing');
+  const r = await api('/api/data', 'PUT', { json: JSON.stringify(db), updated: db.meta.updated });
+  if (!r.ok) { markSync(navigator.onLine ? 'error' : 'pending'); return; }
+  if (r.data && r.data.saved === false) { applyRemote(r.data.json, r.data.updated); return; }
+  markSync('synced');
+}
+async function pullNow() {
+  const r = await api('/api/data');
+  if (!r.ok || !r.data) { markSync('error'); return; }
+  if (r.data.json && (r.data.updated || 0) > (db.meta.updated || 0)) applyRemote(r.data.json, r.data.updated);
+  else if (db.shop) await pushNow();
+  else markSync('synced');
+}
+function queueSync() {
+  if (!me) return;
+  clearTimeout(syncTimer);
+  markSync('pending');
+  syncTimer = setTimeout(pushNow, 1200);
+}
+async function signup(email, phone, password) {
+  const r = await api('/api/signup', 'POST', { email, phone, password });
+  if (!r.ok) return (r.data && r.data.error) || 'server';
+  me = r.data.user;
+  markSync('syncing');
+  await pushNow();
+  return null;
+}
+async function login(email, password) {
+  const r = await api('/api/login', 'POST', { email, password });
+  if (!r.ok) return (r.data && r.data.error) || 'server';
+  me = r.data.user;
+  await pullNow();
+  return null;
+}
+async function logout() {
+  await api('/api/logout', 'POST', {});
+  me = null;
+  markSync('idle');
+}
+async function bootAccount() {
+  await refreshMe();
+  if (me) await pullNow();
+  updatePill();
+}
+function accountHTML() {
+  if (me) {
+    return `<div class="card" style="margin-top:14px"><h3>${T('account')}</h3>
+      <div class="row"><div><div class="t">${esc(me.email)}</div><div class="s">${esc(me.phone)}</div></div><div class="right"><span class="tag ok">${T('synced')}</span></div></div>
+      <button class="btn out" data-act="syncNow">${T('syncNow')}</button>
+      <button class="btn out" data-act="logout">${T('signOut')}</button></div>`;
+  }
+  return `<div class="card" style="margin-top:14px"><h3>${T('account')}</h3>
+    <label>${T('email')}</label><input id="acEmail" type="email" autocomplete="email" placeholder="awa@exemple.com">
+    <label>${T('phoneNumber')}</label><input id="acPhone" type="tel" autocomplete="tel" placeholder="+225 07 00 00 00 00">
+    <label>${T('password')}</label><input id="acPass" type="password" autocomplete="new-password">
+    <button class="btn" id="acSignup">${T('createAccount')}</button>
+    <button class="btn out" id="acLogin">${T('signIn')}</button>
+    <p class="hint">${T('accountHint')}</p><p class="err" id="acErr"></p></div>`;
+}
+function wireAccount(d) {
+  const btn = d.querySelector('#acSignup');
+  if (!btn) return;
+  const err = d.querySelector('#acErr');
+  const values = () => ({ email: d.querySelector('#acEmail').value.trim(), phone: d.querySelector('#acPhone').value.trim(), pass: d.querySelector('#acPass').value });
+  btn.onclick = async () => {
+    err.textContent = '';
+    const { email, phone, pass } = values();
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) { err.textContent = T('badEmail'); return; }
+    if (phone.replace(/\D/g, '').length < 8) { err.textContent = T('badPhone'); return; }
+    if (pass.length < 8) { err.textContent = T('badPass'); return; }
+    const e = await signup(email, phone, pass);
+    if (e) { err.textContent = e === 'exists' ? T('emailTaken') : e === 'phone' ? T('badPhone') : T('badCredentials'); return; }
+    d.remove(); render();
+  };
+  d.querySelector('#acLogin').onclick = async () => {
+    err.textContent = '';
+    const { email, pass } = values();
+    if (!email || !pass) { err.textContent = T('badCredentials'); return; }
+    const e = await login(email, pass);
+    if (e) { err.textContent = T('badCredentials'); return; }
+    d.remove(); render();
+  };
+}
+
 /* ---------------- démarrage ---------------- */
 if (!db.shop) {
   const d = modal(`<h2>${T('welcomeTitle')}</h2><p>${T('welcomeAsk')}</p><input id="wShop" placeholder="Chez Awa"><button class="btn" id="wOk">${T('start')}</button>`);
@@ -502,4 +643,5 @@ if (!db.shop) {
 window.addEventListener('online', render);
 window.addEventListener('offline', render);
 render();
+bootAccount();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -1,14 +1,15 @@
 # Assistant Commercial
 
-Application unique : vendre, suivre le stock, savoir qui doit de l'argent.
+Vendre, suivre le stock, savoir qui doit de l'argent, sur un téléphone.
 
 - Fonctionne hors ligne (service worker), données dans le téléphone.
-- Onglets : Vendre, Stock, Clients, Documents, Bilans.
+- Compte avec adresse e-mail et numéro de téléphone, synchronisation entre
+  appareils (Cloudflare Worker + base D1, voir worker.js).
 - Français, anglais, arabe inversé.
-- Ventes et dépenses, prélèvement personnel, stock avec marge et alertes,
+- Ventes, dépenses, prélèvement personnel, stock avec marge et alertes,
   crédits clients et dettes fournisseurs, relance WhatsApp à cinq variables.
 - Devis DEV-… transformables en facture FAC-…, impression A4 et ticket 58 mm.
 - Réglages : langue, texte de relance, sauvegarde et restauration, partage.
 
-Fichiers : index.html, app.js, i18n.js, style.css, sw.js, manifest.webmanifest.
-Ouvrir index.html ou servir ce dossier.
+Interface : index.html, app.js, i18n.js, style.css, sw.js, manifest.webmanifest.
+API : worker.js (comptes, sessions, synchronisation), base D1.
