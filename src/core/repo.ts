@@ -8,9 +8,17 @@ import { defaultMemberFor } from '@/core/members';
 import { getAuth } from '@/lib/api';
 import { convertMinor } from '@/core/money';
 import { uuid } from '@/lib/id';
-import { boundPaid, buildLines, stockDeltaMap, stockMovements, taxBreakdown, tradeDue } from '@/core/trade';
+import { boundPaid, buildLines, lineTotal, stockDeltaMap, stockMovements, taxBreakdown, tradeDue } from '@/core/trade';
 import { allocatePayment } from '@/core/payments';
-import { nextDocumentNumber, quoteCanConvert, quoteIsEditable, yearOf } from '@/core/documents';
+import {
+  amendmentsOf,
+  depositAmount,
+  depositsTotal,
+  nextDocumentNumber,
+  quoteCanConvert,
+  quoteIsEditable,
+  yearOf,
+} from '@/core/documents';
 import { todayISO, toISODate } from '@/lib/date';
 import { firstRecurringDue } from '@/lib/recurrence';
 import type { ActivityProfile } from '@/core/profiles';
@@ -31,6 +39,7 @@ import type {
   ProductKind,
   Project,
   Quote,
+  QuoteDeposit,
   RecurrenceFrequency,
   TradeDocument,
   RecurringRule,
@@ -941,6 +950,12 @@ export interface TradeInput {
   note?: string;
   /** Taux de TVA en pourcentage (les prix des lignes sont hors taxe). */
   taxRate?: number;
+  /** Acompte déjà facturé sur le devis, déduit du total (facture de solde). */
+  deduct?: number;
+  /** Devis d'origine quand la facture est un acompte. */
+  quoteId?: string;
+  /** Part du devis facturée en acompte, en pourcentage. */
+  depositPercent?: number;
 }
 
 /**
@@ -994,7 +1009,11 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
   const drafts = input.lines.map((line) => ({ ...line, id: uuid() }));
   const documentLines = buildLines(drafts);
   const tax = taxBreakdown(documentLines, input.taxRate);
-  const total = tax.total;
+  // Un acompte déjà facturé sur le devis est déduit du total : la facture de
+  // solde ne réclame que le reste. Aucune ligne négative n'est nécessaire (le
+  // stock suit les vraies lignes, l'acompte n'en porte aucune).
+  const deduct = Math.min(Math.max(0, Math.round(input.deduct ?? 0)), tax.total);
+  const total = Math.max(0, tax.total - deduct);
   const paid = boundPaid(input.paid, total);
   const due = tradeDue(total, paid);
   const id = uuid();
@@ -1012,6 +1031,9 @@ export async function createTrade(kind: 'sale' | 'purchase', input: TradeInput):
     projectId: input.projectId || undefined,
     lines: documentLines,
     total,
+    deduct: deduct > 0 ? deduct : undefined,
+    quoteId: input.quoteId,
+    depositPercent: input.depositPercent,
     taxRate: tax.rate > 0 ? tax.rate : undefined,
     paid,
     due,
@@ -1302,12 +1324,22 @@ export interface QuoteInput {
   note?: string;
   /** Taux de TVA en pourcentage : les prix des lignes sont hors taxe. */
   taxRate?: number;
+  /** Document ordinaire (devis) ou avenant à un devis existant. */
+  kind?: 'quote' | 'amendment';
+  /** Devis modifié quand il s'agit d'un avenant. */
+  parentQuoteId?: string;
 }
 
-/** Numéro du prochain devis (DEV-). */
-async function nextQuoteNumber(date: string): Promise<string> {
+/** Numéro du prochain document de devis : DEV-… ou, pour un avenant, AVE-…. */
+async function nextQuoteNumber(kind: 'quote' | 'amendment', date: string): Promise<string> {
   const rows = await db.quotes.toArray();
-  return nextDocumentNumber('quote', yearOf(date), rows.map((row) => row.number));
+  return nextDocumentNumber(kind, yearOf(date), rows.map((row) => row.number));
+}
+
+/** Numéro de la prochaine facture d'acompte (ACO-…). */
+async function nextDepositNumber(date: string): Promise<string> {
+  const rows = await db.sales.toArray();
+  return nextDocumentNumber('deposit', yearOf(date), rows.map((row) => row.number));
 }
 
 function quoteFields(input: QuoteInput) {
@@ -1338,9 +1370,11 @@ export async function createQuote(input: QuoteInput): Promise<string> {
     id: uuid(),
     familyId: family.id,
     businessId: input.businessId,
-    number: await nextQuoteNumber(input.date),
+    number: await nextQuoteNumber(input.kind ?? 'quote', input.date),
     date: input.date,
     createdAt: Date.now(),
+    kind: input.kind,
+    parentQuoteId: input.kind === 'amendment' ? input.parentQuoteId : undefined,
     ...quoteFields(input),
     ...newSyncFields(),
   };
@@ -1377,6 +1411,14 @@ export async function setQuoteStatus(id: string, status: Quote['status']): Promi
 }
 
 export async function deleteQuote(id: string): Promise<void> {
+  // Un avenant ne survit pas à son devis : ses lignes n'ont plus de support.
+  const children = (await db.quotes.toArray()).filter(
+    (quote) => quote.kind === 'amendment' && quote.parentQuoteId === id,
+  );
+  for (const child of children) {
+    await db.quotes.delete(child.id);
+    await enqueue('quote', child.id, 'delete', null);
+  }
   await db.quotes.delete(id);
   await enqueue('quote', id, 'delete', null);
 }
@@ -1398,23 +1440,30 @@ export async function convertQuoteToSale(id: string, options: QuoteConversionInp
   const quote = await db.quotes.get(id);
   if (!quote) throw new Error('not-found');
   if (!quoteCanConvert(quote)) throw new Error('quote-not-convertible');
+  // Un avenant s'ajoute au devis : la vente reprend donc toutes les lignes.
+  const amendments = amendmentsOf(await db.quotes.toArray(), quote.id);
+  const lines = [...quote.lines, ...amendments.flatMap((amendment) => amendment.lines)].map((line) => ({
+    productId: line.productId,
+    label: line.label,
+    qty: line.qty,
+    unitPrice: line.unitPrice,
+  }));
+  // Les acomptes déjà facturés ne sont pas refacturés : ils sont déduits.
+  const deposits = depositsTotal(quote);
   const saleId = await createTrade('sale', {
     businessId: quote.businessId,
     date: options.date ?? todayISO(),
     partyId: quote.partyId,
     partyName: quote.partyName,
     projectId: quote.projectId,
-    lines: quote.lines.map((line) => ({
-      productId: line.productId,
-      label: line.label,
-      qty: line.qty,
-      unitPrice: line.unitPrice,
-    })),
+    lines,
     paid: options.paid ?? 0,
     paymentMethod: options.paymentMethod,
     accountId: options.accountId,
     taxRate: quote.taxRate,
-    note: `Devis ${quote.number}`,
+    deduct: deposits,
+    quoteId: quote.id,
+    note: deposits > 0 ? `Devis ${quote.number} · acomptes déjà facturés déduits` : `Devis ${quote.number}`,
   });
   const base = await baseSnapshotOf('quote', id);
   const updated: Quote = {
@@ -1425,6 +1474,84 @@ export async function convertQuoteToSale(id: string, options: QuoteConversionInp
   };
   await db.quotes.put(updated);
   await enqueueUpsert('quote', id, recordOf(updated), quote.rev, base);
+  // Les avenants suivent leur devis : ils ne peuvent plus être transformés seuls.
+  for (const amendment of amendments) {
+    const childBase = await baseSnapshotOf('quote', amendment.id);
+    const childUpdated: Quote = {
+      ...amendment,
+      status: 'converted',
+      convertedSaleId: saleId,
+      ...(updatedSyncFields(amendment) as object),
+    };
+    await db.quotes.put(childUpdated);
+    await enqueueUpsert('quote', amendment.id, recordOf(childUpdated), amendment.rev, childBase);
+  }
+  return saleId;
+}
+
+export interface DepositInvoiceInput {
+  accountId: string;
+  paymentMethod: PaymentMethod;
+  /** Part du devis facturée, en pourcentage (30 par défaut). */
+  percent?: number;
+  /** Acompte déjà encaissé, en sous-unités (0 = à recevoir). */
+  paid?: number;
+  date?: string;
+}
+
+/**
+ * Facture un acompte sur un devis : une vraie facture (ACO-…), comptée comme
+ * une vente, pour une part du total révisé (devis + avenants). Elle est
+ * mémorisée sur le devis et déduite du solde lors de la transformation.
+ */
+export async function createDepositInvoice(quoteId: string, options: DepositInvoiceInput): Promise<string> {
+  const quote = await db.quotes.get(quoteId);
+  if (!quote) throw new Error('not-found');
+  if (quote.kind === 'amendment') throw new Error('quote-not-invoiceable');
+  if (quote.convertedSaleId) throw new Error('quote-locked');
+  const amendments = amendmentsOf(await db.quotes.toArray(), quote.id);
+  const base = taxBreakdown(
+    [...quote.lines, ...amendments.flatMap((amendment) => amendment.lines)].map((line) => ({
+      lineTotal: lineTotal(line.qty, line.unitPrice),
+    })),
+    quote.taxRate,
+  );
+  const percent = Math.round(Math.min(100, Math.max(0, options.percent ?? 30)));
+  const amountHt = depositAmount(base.subtotal, percent);
+  if (amountHt <= 0) throw new Error('deposit-empty');
+  const date = options.date ?? todayISO();
+  const saleId = await createTrade('sale', {
+    businessId: quote.businessId,
+    date,
+    number: await nextDepositNumber(date),
+    partyId: quote.partyId,
+    partyName: quote.partyName,
+    projectId: quote.projectId,
+    lines: [{ label: `Acompte ${percent} % — devis ${quote.number}`, qty: 1, unitPrice: amountHt }],
+    paid: options.paid ?? 0,
+    paymentMethod: options.paymentMethod,
+    accountId: options.accountId,
+    taxRate: quote.taxRate,
+    quoteId: quote.id,
+    depositPercent: percent,
+    note: `Acompte sur devis ${quote.number}`,
+  });
+  const sale = await db.sales.get(saleId);
+  const snapshot = await baseSnapshotOf('quote', quote.id);
+  const deposit: QuoteDeposit = {
+    saleId,
+    number: sale?.number ?? '',
+    percent,
+    amount: sale?.total ?? amountHt,
+    date,
+  };
+  const updated: Quote = {
+    ...quote,
+    deposits: [...(quote.deposits ?? []), deposit],
+    ...(updatedSyncFields(quote) as object),
+  };
+  await db.quotes.put(updated);
+  await enqueueUpsert('quote', quote.id, recordOf(updated), quote.rev, snapshot);
   return saleId;
 }
 

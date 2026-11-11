@@ -313,6 +313,15 @@ export interface TradeDocument extends SyncFields {
   paymentMethod: PaymentMethod;
   /** Compte où l'argent entre (vente) ou sort (achat). */
   accountId: string;
+  /**
+   * Acompte déjà facturé sur le devis d'origine, déduit du total : la facture
+   * de solde ne réclame que le reste. Absent ou 0 = facture ordinaire.
+   */
+  deduct?: number;
+  /** Devis d'origine d'une facture d'acompte (facultatif). */
+  quoteId?: string;
+  /** Part du devis facturée en acompte, en pourcentage (absent = pas un acompte). */
+  depositPercent?: number;
   note?: string;
   createdAt: number;
 }
@@ -379,12 +388,34 @@ export interface Settlement extends SyncFields {
  * aucun chiffre d'affaires, aucun mouvement de stock. Un devis accepté peut
  * être transformé en vente, qui devient alors le seul document compté.
  */
+/** Acompte déjà facturé sur un devis (une facture ACO-… par acompte). */
+export interface QuoteDeposit {
+  /** Vente (facture) émise pour cet acompte. */
+  saleId: string;
+  /** Numéro de la facture d'acompte : ACO-2026-0001. */
+  number: string;
+  /** Part du devis facturée, en pourcentage. */
+  percent: number;
+  /** Montant facturé, taxes comprises, en sous-unités du foyer. */
+  amount: number;
+  date: string;
+}
+
 export interface Quote extends SyncFields {
   id: string;
   familyId: string;
   businessId: string;
   /** Numéro du devis : DEV-2026-0001. */
   number: string;
+  /**
+   * Nature du document : un devis (absent) ou un avenant à un devis. Un avenant
+   * porte ses propres lignes et s'ajoute au devis initial.
+   */
+  kind?: 'quote' | 'amendment';
+  /** Devis modifié par cet avenant. */
+  parentQuoteId?: string;
+  /** Acomptes déjà facturés sur ce devis (déduits du solde à la transformation). */
+  deposits?: QuoteDeposit[];
   date: string;
   /** Date de validité de l'offre (facultative). */
   validUntil?: string;

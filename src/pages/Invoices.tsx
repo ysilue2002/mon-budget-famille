@@ -19,18 +19,25 @@ type Translator = (key: string, options?: Record<string, unknown>) => string;
  * total TTC, puis ce qui est encaissé et ce qui reste dû.
  */
 function invoiceTotals(
-  invoice: Pick<TradeDocument, 'lines' | 'taxRate' | 'total' | 'paid' | 'due'>,
+  invoice: Pick<TradeDocument, 'lines' | 'taxRate' | 'total' | 'paid' | 'due' | 'deduct'>,
   t: Translator,
   fmt: (minor: number) => string,
 ): [string, string][] {
   const tax = taxBreakdown(invoice.lines, invoice.taxRate);
+  const deduct = Math.max(0, invoice.deduct ?? 0);
+  // Montant facturé avant déduction des acomptes déjà facturés sur le devis.
+  const gross = invoice.total + deduct;
   const rows: [string, string][] = [];
   if (tax.rate > 0) {
     rows.push([t('documents.subtotal'), fmt(tax.subtotal)]);
     rows.push([t('documents.tax', { rate: tax.rate }), fmt(tax.tax)]);
-    rows.push([t('documents.totalTtc'), fmt(invoice.total)]);
+    rows.push([t('documents.totalTtc'), fmt(gross)]);
   } else {
-    rows.push([t('documents.total'), fmt(invoice.total)]);
+    rows.push([t('documents.total'), fmt(gross)]);
+  }
+  if (deduct > 0) {
+    rows.push([t('invoices.deducted'), `− ${fmt(deduct)}`]);
+    rows.push([t('invoices.net'), fmt(invoice.total)]);
   }
   rows.push([t('invoices.paid'), fmt(invoice.paid)]);
   rows.push([t('invoices.due'), fmt(invoice.due)]);
@@ -148,7 +155,14 @@ export default function Invoices() {
             <tbody>
               {rows.map((invoice) => (
                 <tr key={invoice.id} className="border-b border-forest-50">
-                  <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">{invoice.number}</td>
+                  <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">
+                    {invoice.number}
+                    {(invoice.depositPercent ?? 0) > 0 && (
+                      <span className="ms-1 align-middle">
+                        <Tag tone="sage">{t('invoices.depositTag')}</Tag>
+                      </span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap py-1.5">{invoice.date}</td>
                   <td className="py-1.5 pe-2">{invoice.partyName || '—'}</td>
                   <td className="py-1.5 pe-2 text-xs text-sage-700">{projectName(invoice.projectId) ?? '—'}</td>

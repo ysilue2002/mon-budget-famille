@@ -1015,7 +1015,29 @@
     "markSent": "Marquer comme envoyé",
     "empty": "Aucun devis",
     "emptyHint": "Un devis propose un prix ; il ne compte ni dans les ventes ni dans le stock.",
-    "hint": "Un devis accepté se transforme en vente en un clic. Le devis reste consultable pour mémoire."
+    "hint": "Un devis accepté se transforme en vente en un clic. Le devis reste consultable pour mémoire.",
+    "amendment": "Avenant",
+    "amendmentShort": "Avenant",
+    "amendmentTitle": "Avenant au devis",
+    "amendmentOf": "sur {{number}}",
+    "newAmendment": "Nouvel avenant",
+    "amendmentSaved": "Avenant enregistré.",
+    "amendmentsTotal": "Avenants",
+    "revisedTotal": "Total révisé",
+    "deposit": "Facture d'acompte",
+    "depositShort": "Acompte",
+    "depositTitle": "Facturer un acompte",
+    "depositFor": "Devis {{number}} · total révisé {{total}}",
+    "depositPercent": "Part de l'acompte (%)",
+    "depositAmount": "Montant de l'acompte",
+    "depositReceived": "Acompte encaissé aujourd'hui",
+    "depositCreate": "Créer la facture d'acompte",
+    "depositDone": "Facture d'acompte créée. Retrouvez-la dans Factures.",
+    "depositAlready": "Acomptes déjà facturés",
+    "depositOnQuote": "Acomptes facturés",
+    "depositInvalid": "Choisissez une part entre 1 et 100 %.",
+    "depositHint": "L'acompte est une vraie facture (ACO-…). Il sera déduit du solde quand le devis deviendra une vente.",
+    "convertDeposits": "Acomptes déjà facturés, déduits du solde : {{amount}}."
   },
   "invoices": {
     "title": "Factures",
@@ -1036,7 +1058,10 @@
     "count": "{{count}} facture(s)",
     "empty": "Aucune facture",
     "emptyHint": "Enregistrez une vente : elle reçoit automatiquement un numéro de facture.",
-    "hint": "Chaque vente est une facture numérotée. La facture n'est pas un second document comptable : c'est la vente elle-même."
+    "hint": "Chaque vente est une facture numérotée. La facture n'est pas un second document comptable : c'est la vente elle-même.",
+    "depositTag": "Acompte",
+    "deducted": "Acompte déjà facturé",
+    "net": "Reste à facturer"
   },
   "states": {
     "title": "États",

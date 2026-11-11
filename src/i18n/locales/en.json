@@ -1015,7 +1015,29 @@
     "markSent": "Mark as sent",
     "empty": "No quote yet",
     "emptyHint": "A quote proposes a price; it counts neither in sales nor in stock.",
-    "hint": "An accepted quote becomes a sale in one click. The quote stays available for reference."
+    "hint": "An accepted quote becomes a sale in one click. The quote stays available for reference.",
+    "amendment": "Amendment",
+    "amendmentShort": "Amendment",
+    "amendmentTitle": "Quote amendment",
+    "amendmentOf": "for {{number}}",
+    "newAmendment": "New amendment",
+    "amendmentSaved": "Amendment saved.",
+    "amendmentsTotal": "Amendments",
+    "revisedTotal": "Revised total",
+    "deposit": "Deposit invoice",
+    "depositShort": "Deposit",
+    "depositTitle": "Invoice a deposit",
+    "depositFor": "Quote {{number}} · revised total {{total}}",
+    "depositPercent": "Deposit share (%)",
+    "depositAmount": "Deposit amount",
+    "depositReceived": "Deposit received today",
+    "depositCreate": "Create the deposit invoice",
+    "depositDone": "Deposit invoice created. Find it under Invoices.",
+    "depositAlready": "Deposits already invoiced",
+    "depositOnQuote": "Deposits invoiced",
+    "depositInvalid": "Choose a share between 1 and 100%.",
+    "depositHint": "The deposit is a real invoice (ACO-…). It is deducted from the balance when the quote becomes a sale.",
+    "convertDeposits": "Deposits already invoiced, deducted from the balance: {{amount}}."
   },
   "invoices": {
     "title": "Invoices",
@@ -1036,7 +1058,10 @@
     "count": "{{count}} invoice(s)",
     "empty": "No invoice yet",
     "emptyHint": "Record a sale: it receives an invoice number automatically.",
-    "hint": "Every sale is a numbered invoice. The invoice is not a second accounting document: it is the sale itself."
+    "hint": "Every sale is a numbered invoice. The invoice is not a second accounting document: it is the sale itself.",
+    "depositTag": "Deposit",
+    "deducted": "Deposit already invoiced",
+    "net": "Balance to invoice"
   },
   "states": {
     "title": "Statements",

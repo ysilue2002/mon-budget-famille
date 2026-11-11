@@ -10,10 +10,25 @@ import {
   useProjects,
   useQuotes,
 } from '@/hooks/useData';
-import { convertQuoteToSale, createQuote, deleteQuote, setQuoteStatus, updateQuote } from '@/core/repo';
+import {
+  convertQuoteToSale,
+  createDepositInvoice,
+  createQuote,
+  deleteQuote,
+  setQuoteStatus,
+  updateQuote,
+} from '@/core/repo';
 import { formatAmount } from '@/core/currencies';
 import { parseAmountInput, toMajor } from '@/core/money';
-import { QUOTE_STATUS_KEY, quoteCanConvert, quoteIsEditable } from '@/core/documents';
+import {
+  QUOTE_STATUS_KEY,
+  amendmentsOf,
+  depositAmount,
+  depositsTotal,
+  quoteCanConvert,
+  quoteIsEditable,
+  revisedQuoteTotal,
+} from '@/core/documents';
 import { downloadPdf, pdfFileName, pdfSupportsLanguage, printDocument } from '@/core/pdf';
 import { lineTotal, taxBreakdown } from '@/core/trade';
 import { uuid } from '@/lib/id';
@@ -72,6 +87,9 @@ interface LineForm {
 
 interface QuoteForm {
   id?: string;
+  /** Avenant en préparation : rattaché au devis `parentQuoteId`. */
+  kind?: 'quote' | 'amendment';
+  parentQuoteId?: string;
   businessId: string;
   date: string;
   validUntil: string;
@@ -119,6 +137,12 @@ export default function Quotes() {
   const [convertPaid, setConvertPaid] = useState(0);
   const [convertMethod, setConvertMethod] = useState<PaymentMethod>('cash');
   const [convertAccount, setConvertAccount] = useState('');
+  // Facture d'acompte : part du devis et encaissement immédiat.
+  const [depositForId, setDepositForId] = useState<string | null>(null);
+  const [depositPercent, setDepositPercent] = useState('30');
+  const [depositPaid, setDepositPaid] = useState(true);
+  const [depositMethod, setDepositMethod] = useState<PaymentMethod>('cash');
+  const [depositAccount, setDepositAccount] = useState('');
   // Filtre dans l'adresse (`?chantier=…`), comme les ventes et les achats.
   const [searchParams, setSearchParams] = useSearchParams();
   const projectFilter = searchParams.get('chantier') ?? '';
@@ -128,6 +152,8 @@ export default function Quotes() {
   const allRows = quotes ?? [];
   const rows = projectFilter ? allRows.filter((quote) => quote.projectId === projectFilter) : allRows;
   const projectName = (id?: string) => (projects ?? []).find((project) => project.id === id)?.name;
+  const parentNumber = (quote: Quote) => allRows.find((row) => row.id === quote.parentQuoteId)?.number;
+  const amendments = (quote: Quote) => amendmentsOf(allRows, quote.id);
   const activeBusinesses = (businesses ?? []).filter((business) => !business.archived);
   const activeProducts = (products ?? []).filter((product) => !product.archived);
   const accountList = (accounts ?? []).filter((account) => !account.archived);
@@ -157,6 +183,20 @@ export default function Quotes() {
   const total = formTax.total;
   const preview = rows.find((quote) => quote.id === previewId) ?? null;
   const converting = rows.find((quote) => quote.id === convertId) ?? null;
+  const depositFor = rows.find((quote) => quote.id === depositForId) ?? null;
+  // Montant de l'acompte : la part demandée du total hors taxe, taxes comprises.
+  const depositHt = depositFor
+    ? [...depositFor.lines, ...amendments(depositFor).flatMap((row) => row.lines)].reduce(
+        (sum, line) => sum + line.lineTotal,
+        0,
+      )
+    : 0;
+  const depositPreview = depositFor
+    ? taxBreakdown(
+        [{ lineTotal: depositAmount(depositHt, Number(depositPercent.replace(',', '.')) || 0) }],
+        depositFor.taxRate,
+      ).total
+    : 0;
 
   const openCreate = () => {
     if (!business) {
@@ -229,6 +269,64 @@ export default function Quotes() {
     setOpen(true);
   };
 
+  /**
+   * Avenant : même client, même chantier, nouvelles lignes. Il porte son propre
+   * numéro (AVE-…) et s'ajoute au total du devis qu'il modifie.
+   */
+  const openAmendment = (quote: Quote) => {
+    setForm({
+      kind: 'amendment',
+      parentQuoteId: quote.id,
+      businessId: quote.businessId,
+      date: todayISO(),
+      validUntil: '',
+      partyName: quote.partyName ?? '',
+      projectId: quote.projectId ?? '',
+      status: 'draft',
+      note: '',
+      taxRate: quote.taxRate ? String(quote.taxRate) : '',
+      lines: [newLine()],
+    });
+    setError(null);
+    setFlash(null);
+    setOpen(true);
+  };
+
+  const startDeposit = (quote: Quote) => {
+    setDepositForId(quote.id);
+    setDepositPercent('30');
+    setDepositPaid(true);
+    setDepositMethod('cash');
+    setDepositAccount(accountList[0]?.id ?? '');
+    setError(null);
+  };
+
+  const doDeposit = async () => {
+    if (!depositFor) return;
+    if (!depositAccount) {
+      setError(t('validation.noAccounts'));
+      return;
+    }
+    const percent = Number(depositPercent.replace(',', '.')) || 0;
+    if (percent <= 0 || percent > 100) {
+      setError(t('quotes.depositInvalid'));
+      return;
+    }
+    try {
+      await createDepositInvoice(depositFor.id, {
+        accountId: depositAccount,
+        paymentMethod: depositMethod,
+        percent,
+        paid: depositPaid ? depositPreview : 0,
+      });
+      setDepositForId(null);
+      setError(null);
+      setFlash(t('quotes.depositDone'));
+    } catch (err) {
+      setError(err instanceof Error && err.message === 'deposit-empty' ? t('quotes.depositInvalid') : String(err));
+    }
+  };
+
   const patchLine = (key: string, patch: Partial<LineForm>) => {
     setForm((current) =>
       current ? { ...current, lines: current.lines.map((line) => (line.key === key ? { ...line, ...patch } : line)) } : current,
@@ -267,12 +365,15 @@ export default function Quotes() {
       status: form.status,
       note: form.note,
       taxRate: formTax.rate,
+      kind: form.kind,
+      parentQuoteId: form.parentQuoteId,
     };
+    const isAmendmentForm = form.kind === 'amendment';
     if (form.id) await updateQuote(form.id, input);
     else await createQuote(input);
     setOpen(false);
     setForm(null);
-    setFlash(t('quotes.saved'));
+    setFlash(isAmendmentForm ? t('quotes.amendmentSaved') : t('quotes.saved'));
   };
 
   const startConvert = (quote: Quote) => {
@@ -378,11 +479,40 @@ export default function Quotes() {
             <tbody>
               {rows.map((quote) => (
                 <tr key={quote.id} className="border-b border-forest-50">
-                  <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">{quote.number}</td>
+                  <td className="whitespace-nowrap py-1.5 font-medium text-forest-950">
+                    {quote.number}
+                    {quote.kind === 'amendment' && (
+                      <span className="ms-1 align-middle">
+                        <Tag tone="sage">{t('quotes.amendment')}</Tag>
+                      </span>
+                    )}
+                    {quote.kind === 'amendment' && parentNumber(quote) && (
+                      <p className="text-[11px] font-normal text-sage-600">
+                        {t('quotes.amendmentOf', { number: parentNumber(quote) })}
+                      </p>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap py-1.5">{quote.date}</td>
                   <td className="py-1.5 pe-2">{quote.partyName || '—'}</td>
                   <td className="py-1.5 pe-2 text-xs text-sage-700">{projectName(quote.projectId) ?? '—'}</td>
-                  <td className="py-1.5 pe-2 text-right font-semibold">{fmt(quote.total)}</td>
+                  <td className="py-1.5 pe-2 text-right font-semibold">
+                    {fmt(quote.total)}
+                    {amendments(quote).length > 0 && (
+                      <>
+                        <p className="text-[11px] font-normal text-sage-600">
+                          {t('quotes.amendmentsTotal')} : +{fmt(amendments(quote).reduce((sum, row) => sum + row.total, 0))}
+                        </p>
+                        <p className="text-[11px] font-normal text-forest-700">
+                          {t('quotes.revisedTotal')} : {fmt(revisedQuoteTotal(quote, amendments(quote)))}
+                        </p>
+                      </>
+                    )}
+                    {depositsTotal(quote) > 0 && (
+                      <p className="text-[11px] font-normal text-sage-600">
+                        {t('quotes.depositOnQuote')} : {fmt(depositsTotal(quote))}
+                      </p>
+                    )}
+                  </td>
                   <td className="py-1.5 pe-2">
                     <Tag tone={statusTone(quote.status)}>{t(QUOTE_STATUS_KEY[quote.status])}</Tag>
                   </td>
@@ -403,6 +533,28 @@ export default function Quotes() {
                       >
                         ⧉
                       </button>
+                      {quote.kind !== 'amendment' && !quote.convertedSaleId && (
+                        <button
+                          type="button"
+                          className={btnGhost}
+                          onClick={() => openAmendment(quote)}
+                          aria-label={t('quotes.newAmendment')}
+                          title={t('quotes.newAmendment')}
+                        >
+                          ＋ {t('quotes.amendmentShort')}
+                        </button>
+                      )}
+                      {quote.kind !== 'amendment' && !quote.convertedSaleId && (
+                        <button
+                          type="button"
+                          className={btnGhost}
+                          onClick={() => startDeposit(quote)}
+                          aria-label={t('quotes.deposit')}
+                          title={t('quotes.deposit')}
+                        >
+                          {t('quotes.depositShort')}
+                        </button>
+                      )}
                       {quoteIsEditable(quote) && (
                         <button type="button" className="rounded p-1 text-sm hover:bg-forest-50" onClick={() => openEdit(quote)} aria-label={t('common.edit')}>
                           ✎
@@ -448,10 +600,16 @@ export default function Quotes() {
             </button>
           </div>
           <DocumentSheet
-            title={t('quotes.title')}
+            title={preview.kind === 'amendment' ? t('quotes.amendmentTitle') : t('quotes.title')}
             number={preview.number}
             date={preview.date}
-            extra={preview.validUntil ? [t('quotes.validUntil'), preview.validUntil] : undefined}
+            extra={
+              preview.kind === 'amendment'
+                ? [t('quotes.amendment'), parentNumber(preview) ?? '—']
+                : preview.validUntil
+                  ? [t('quotes.validUntil'), preview.validUntil]
+                  : undefined
+            }
             business={activeBusinesses.find((row) => row.id === preview.businessId) ?? business}
             partyLabel={t('quotes.client')}
             partyName={preview.partyName}
@@ -471,7 +629,11 @@ export default function Quotes() {
 
       <p className="no-print mt-2 text-xs text-sage-500">{t('quotes.hint')}</p>
 
-      <Modal title={form?.id ? t('common.edit') : t('quotes.new')} open={open} onClose={() => setOpen(false)}>
+      <Modal
+        title={form?.id ? t('common.edit') : form?.kind === 'amendment' ? t('quotes.amendmentTitle') : t('quotes.new')}
+        open={open}
+        onClose={() => setOpen(false)}
+      >
         {form && (
           <form
             className="flex max-h-[75vh] flex-col gap-3 overflow-y-auto"
@@ -480,6 +642,13 @@ export default function Quotes() {
               void save();
             }}
           >
+            {form.kind === 'amendment' && form.parentQuoteId && (
+              <p className="text-sm text-sage-700">
+                {t('quotes.amendmentOf', {
+                  number: allRows.find((row) => row.id === form.parentQuoteId)?.number ?? '—',
+                })}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <Field label={t('documents.date')}>
                 <TextInput type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} required />
@@ -649,6 +818,11 @@ export default function Quotes() {
             }}
           >
             <p className="text-sm text-sage-700">{t('quotes.convertHint', { number: converting.number })}</p>
+            {depositsTotal(converting) > 0 && (
+              <p className="text-xs font-medium text-amber-700">
+                {t('quotes.convertDeposits', { amount: fmt(depositsTotal(converting)) })}
+              </p>
+            )}
             <MoneyInput
               label={t('quotes.alreadyPaid')}
               amountMinor={convertPaid}
@@ -676,6 +850,68 @@ export default function Quotes() {
               </button>
               <button type="submit" className={btnPrimary}>
                 {t('quotes.convertAction')}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal title={t('quotes.depositTitle')} open={Boolean(depositFor)} onClose={() => setDepositForId(null)}>
+        {depositFor && (
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void doDeposit();
+            }}
+          >
+            <p className="text-sm text-sage-700">
+              {t('quotes.depositFor', {
+                number: depositFor.number,
+                total: fmt(revisedQuoteTotal(depositFor, amendments(depositFor))),
+              })}
+            </p>
+            <Field label={t('quotes.depositPercent')}>
+              <TextInput
+                inputMode="decimal"
+                value={depositPercent}
+                onChange={(event) => setDepositPercent(event.target.value)}
+              />
+            </Field>
+            <div className="flex items-center justify-between rounded-lg border border-forest-200 bg-forest-50 px-3 py-2 text-sm">
+              <span className="text-sage-700">{t('quotes.depositAmount')}</span>
+              <span className="font-bold text-forest-950">{fmt(depositPreview)}</span>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-forest-900">
+              <input
+                type="checkbox"
+                checked={depositPaid}
+                onChange={(event) => setDepositPaid(event.target.checked)}
+              />
+              {t('quotes.depositReceived')}
+            </label>
+            <Field label={t('quotes.method')}>
+              <SelectInput
+                value={depositMethod}
+                onChange={(value) => setDepositMethod(value as PaymentMethod)}
+                options={PAYMENT_METHODS.map((method) => ({ value: method, label: t(`trade.paymentMethods.${method}`) }))}
+              />
+            </Field>
+            <Field label={t('quotes.account')}>
+              <SelectInput
+                value={depositAccount}
+                onChange={setDepositAccount}
+                options={accountList.map((account) => ({ value: account.id, label: account.name }))}
+              />
+            </Field>
+            <p className="text-xs text-sage-500">{t('quotes.depositHint')}</p>
+            {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={btnGhost} onClick={() => setDepositForId(null)}>
+                {t('common.cancel')}
+              </button>
+              <button type="submit" className={btnPrimary}>
+                {t('quotes.depositCreate')}
               </button>
             </div>
           </form>

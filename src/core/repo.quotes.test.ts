@@ -4,6 +4,7 @@ import { bootstrapApp } from '@/db/seed';
 import {
   convertQuoteToSale,
   createBusiness,
+  createDepositInvoice,
   createParty,
   createProduct,
   createQuote,
@@ -170,5 +171,40 @@ describe('TVA d’un devis et de sa vente', () => {
     expect(sale).toMatchObject({ total: 1_180_000, taxRate: 18, due: 1_180_000 });
     // Le journal enregistre le montant facturé (TTC), une seule fois.
     expect(await db.transactions.get(`sale-${saleId}`)).toMatchObject({ amountInPrimary: 1_180_000 });
+  });
+});
+
+describe('avenants et factures d’acompte', () => {
+  it('numérote un avenant et l’ajoute au devis transformé', async () => {
+    const id = await createQuote(quoteInput({ status: 'accepted' }));
+    const amendmentId = await createQuote({
+      ...quoteInput({ status: 'accepted' }),
+      kind: 'amendment',
+      parentQuoteId: id,
+      lines: [{ label: 'Finition', qty: 1, unitPrice: 250_000 }],
+    });
+
+    expect((await db.quotes.get(amendmentId))?.number).toBe('AVE-2026-0001');
+
+    const saleId = await convertQuoteToSale(id, { accountId, paymentMethod: 'cash', paid: 0 });
+    const sale = await db.sales.get(saleId);
+    expect(sale?.total).toBe(4_750_000);
+    expect(sale?.lines).toHaveLength(2);
+    expect((await db.quotes.get(amendmentId))?.status).toBe('converted');
+  });
+
+  it('facture un acompte de 30 % puis déduit ce montant du solde', async () => {
+    const id = await createQuote(quoteInput({ status: 'accepted' }));
+    const depositId = await createDepositInvoice(id, { accountId, paymentMethod: 'cash', percent: 30, paid: 0 });
+    const deposit = await db.sales.get(depositId);
+
+    expect(deposit?.number).toBe('ACO-2026-0001');
+    expect(deposit?.total).toBe(1_350_000);
+    expect(deposit?.depositPercent).toBe(30);
+    expect((await db.quotes.get(id))?.deposits?.[0]).toMatchObject({ amount: 1_350_000, number: 'ACO-2026-0001' });
+
+    const saleId = await convertQuoteToSale(id, { accountId, paymentMethod: 'cash', paid: 0 });
+    const sale = await db.sales.get(saleId);
+    expect(sale).toMatchObject({ total: 3_150_000, deduct: 1_350_000, due: 3_150_000 });
   });
 });

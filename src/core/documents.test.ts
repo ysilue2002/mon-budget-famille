@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  amendmentsOf,
   defaultDueDate,
+  depositAmount,
+  depositsTotal,
   documentLabel,
+  isAmendment,
   isOverdue,
   nextDocumentNumber,
   quoteCanConvert,
   quoteIsEditable,
   quoteTotal,
+  revisedQuoteTotal,
   yearOf,
 } from '@/core/documents';
 
@@ -15,6 +20,8 @@ describe('numérotation des documents', () => {
     expect(nextDocumentNumber('sale', 2026, [])).toBe('FAC-2026-0001');
     expect(nextDocumentNumber('purchase', 2026, [])).toBe('ACH-2026-0001');
     expect(nextDocumentNumber('quote', 2026, [])).toBe('DEV-2026-0001');
+    expect(nextDocumentNumber('amendment', 2026, [])).toBe('AVE-2026-0001');
+    expect(nextDocumentNumber('deposit', 2026, [])).toBe('ACO-2026-0001');
   });
 
   it('continue après le plus grand numéro de l’année', () => {
@@ -25,6 +32,7 @@ describe('numérotation des documents', () => {
     expect(nextDocumentNumber('sale', 2026, ['ACH-2026-0050', 'FAC-2025-0012', 'DEV-2026-0031', undefined])).toBe(
       'FAC-2026-0001',
     );
+    expect(nextDocumentNumber('deposit', 2026, ['FAC-2026-0004', 'ACO-2026-0002'])).toBe('ACO-2026-0003');
   });
 
   it('ignore une valeur qui n’est pas un numéro', () => {
@@ -60,6 +68,51 @@ describe('devis', () => {
     expect(quoteIsEditable({ status: 'draft' })).toBe(true);
     expect(quoteIsEditable({ status: 'accepted' })).toBe(true);
     expect(quoteIsEditable({ status: 'converted', convertedSaleId: 'sale-1' })).toBe(false);
+  });
+});
+
+describe('avenants', () => {
+  it('reconnaît un avenant et le rattache à son devis', () => {
+    const amendment = { kind: 'amendment' as const, parentQuoteId: 'q1', date: '2026-03-02', total: 250_000 };
+    const other = { kind: 'amendment' as const, parentQuoteId: 'q2', date: '2026-03-03', total: 90_000 };
+    const first = { kind: 'amendment' as const, parentQuoteId: 'q1', date: '2026-03-01', total: 100_000 };
+    const quote = { parentQuoteId: 'q1', date: '2026-03-01', total: 1_000_000 };
+
+    expect(isAmendment(amendment)).toBe(true);
+    expect(isAmendment({ kind: 'quote' })).toBe(false);
+    expect(amendmentsOf([other, amendment, first, quote], 'q1').map((row) => row.total)).toEqual([100_000, 250_000]);
+  });
+
+  it('additionne les avenants au total du devis', () => {
+    expect(revisedQuoteTotal({ total: 1_000_000 }, [{ total: 100_000 }, { total: 250_000 }])).toBe(1_350_000);
+    expect(revisedQuoteTotal({ total: 1_000_000 }, [])).toBe(1_000_000);
+  });
+
+  it('ne transforme jamais un avenant seul en vente', () => {
+    expect(quoteCanConvert({ status: 'accepted', kind: 'amendment' })).toBe(false);
+    expect(quoteCanConvert({ status: 'accepted', kind: 'quote' })).toBe(true);
+  });
+});
+
+describe('acomptes', () => {
+  it('calcule une part du total, arrondie et bornée', () => {
+    expect(depositAmount(4_500_000, 30)).toBe(1_350_000);
+    expect(depositAmount(4_500_001, 30)).toBe(1_350_000);
+    expect(depositAmount(1_000, 0)).toBe(0);
+    expect(depositAmount(1_000, 150)).toBe(1_000);
+    expect(depositAmount(1_000, Number.NaN)).toBe(0);
+  });
+
+  it('additionne les acomptes déjà facturés', () => {
+    expect(
+      depositsTotal({
+        deposits: [
+          { saleId: 's1', number: 'ACO-2026-0001', percent: 30, amount: 1_350_000, date: '2026-03-01' },
+          { saleId: 's2', number: 'ACO-2026-0002', percent: 10, amount: 450_000, date: '2026-03-05' },
+        ],
+      }),
+    ).toBe(1_800_000);
+    expect(depositsTotal({})).toBe(0);
   });
 });
 
