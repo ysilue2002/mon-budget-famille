@@ -40,16 +40,19 @@ const cookieOf = (request, name) => {
 
 const validEmail = (v) => typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(v.trim()) && v.length <= 190;
 const validPhone = (v) => typeof v === 'string' && /^\+?[\d ().-]{8,25}$/.test(v.trim());
+const digitsOf = (v) => String(v || '').replace(/\D/g, '').replace(/^00/, '');
 const validPass = (v) => typeof v === 'string' && v.length >= 8 && v.length <= 200;
 
 let schemaReady;
 function ensureSchema(env) {
   schemaReady = schemaReady || env.DB.batch([
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, phone TEXT NOT NULL, pass TEXT NOT NULL, salt TEXT NOT NULL, created INTEGER NOT NULL)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, phone TEXT NOT NULL, phone_digits TEXT, pass TEXT NOT NULL, salt TEXT NOT NULL, created INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS state (user_id TEXT PRIMARY KEY, json TEXT NOT NULL, rev INTEGER NOT NULL DEFAULT 1, updated INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS resets (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)'),
-  ]);
+  ]).then(async () => {
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
+  });
   return schemaReady;
 }
 
@@ -111,19 +114,40 @@ async function api(request, env, url) {
     if (!validPass(password)) return json({ error: 'password' }, 400);
     const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
     if (exists) return json({ error: 'exists' }, 409);
+    const phoneDigits = digitsOf(phone);
+    const samePhone = await env.DB.prepare('SELECT id FROM users WHERE phone_digits = ?').bind(phoneDigits).first();
+    if (samePhone) return json({ error: 'phone_taken' }, 409);
     const id = crypto.randomUUID();
     const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
     const pass = await pbkdf2(password, salt);
-    await env.DB.prepare('INSERT INTO users (id, email, phone, pass, salt, created) VALUES (?, ?, ?, ?, ?, ?)').bind(id, email, phone, pass, salt, Date.now()).run();
+    await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, email, phone, phoneDigits, pass, salt, Date.now()).run();
     const cookie = await createSession(env, id);
     return json({ user: { id, email, phone } }, 200, { 'set-cookie': cookie });
   }
 
   if (path === '/api/login' && request.method === 'POST') {
     const body = await readBody(request);
-    const email = String(body.email || '').trim().toLowerCase();
+    const identifier = String(body.login || body.email || '').trim();
     const password = String(body.password || '');
-    const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first();
+    let user = null;
+    if (identifier.includes('@')) {
+      user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(identifier.toLowerCase()).first();
+    } else {
+      const digits = digitsOf(identifier);
+      if (digits.length >= 8) {
+        user = await env.DB.prepare('SELECT * FROM users WHERE phone_digits = ?').bind(digits).first();
+        if (!user) {
+          const rows = await env.DB.prepare('SELECT * FROM users WHERE phone_digits LIKE ?').bind('%' + digits).all();
+          const list = rows.results || [];
+          if (list.length === 1) user = list[0];
+        }
+        if (!user) {
+          const old = await env.DB.prepare('SELECT * FROM users WHERE phone_digits IS NULL').all();
+          const match = (old.results || []).filter((u) => digitsOf(u.phone) === digits || digitsOf(u.phone).endsWith(digits));
+          if (match.length === 1) user = match[0];
+        }
+      }
+    }
     if (!user) return json({ error: 'credentials' }, 401);
     const hash = await pbkdf2(password, user.salt);
     if (!same(hash, user.pass)) return json({ error: 'credentials' }, 401);

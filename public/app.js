@@ -5,10 +5,27 @@ const DEFAULTS = {
   en: "Hello [Nom du Client], this is [Nom de la Boutique]. Invoice [Numéro Facture] dated [Date Facture] for [Montant] is still unpaid. Thank you.",
   ar: "مرحباً [Nom du Client]، هذه رسالة من [Nom de la Boutique]. الفاتورة [Numéro Facture] بتاريخ [Date Facture] بمبلغ [Montant] لا تزال غير مسددة. شكراً لكم.",
 };
+const COUNTRIES = [
+  ['CI', "Côte d'Ivoire", 'FCFA'], ['SN', 'Sénégal', 'FCFA'], ['ML', 'Mali', 'FCFA'], ['BF', 'Burkina Faso', 'FCFA'],
+  ['NE', 'Niger', 'FCFA'], ['TG', 'Togo', 'FCFA'], ['BJ', 'Bénin', 'FCFA'], ['GN', 'Guinée', 'GNF'],
+  ['CM', 'Cameroun', 'FCFA'], ['GA', 'Gabon', 'FCFA'], ['CG', 'Congo', 'FCFA'], ['CD', 'RD Congo', 'FC'],
+  ['TD', 'Tchad', 'FCFA'], ['CF', 'Centrafrique', 'FCFA'], ['MG', 'Madagascar', 'Ar'], ['MR', 'Mauritanie', 'UM'],
+  ['MA', 'Maroc', 'DH'], ['DZ', 'Algérie', 'DA'], ['TN', 'Tunisie', 'DT'], ['FR', 'France', '€'],
+  ['BE', 'Belgique', '€'], ['CH', 'Suisse', 'CHF'], ['CA', 'Canada', '$'], ['US', 'États-Unis', '$'],
+  ['GB', 'Royaume-Uni', '£'], ['NG', 'Nigéria', '₦'], ['GH', 'Ghana', 'GH₵'], ['KE', 'Kenya', 'KSh'],
+  ['ZA', 'Afrique du Sud', 'R'], ['IN', 'Inde', '₹'], ['CN', 'Chine', '¥'], ['AE', 'Émirats arabes unis', 'AED'],
+  ['SA', 'Arabie saoudite', 'SAR'], ['BR', 'Brésil', 'R$'],
+];
+const COMPANY_FORMS = ['Entreprise individuelle', 'SARL', 'SARLU', 'SA', 'SAS', 'SASU', 'Coopérative', 'Association', 'Auto-entrepreneur', 'Autre'];
+const countryOf = (code) => COUNTRIES.find((c) => c[0] === code) || COUNTRIES[0];
+const countryName = (code) => countryOf(code)[1];
+const currencyFor = (code) => countryOf(code)[2];
+const countryOptions = (sel) => COUNTRIES.map((c) => `<option value="${c[0]}" ${c[0] === sel ? 'selected' : ''}>${c[1]} — ${c[2]}</option>`).join('');
+const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f === sel ? 'selected' : ''}>${f}</option>`).join('');
 const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [],
   seq: { DEV: 0, FAC: 0 },
-  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS } },
+  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '' },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
 let db = loadDB();
@@ -47,7 +64,7 @@ const T = (k) => (I18N[db.settings.lang] || I18N.fr)[k] || I18N.fr[k] || k;
 const uid = () => Math.random().toString(36).slice(2, 10);
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fr = (n) => Math.round(n || 0).toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ');
-const money = (n) => fr(n) + ' FCFA';
+const money = (n) => fr(n) + ' ' + ((db.settings && db.settings.currency) || 'FCFA');
 const dayFR = (iso) => (iso || '').split('-').reverse().join('/');
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const inPeriod = (date, p) => {
@@ -333,7 +350,14 @@ function printDoc(id, format) {
   const area = document.getElementById('printArea');
   const lines = d.lines.map((l) => `<tr><td>${esc(l.label)}</td><td>${esc(l.qty)}</td><td>${money(+l.price)}</td><td>${money((+l.qty || 1) * +l.price)}</td></tr>`).join('');
   area.className = format === 'ticket' ? 'ticket' : 'a4';
+  const s = db.settings || {};
+  const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
+  const contact = [me && me.phone, me && me.email].filter(Boolean).map((x) => esc(x)).join(' · ');
   area.innerHTML = `<h2>${db.shop || 'Assistant Commercial'}</h2>
+    ${s.companyForm ? `<div class="small">${esc(s.companyForm)}</div>` : ''}
+    ${place ? `<div class="small">${esc(place)}</div>` : ''}
+    ${contact ? `<div class="small">${contact}</div>` : ''}
+    <hr>
     <div class="small">${d.kind === 'DEV' ? T('quote') : T('invoice')} ${esc(d.number)} · ${dayFR(d.date)}</div>
     <div class="small">${T('client')} : ${esc(d.party || '—')}</div>
     <table><thead><tr><th>${T('line')}</th><th>${T('qty')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
@@ -463,6 +487,12 @@ function syncDraft() {
 function settingsModal() {
   const d = modal(`<h2>${T('settings')}</h2>
     <label>${T('shopName')}</label><input id="setShop" value="${esc(db.shop)}">
+    <label>${T('companyForm')}</label><select id="setForm">${formOptions(db.settings.companyForm || '')}</select>
+    <label>${T('country')}</label><select id="setCountry">${countryOptions(db.settings.country || 'CI')}</select>
+    <label>${T('city')}</label><input id="setCity" value="${esc(db.settings.city || '')}">
+    <label>${T('district')}</label><input id="setDistrict" value="${esc(db.settings.district || '')}">
+    <label>${T('address')}</label><input id="setAddress" value="${esc(db.settings.address || '')}">
+    <p class="hint">${T('currency')} : <b id="setCur">${esc(db.settings.currency || currencyFor(db.settings.country || 'CI'))}</b> — ${T('currencyAuto')}</p>
     <label>${T('language')}</label>
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
@@ -481,12 +511,21 @@ function settingsModal() {
   d.querySelector('#setInstall').onclick = () => { d.remove(); installModal(); };
   d.querySelector('#setExport').onclick = exportDB;
   d.querySelector('#setImport').onclick = importDB;
+  const setCountry = d.querySelector('#setCountry');
+  const setCur = d.querySelector('#setCur');
+  setCountry.onchange = () => { setCur.textContent = currencyFor(setCountry.value); };
   d.querySelector('#setOk').onclick = () => {
     db.shop = d.querySelector('#setShop').value.trim();
     const l = d.querySelector('#setLang').value;
     db.settings.reminder[db.settings.lang] = d.querySelector('#setRem').value;
     db.settings.lang = l;
     db.settings.ads = d.querySelector('#setAds').checked;
+    db.settings.companyForm = d.querySelector('#setForm').value;
+    db.settings.country = setCountry.value;
+    db.settings.currency = currencyFor(setCountry.value);
+    db.settings.city = d.querySelector('#setCity').value.trim();
+    db.settings.district = d.querySelector('#setDistrict').value.trim();
+    db.settings.address = d.querySelector('#setAddress').value.trim();
     saveDB(); d.remove(); render();
   };
 }
@@ -734,8 +773,8 @@ async function signup(email, phone, password) {
   await pushNow();
   return null;
 }
-async function login(email, password) {
-  const r = await api('/api/login', 'POST', { email, password });
+async function login(identifier, password) {
+  const r = await api('/api/login', 'POST', { login: identifier, password });
   if (!r.ok) return (r.data && r.data.error) || 'server';
   me = r.data.user;
   await pullNow(true);
@@ -766,6 +805,9 @@ function accountHTML() {
     <label>${T('phoneNumber')}</label><input id="acPhone" type="tel" autocomplete="tel" placeholder="+225 07 00 00 00 00">
     <label>${T('password')}</label><input id="acPass" type="password" autocomplete="new-password">
     <button class="btn" id="acSignup">${T('createAccount')}</button>
+    <h3 style="margin-top:16px">${T('signIn')}</h3>
+    <label>${T('loginId')}</label><input id="acLoginId" type="text" autocomplete="username">
+    <label>${T('password')}</label><input id="acLoginPass" type="password" autocomplete="current-password">
     <button class="btn out" id="acLogin">${T('signIn')}</button>
     <button class="btn out" id="acForgot">${T('forgot')}</button>
     <p class="hint">${T('accountHint')}</p><p class="err" id="acErr"></p></div>`;
@@ -787,14 +829,15 @@ function wireAccount(d) {
   };
   d.querySelector('#acLogin').onclick = async () => {
     err.textContent = '';
-    const { email, pass } = values();
-    if (!email || !pass) { err.textContent = T('badCredentials'); return; }
-    const e = await login(email, pass);
+    const identifier = d.querySelector('#acLoginId').value.trim();
+    const pass = d.querySelector('#acLoginPass').value;
+    if (!identifier || !pass) { err.textContent = T('badCredentials'); return; }
+    const e = await login(identifier, pass);
     if (e) { err.textContent = T('badCredentials'); return; }
     d.remove(); render();
   };
   const forgot = d.querySelector('#acForgot');
-  if (forgot) forgot.onclick = () => forgotModal(values().email);
+  if (forgot) forgot.onclick = () => forgotModal(values().email || d.querySelector('#acLoginId').value.trim());
 }
 function forgotModal(email = '') {
   const d = modal(`<h2>${T('forgotTitle')}</h2><p class="hint">${T('forgotHint')}</p>
@@ -880,8 +923,7 @@ function showAuthGate() {
     <p class="hint">${T('gateHint')}</p>
     <div class="seg"><button id="gSignup"></button><button id="gLogin"></button></div>
     <div class="card" id="gForm"></div>
-    <button class="btn out" id="gLater">${T('continueNo')}</button>
-    <p class="hint">${T('gateNoAccountHint')}</p></div>`;
+    <p class="hint">${T('gateRequired')}</p></div>`;
   document.body.appendChild(g);
   const tabs = { signup: g.querySelector('#gSignup'), login: g.querySelector('#gLogin') };
   const form = g.querySelector('#gForm');
@@ -898,28 +940,53 @@ function showAuthGate() {
       ? `<label>${T('email')}</label><input id="gEmail" type="email" autocomplete="email">
          <label>${T('phoneNumber')}</label><input id="gPhone" type="tel" autocomplete="tel">
          <label>${T('password')}</label><input id="gPass" type="password" autocomplete="new-password">
+         <label>${T('business')}</label>
+         <label>${T('companyForm')}</label><select id="gForm">${formOptions('')}</select>
+         <label>${T('country')}</label><select id="gCountry">${countryOptions(db.settings.country || 'CI')}</select>
+         <p class="hint">${T('currency')} : <b id="gCur">${currencyFor(db.settings.country || 'CI')}</b></p>
+         <label>${T('city')}</label><input id="gCity" autocomplete="address-level2">
+         <label>${T('district')}</label><input id="gDistrict">
+         <label>${T('address')}</label><input id="gAddress" autocomplete="street-address">
          <button class="btn" id="gGo">${T('createAccount')}</button><p class="err" id="gErr"></p>`
-      : `<label>${T('email')}</label><input id="gEmail" type="email" autocomplete="email">
+      : `<label>${T('loginId')}</label><input id="gLoginId" type="text" autocomplete="username" placeholder="awa@exemple.com / +225 07 00 00 00 00">
          <label>${T('password')}</label><input id="gPass" type="password" autocomplete="current-password">
          <button class="btn" id="gGo">${T('signIn')}</button><p class="err" id="gErr"></p>`;
     const go = form.querySelector('#gGo');
+    if (gateMode === 'signup') {
+      const csel = form.querySelector('#gCountry');
+      csel.onchange = () => { form.querySelector('#gCur').textContent = currencyFor(csel.value); };
+    }
     go.onclick = async () => {
       const err = form.querySelector('#gErr');
-      const email = form.querySelector('#gEmail').value.trim();
       const pass = form.querySelector('#gPass').value;
       err.textContent = '';
       if (gateMode === 'signup') {
+        const email = form.querySelector('#gEmail').value.trim();
         const phone = form.querySelector('#gPhone').value.trim();
+        const country = form.querySelector('#gCountry').value;
+        const companyForm = form.querySelector('#gForm').value;
+        const city = form.querySelector('#gCity').value.trim();
+        const district = form.querySelector('#gDistrict').value.trim();
+        const address = form.querySelector('#gAddress').value.trim();
         if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) { err.textContent = T('badEmail'); return; }
         if (phone.replace(/\D/g, '').length < 8) { err.textContent = T('badPhone'); return; }
         if (pass.length < 8) { err.textContent = T('badPass'); return; }
+        if (!city || !companyForm) { err.textContent = T('badBusiness'); return; }
+        db.settings.country = country;
+        db.settings.currency = currencyFor(country);
+        db.settings.companyForm = companyForm;
+        db.settings.city = city;
+        db.settings.district = district;
+        db.settings.address = address;
+        saveDB(false);
         go.disabled = true;
         const e = await signup(email, phone, pass);
-        if (e) { go.disabled = false; err.textContent = e === 'exists' ? T('emailTaken') : e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
+        if (e) { go.disabled = false; err.textContent = e === 'exists' ? T('emailTaken') : e === 'phone_taken' ? T('phoneTaken') : e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
       } else {
-        if (!email || !pass) { err.textContent = T('badCredentials'); return; }
+        const identifier = form.querySelector('#gLoginId').value.trim();
+        if (!identifier || !pass) { err.textContent = T('badCredentials'); return; }
         go.disabled = true;
-        const e = await login(email, pass);
+        const e = await login(identifier, pass);
         if (e) { go.disabled = false; err.textContent = e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
       }
       afterGate();
@@ -927,7 +994,6 @@ function showAuthGate() {
   }
   tabs.signup.onclick = () => setMode('signup');
   tabs.login.onclick = () => setMode('login');
-  g.querySelector('#gLater').onclick = () => afterGate();
   setMode(gateMode);
 }
 window.addEventListener('online', () => { render(); syncTick(); });
@@ -941,7 +1007,7 @@ const resetToken = new URLSearchParams(location.search).get('reset');
   await bootAccount();
   if (resetToken) { resetModal(resetToken); return; }
   if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
-  if (!me && !db.shop) showAuthGate();
-  else askShop();
+  if (!me) { gateMode = db.shop ? 'login' : 'signup'; showAuthGate(); return; }
+  askShop();
 })();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
