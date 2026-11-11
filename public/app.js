@@ -344,16 +344,12 @@ function waOpen(phone, text) {
 }
 
 /* ---------------- impression ---------------- */
-function printDoc(id, format) {
-  const d = db.docs.find((x) => x.id === id);
-  if (!d) return;
-  const area = document.getElementById('printArea');
+function docHTML(d) {
   const lines = d.lines.map((l) => `<tr><td>${esc(l.label)}</td><td>${esc(l.qty)}</td><td>${money(+l.price)}</td><td>${money((+l.qty || 1) * +l.price)}</td></tr>`).join('');
-  area.className = format === 'ticket' ? 'ticket' : 'a4';
   const s = db.settings || {};
   const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
   const contact = [me && me.phone, me && me.email].filter(Boolean).map((x) => esc(x)).join(' · ');
-  area.innerHTML = `${s.logo ? `<img class="docLogo" src="${esc(s.logo)}" alt="">` : ''}<h2>${db.shop || 'Assistant Commercial'}</h2>
+  return `${s.logo ? `<img class="docLogo" src="${esc(s.logo)}" alt="">` : ''}<h2>${db.shop || 'Assistant Commercial'}</h2>
     ${s.companyForm ? `<div class="small">${esc(s.companyForm)}</div>` : ''}
     ${place ? `<div class="small">${esc(place)}</div>` : ''}
     ${contact ? `<div class="small">${contact}</div>` : ''}
@@ -363,7 +359,26 @@ function printDoc(id, format) {
     <table><thead><tr><th>${T('line')}</th><th>${T('qty')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
     <div class="tot"><span>${T('total')}</span><span>${money(d.total)}</span></div>
     <p class="small">${T('thanks')}</p>`;
+}
+function printFormat(id, format) {
+  const d = db.docs.find((x) => x.id === id);
+  if (!d) return;
+  const area = document.getElementById('printArea');
+  area.className = format === 'ticket' ? 'ticket' : 'a4';
+  area.innerHTML = docHTML(d);
   window.print();
+}
+function previewDoc(id) {
+  const d = db.docs.find((x) => x.id === id);
+  if (!d) return;
+  const m = modal(`<h2>${T('preview')}</h2>
+    <div class="docPreview">${docHTML(d)}</div>
+    <button class="btn" id="pvA4">${T('printA4')}</button>
+    <button class="btn out" id="pvTk">${T('printTicket')}</button>
+    <button class="btn out" id="pvNo">${T('close')}</button>`);
+  m.querySelector('#pvA4').onclick = () => { m.remove(); printFormat(id, 'a4'); };
+  m.querySelector('#pvTk').onclick = () => { m.remove(); printFormat(id, 'ticket'); };
+  m.querySelector('#pvNo').onclick = () => m.remove();
 }
 
 /* ---------------- délégation ---------------- */
@@ -457,7 +472,7 @@ document.addEventListener('click', async (e) => {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (d && d.kind === 'DEV') { d.kind = 'FAC'; d.number = num('FAC'); d.u = Date.now(); saveDB(); render(); }
   }
-  if (act === 'print') printDoc(b.dataset.id, 'a4');
+  if (act === 'print') previewDoc(b.dataset.id);
   if (act === 'waDoc') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (d) waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(d.total)} — ${db.shop || ''}`);
@@ -525,6 +540,12 @@ function settingsModal() {
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
     ${accountHTML()}
+    ${me ? `<h3 style="margin-top:16px">${T('changePassword')}</h3>
+      <label>${T('currentPassword')}</label><input id="pwCur" type="password" autocomplete="current-password">
+      <label>${T('newPassword')}</label><input id="pwNew" type="password" autocomplete="new-password">
+      <label>${T('confirmPassword')}</label><input id="pwNew2" type="password" autocomplete="new-password">
+      <button class="btn out" id="pwOk">${T('savePassword')}</button>
+      <p class="hint" id="pwMsg"></p>` : ''}
     <button class="btn" id="setOk">${T('save')}</button>
     <button class="btn out" id="setShare">${T('share')}</button>
     <button class="btn out" id="setInstall">${T('install')}</button>
@@ -536,6 +557,19 @@ function settingsModal() {
   wireAccount(d);
   d.querySelector('#setShare').onclick = () => { d.remove(); shareModal(); };
   d.querySelector('#setInstall').onclick = () => { d.remove(); installModal(); };
+  const pwOk = d.querySelector('#pwOk');
+  if (pwOk) pwOk.onclick = async () => {
+    const msg = d.querySelector('#pwMsg');
+    const cur = d.querySelector('#pwCur').value;
+    const p1 = d.querySelector('#pwNew').value;
+    const p2 = d.querySelector('#pwNew2').value;
+    if (p1.length < 8) { msg.textContent = T('badPass'); return; }
+    if (p1 !== p2) { msg.textContent = T('passMismatch'); return; }
+    const r = await api('/api/password', 'POST', { current: cur, password: p1 });
+    if (!r.ok) { msg.textContent = r.data && r.data.error === 'current' ? T('badCurrent') : T('badPass'); return; }
+    d.querySelector('#pwCur').value = ''; d.querySelector('#pwNew').value = ''; d.querySelector('#pwNew2').value = '';
+    msg.textContent = T('pwDone');
+  };
   d.querySelector('#setExport').onclick = exportDB;
   d.querySelector('#setImport').onclick = importDB;
   const setCountry = d.querySelector('#setCountry');

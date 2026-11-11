@@ -198,6 +198,24 @@ async function api(request, env, url) {
   const user = await currentUser(request, env);
   if (!user) return json({ error: 'auth' }, 401);
 
+  if (path === '/api/password' && request.method === 'POST') {
+    const body = await readBody(request);
+    const current = String(body.current || '');
+    const password = String(body.password || '');
+    if (!validPass(password)) return json({ error: 'password' }, 400);
+    const row = await env.DB.prepare('SELECT pass, salt FROM users WHERE id = ?').bind(user.id).first();
+    if (!row) return json({ error: 'auth' }, 401);
+    if (!same(await pbkdf2(current, row.salt), row.pass)) return json({ error: 'current' }, 401);
+    const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+    const pass = await pbkdf2(password, salt);
+    const token = cookieOf(request, 'ac_session');
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET pass = ?, salt = ? WHERE id = ?').bind(pass, salt, user.id),
+      env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?').bind(user.id, token ? await sha256(token) : ''),
+    ]);
+    return json({ ok: true });
+  }
+
   if (path === '/api/data' && request.method === 'GET') {
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(user.id).first();
     return json(row ? { json: row.json, rev: row.rev, updated: row.updated } : { json: null, rev: 0, updated: 0 });
