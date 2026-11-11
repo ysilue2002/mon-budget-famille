@@ -41,7 +41,7 @@ html[dir="rtl"] .right{text-align:left}
 .tag.bad{background:#fee2e2;color:var(--rouge)}
 .tag.ok{background:#dcfce7;color:#166534}
 .empty{color:var(--gris);font-size:15px;padding:8px 0}
-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:2px solid #d8e6da;display:grid;grid-template-columns:repeat(5,1fr);z-index:6}
+nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:2px solid #d8e6da;display:grid;grid-template-columns:repeat(6,1fr);z-index:6}
 nav button{background:none;color:var(--gris);padding:10px 4px 12px;font-size:12px;font-weight:700;display:flex;flex-direction:column;gap:3px;align-items:center}
 nav button .ic{font-size:22px;line-height:1}
 nav button.on{color:var(--vert)}
@@ -66,6 +66,9 @@ html[dir="rtl"] .adsBottom button{inset-inline-end:auto;inset-inline-start:8px}
 .gate h1{font-size:27px;color:var(--vert);margin:8px 0 4px}
 .gate .lang{font-size:21px;margin-top:12px}
 .gate .seg{margin:16px 0 12px}
+.logoPrev{max-height:90px;max-width:180px;border:2px solid #d8e6da;border-radius:10px;padding:4px;background:#fff}
+#printArea .docLogo{max-height:22mm;max-width:65mm;display:block;margin-bottom:4mm}
+#printArea.ticket .docLogo{max-height:14mm;max-width:45mm}
 .qrbox{display:flex;justify-content:center;margin:14px 0;padding:10px;background:#fff;border:2px solid #d8e6da;border-radius:14px}
 .qrbox svg{width:220px;height:220px}
 #printArea{display:none}

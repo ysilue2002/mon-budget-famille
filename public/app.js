@@ -353,7 +353,7 @@ function printDoc(id, format) {
   const s = db.settings || {};
   const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
   const contact = [me && me.phone, me && me.email].filter(Boolean).map((x) => esc(x)).join(' · ');
-  area.innerHTML = `<h2>${db.shop || 'Assistant Commercial'}</h2>
+  area.innerHTML = `${s.logo ? `<img class="docLogo" src="${esc(s.logo)}" alt="">` : ''}<h2>${db.shop || 'Assistant Commercial'}</h2>
     ${s.companyForm ? `<div class="small">${esc(s.companyForm)}</div>` : ''}
     ${place ? `<div class="small">${esc(place)}</div>` : ''}
     ${contact ? `<div class="small">${contact}</div>` : ''}
@@ -369,7 +369,10 @@ function printDoc(id, format) {
 /* ---------------- délégation ---------------- */
 document.addEventListener('click', async (e) => {
   const nav = e.target.closest('#nav button');
-  if (nav) { tab = nav.dataset.tab; draft = null; render(); return; }
+  if (nav) {
+    if (nav.dataset.act === 'openSettings') { settingsModal(); return; }
+    tab = nav.dataset.tab; draft = null; render(); return;
+  }
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const act = b.dataset.act;
@@ -484,7 +487,26 @@ function syncDraft() {
 }
 
 /* ---------------- réglages ---------------- */
+function readLogo(file, cb) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 320;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * scale));
+      c.height = Math.max(1, Math.round(img.height * scale));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => cb(null);
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
 function settingsModal() {
+  let logoDraft = db.settings.logo || '';
   const d = modal(`<h2>${T('settings')}</h2>
     <label>${T('shopName')}</label><input id="setShop" value="${esc(db.shop)}">
     <label>${T('companyForm')}</label><select id="setForm">${formOptions(db.settings.companyForm || '')}</select>
@@ -493,6 +515,11 @@ function settingsModal() {
     <label>${T('district')}</label><input id="setDistrict" value="${esc(db.settings.district || '')}">
     <label>${T('address')}</label><input id="setAddress" value="${esc(db.settings.address || '')}">
     <p class="hint">${T('currency')} : <b id="setCur">${esc(db.settings.currency || currencyFor(db.settings.country || 'CI'))}</b> — ${T('currencyAuto')}</p>
+    <label>${T('logo')}</label>
+    <input type="file" id="setLogo" accept="image/*">
+    <div id="logoPrev" style="margin-top:8px">${logoDraft ? `<img src="${esc(logoDraft)}" class="logoPrev" alt="">` : ''}</div>
+    <button class="btn out" id="logoDel">${T('logoRemove')}</button>
+    <p class="hint">${T('logoHint')}</p>
     <label>${T('language')}</label>
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
@@ -514,6 +541,13 @@ function settingsModal() {
   const setCountry = d.querySelector('#setCountry');
   const setCur = d.querySelector('#setCur');
   setCountry.onchange = () => { setCur.textContent = currencyFor(setCountry.value); };
+  const logoPrev = d.querySelector('#logoPrev');
+  d.querySelector('#setLogo').onchange = () => {
+    const f = d.querySelector('#setLogo').files[0];
+    if (!f) return;
+    readLogo(f, (url) => { if (url) { logoDraft = url; logoPrev.innerHTML = `<img src="${esc(url)}" class="logoPrev" alt="">`; } });
+  };
+  d.querySelector('#logoDel').onclick = () => { logoDraft = ''; logoPrev.innerHTML = ''; };
   d.querySelector('#setOk').onclick = () => {
     db.shop = d.querySelector('#setShop').value.trim();
     const l = d.querySelector('#setLang').value;
@@ -526,6 +560,7 @@ function settingsModal() {
     db.settings.city = d.querySelector('#setCity').value.trim();
     db.settings.district = d.querySelector('#setDistrict').value.trim();
     db.settings.address = d.querySelector('#setAddress').value.trim();
+    db.settings.logo = logoDraft;
     saveDB(); d.remove(); render();
   };
 }
