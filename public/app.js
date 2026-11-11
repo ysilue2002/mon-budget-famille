@@ -470,6 +470,7 @@ function settingsModal() {
     ${accountHTML()}
     <button class="btn" id="setOk">${T('save')}</button>
     <button class="btn out" id="setShare">${T('share')}</button>
+    <button class="btn out" id="setInstall">${T('install')}</button>
     <button class="btn out" id="setExport">${T('exportData')}</button>
     <button class="btn out" id="setImport">${T('importData')}</button>
     <p class="hint">${T('backupHint')}</p>
@@ -477,6 +478,7 @@ function settingsModal() {
   d.querySelector('#setNo').onclick = () => d.remove();
   wireAccount(d);
   d.querySelector('#setShare').onclick = () => { d.remove(); shareModal(); };
+  d.querySelector('#setInstall').onclick = () => { d.remove(); installModal(); };
   d.querySelector('#setExport').onclick = exportDB;
   d.querySelector('#setImport').onclick = importDB;
   d.querySelector('#setOk').onclick = () => {
@@ -516,6 +518,24 @@ function importDB() {
     r.readAsText(f);
   };
   input.click();
+}
+/* ---------------- installation sur le téléphone ---------------- */
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; });
+const installed = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+function installModal() {
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const steps = installed()
+    ? `<p class="hint">${T('installDone')}</p>`
+    : `<ol><li>${isIOS ? T('installIphone1') : T('installAndroid1')}</li><li>${isIOS ? T('installIphone2') : T('installAndroid2')}</li><li>${T('installOpen')}</li></ol>`;
+  const d = modal(`<h2>${T('installTitle')}</h2>
+    <p class="hint">${T('installHint')}</p>
+    ${steps}
+    ${installEvt && !installed() ? `<button class="btn" id="inNow">${T('installNow')}</button>` : ''}
+    <button class="btn out" id="inClose">${T('close')}</button>`);
+  d.querySelector('#inClose').onclick = () => d.remove();
+  const now = d.querySelector('#inNow');
+  if (now) now.onclick = async () => { installEvt.prompt(); await installEvt.userChoice; installEvt = null; d.remove(); };
 }
 function shareModal() {
   const url = location.origin + location.pathname;
