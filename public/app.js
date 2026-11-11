@@ -782,6 +782,8 @@ async function login(identifier, password) {
   return null;
 }
 async function logout() {
+  clearTimeout(syncTimer);
+  if (me) await pushNow();
   await api('/api/logout', 'POST', {});
   me = null;
   markSync('idle');
@@ -941,7 +943,7 @@ function showAuthGate() {
          <label>${T('phoneNumber')}</label><input id="gPhone" type="tel" autocomplete="tel">
          <label>${T('password')}</label><input id="gPass" type="password" autocomplete="new-password">
          <label>${T('business')}</label>
-         <label>${T('companyForm')}</label><select id="gForm">${formOptions('')}</select>
+         <label>${T('companyForm')}</label><select id="gCompany">${formOptions('')}</select>
          <label>${T('country')}</label><select id="gCountry">${countryOptions(db.settings.country || 'CI')}</select>
          <p class="hint">${T('currency')} : <b id="gCur">${currencyFor(db.settings.country || 'CI')}</b></p>
          <label>${T('city')}</label><input id="gCity" autocomplete="address-level2">
@@ -964,7 +966,7 @@ function showAuthGate() {
         const email = form.querySelector('#gEmail').value.trim();
         const phone = form.querySelector('#gPhone').value.trim();
         const country = form.querySelector('#gCountry').value;
-        const companyForm = form.querySelector('#gForm').value;
+        const companyForm = form.querySelector('#gCompany').value;
         const city = form.querySelector('#gCity').value.trim();
         const district = form.querySelector('#gDistrict').value.trim();
         const address = form.querySelector('#gAddress').value.trim();
