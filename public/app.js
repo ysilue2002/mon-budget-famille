@@ -34,6 +34,7 @@ let side = 'clients';
 let period = 'mois';
 let draft = null;
 let adsClosed = false;
+let docQuery = '';
 
 function loadDB() {
   try {
@@ -125,7 +126,7 @@ function vendre() {
   const t = db.sales.filter((s) => s.date === todayISO());
   const ca = t.reduce((a, s) => a + s.total, 0);
   const list = [
-    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(s.method)}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}</div></div>`),
+    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(s.method)}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button></div></div>`),
     ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)} · ${esc(e.method)}</div></div></div>`),
     ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
@@ -202,22 +203,31 @@ function clients() {
 }
 
 /* ---------------- Documents ---------------- */
-function docs() {
+function filterDocs(q) {
+  const term = String(q || '').trim().toLowerCase();
   const list = [...db.docs].sort((a, b) => (a.date < b.date ? 1 : -1));
-  return `<div class="kpis">
-      <div class="kpi"><span>${T('quotes')}</span><b>${db.docs.filter((d) => d.kind === 'DEV').length}</b></div>
-      <div class="kpi"><span>${T('invoices')}</span><b>${db.docs.filter((d) => d.kind === 'FAC').length}</b></div>
-    </div>
-    <button class="btn" data-act="newDoc">＋ ${T('newQuote')}</button>
-    <div class="card" style="margin-top:16px"><h3>${T('myDocs')}</h3>
-      ${list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)}</div><div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(d.total)}</div></div><div class="right">
+  if (!term) return list;
+  return list.filter((d) => [d.number, d.party, d.date, dayFR(d.date), d.kind === 'DEV' ? T('quote') : T('invoice'), String(d.total), money(d.total)].join(' ').toLowerCase().includes(term));
+}
+function docsList(list) {
+  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)}</div><div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(d.total)}</div></div><div class="right">
         <button class="btn small" data-act="print" data-id="${d.id}">${T('print')}</button>
         <button class="btn small whats" data-act="waDoc" data-id="${d.id}">${T('whatsapp')}</button>
         <button class="btn small pdf" data-act="waPdf" data-id="${d.id}">${T('pdf')}</button>
         <button class="btn small out" data-act="duplicate" data-id="${d.id}">${T('duplicate')}</button>
         <button class="btn small mail" data-act="mailDoc" data-id="${d.id}">${T('email')}</button>
         ${d.kind === 'DEV' ? `<button class="btn small out" data-act="toFacture" data-id="${d.id}">${T('toInvoice')}</button>` : ''}
-      </div></div>`).join('') || `<p class="empty">${T('noDocs')}</p>`}
+      </div></div>`).join('') || `<p class="empty">${T('noDocs')}</p>`;
+}
+function docs() {
+  return `<div class="kpis">
+      <div class="kpi"><span>${T('quotes')}</span><b>${db.docs.filter((d) => d.kind === 'DEV').length}</b></div>
+      <div class="kpi"><span>${T('invoices')}</span><b>${db.docs.filter((d) => d.kind === 'FAC').length}</b></div>
+    </div>
+    <button class="btn" data-act="newDoc">＋ ${T('newQuote')}</button>
+    <div class="card" style="margin-top:16px"><h3>${T('myDocs')}</h3>
+      <input id="docSearch" type="search" placeholder="${T('searchDocs')}" value="${esc(docQuery)}" autocomplete="off">
+      <div id="docList">${docsList(filterDocs(docQuery))}</div>
     </div>`;
 }
 function docForm() {
@@ -307,10 +317,11 @@ function saleModal() {
     }
     const sid = uid();
     const now = Date.now();
-    db.sales.push({ id: sid, date: todayISO(), total, paid: credit ? 0 : total, method: d.querySelector('#sMethod').value, party, pid: pid || '', product, qty: product ? qty : 0, cost, u: now });
+    const sale = { id: sid, date: todayISO(), total, paid: credit ? 0 : total, method: d.querySelector('#sMethod').value, party, pid: pid || '', product, qty: product ? qty : 0, cost, u: now };
+    db.sales.push(sale);
     if (pid) db.moves.push({ id: 'mv-' + sid, pid, delta: -qty, u: now });
     if (party && !db.parties.some((x) => x.name.toLowerCase() === party.toLowerCase())) db.parties.push({ id: uid(), name: party, phone: '', u: now });
-    saveDB(); d.remove(); render();
+    saveDB(); d.remove(); render(); saleDone(sale);
   };
 }
 function payModal(name) {
@@ -339,6 +350,29 @@ function reminderText(name) {
     .replaceAll('[Numéro Facture]', doc.number)
     .replaceAll('[Date Facture]', dayFR(doc.date))
     .replaceAll('[Montant]', money(sum));
+}
+function receiptText(s) {
+  const lines = [`${db.shop || T('app')}`, `${T('dueDate')} : ${dayFR(s.date)}`];
+  if (s.product) lines.push(`${s.product} × ${s.qty}`);
+  lines.push(`${T('total')} : ${money(s.total)}`);
+  if (creditOf(s) > 0) lines.push(`${T('paid')} : ${money(paidOf(s))} · ${T('remains')} : ${money(creditOf(s))}`);
+  lines.push(`${T('method')} : ${s.method}`);
+  lines.push(T('thanks'));
+  return lines.filter(Boolean).join('\n');
+}
+function waSale(id) {
+  const s = db.sales.find((x) => x.id === id);
+  if (!s) return;
+  const phone = (db.parties.find((p) => p.name === s.party) || {}).phone;
+  waOpen(phone, receiptText(s));
+}
+function saleDone(sale) {
+  const m = modal(`<h2>${T('saleSaved')}</h2>
+    <p class="hint">${money(sale.total)}${sale.product ? ' · ' + esc(sale.product) + ' ×' + sale.qty : ''}${sale.party ? ' · ' + esc(sale.party) : ''}</p>
+    <button class="btn whats" id="rdWa">${T('sendReceipt')}</button>
+    <button class="btn out" id="rdNo">${T('close')}</button>`);
+  m.querySelector('#rdWa').onclick = () => { m.remove(); waSale(sale.id); };
+  m.querySelector('#rdNo').onclick = () => m.remove();
 }
 function waOpen(phone, text) {
   const clean = (phone || '').replace(/[^\d+]/g, '').replace('+', '');
@@ -557,6 +591,7 @@ document.addEventListener('click', async (e) => {
   }
   if (act === 'print') previewDoc(b.dataset.id);
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
+  if (act === 'waSale') waSale(b.dataset.id);
   if (act === 'duplicate') {
     const src = db.docs.find((x) => x.id === b.dataset.id);
     if (src) {
@@ -1163,6 +1198,13 @@ function showAuthGate() {
   tabs.login.onclick = () => setMode('login');
   setMode(gateMode);
 }
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'docSearch') {
+    docQuery = e.target.value;
+    const box = document.getElementById('docList');
+    if (box) box.innerHTML = docsList(filterDocs(docQuery));
+  }
+});
 window.addEventListener('online', () => { render(); syncTick(); });
 window.addEventListener('offline', render);
 window.addEventListener('focus', syncTick);
