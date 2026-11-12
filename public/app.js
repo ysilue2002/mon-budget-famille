@@ -1278,6 +1278,17 @@ document.addEventListener('click', async (e) => {
   if (act === 'mailDoc') emailDocPDF(b.dataset.id);
   if (act === 'dlPdf') downloadDocPDF(b.dataset.id);
   if (act === 'openSettings') settingsModal();
+  if (act === 'addEmail') {
+    const box = document.getElementById('acAddEmail');
+    const email = (box ? box.value : '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) { alert(T('badEmail')); return; }
+    api('/api/email', 'POST', { email }).then((r) => {
+      if (!r.ok) { alert(r.data && r.data.error === 'exists' ? T('emailTaken') : T('badEmail')); return; }
+      me = r.data.user;
+      alert(T('emailAdded'));
+      render();
+    });
+  }
   if (act === 'syncNow') pushNow();
   if (act === 'logout') {
     await logout();
@@ -1788,7 +1799,11 @@ function accountHTML() {
       <p class="hint">${T('lastSaved')} ${clock(db.meta.lastSync)}</p>
       <button class="btn out" data-act="syncNow">${T('syncNow')}</button>
       <button class="btn out" data-act="logout">${T('signOut')}</button>
-      <p class="hint">${T('multiPhoneHint')}</p></div>`;
+      <p class="hint">${T('multiPhoneHint')}</p>
+      ${me.email ? '' : `<h3 style="margin-top:16px">${T('addEmail')}</h3>
+      <p class="hint">${T('addEmailHint')}</p>
+      <label>${T('email')}</label><input id="acAddEmail" type="email" autocomplete="email" placeholder="awa@exemple.com">
+      <button class="btn out" data-act="addEmail">${T('addEmail')}</button>`}</div>`;
   }
   return `<div class="card" style="margin-top:14px"><h3>${T('account')}</h3>
     <div class="seg" id="acType"><button type="button" id="acModeEmail" class="on">${T('byEmail')}</button><button type="button" id="acModePhone">${T('byPhone')}</button></div>

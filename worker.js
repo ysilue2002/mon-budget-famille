@@ -292,6 +292,18 @@ async function api(request, env, url) {
     return json({ ok: true });
   }
 
+  if (path === '/api/email' && request.method === 'POST') {
+    if (await blocked(env, 'email:' + user.id, 10)) return json({ error: 'slow' }, 429);
+    const body = await readBody(request);
+    const email = String(body.email || '').trim().toLowerCase();
+    if (!validEmail(email)) return json({ error: 'email' }, 400);
+    const taken = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+    if (taken && taken.id !== user.id) return json({ error: 'exists' }, 409);
+    await tooMany(env, 'email:' + user.id, 10, 60 * 60000);
+    await env.DB.prepare('UPDATE users SET email = ? WHERE id = ?').bind(email, user.id).run();
+    return json({ ok: true, user: { id: user.id, email, phone: user.phone } });
+  }
+
   if (path === '/api/data' && request.method === 'GET') {
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(user.id).first();
     return json(row ? { json: row.json, rev: row.rev, updated: row.updated } : { json: null, rev: 0, updated: 0 });
