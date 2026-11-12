@@ -4,7 +4,8 @@
   "private": true,
   "description": "Redirection Render vers l'application Assistant Commercial",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "node -e \"console.log('build ok')\""
   },
   "engines": {
     "node": ">=20"
