@@ -97,3 +97,42 @@ html[dir="rtl"] .adsBottom button{inset-inline-end:auto;inset-inline-start:8px}
   #printArea .small{font-size:9pt;color:#333}
   @page{margin:8mm}
 }
+
+/* Modèle de devis / facture */
+.docPreview .docBar{background:#111;height:8px;margin:-12px -12px 12px}
+.docPreview .docBarBottom{display:none}
+.docPreview .docHead{display:flex;justify-content:space-between;gap:12px}
+.docPreview .docTitle{font-size:26px;font-weight:800;line-height:1;letter-spacing:-.5px;text-transform:uppercase}
+.docPreview .docNumber{font-size:15px;font-weight:700;margin-top:2px}
+.docPreview .docMeta{font-size:10px;text-align:end;color:#222}
+.docPreview .docBoxes{display:flex;gap:8px;margin:12px 0}
+.docPreview .docBox{flex:1;border:1.5px solid #111;border-radius:8px;padding:8px;font-size:10px;line-height:1.45}
+.docPreview .docBox b{display:block;font-size:11px;margin-bottom:3px}
+.docPreview .docBox .docLogo{max-height:34px;margin:0 0 4px}
+.docPreview .docTable th,.docPreview .docTable td{border:1px solid #111;padding:5px 4px;font-size:10px}
+.docPreview .docTotals{margin-left:auto;width:62%;border:1.5px solid #111;border-radius:8px;padding:8px;text-align:end;font-weight:800;font-size:11px}
+.docPreview .docTotals div+div{margin-top:3px;font-size:13px}
+.docPreview .docNotes{display:flex;justify-content:space-between;gap:10px;font-size:8px;margin-top:14px;color:#333}
+.docPreview .docNotes>div{flex:1}
+.docPreview .docNotes>div:last-child{text-align:end}
+
+@media print{
+  #printArea .docBar{background:#111;height:4mm;margin:0 0 9mm}
+  #printArea .docBarBottom{margin:12mm 0 0}
+  #printArea .docHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8mm}
+  #printArea .docTitle{font-size:34pt;font-weight:800;line-height:1;letter-spacing:-1px;text-transform:uppercase}
+  #printArea .docBox .docLogo{max-height:14mm;max-width:40mm;margin:0 0 2mm}
+  #printArea .docNumber{font-size:19pt;font-weight:700;margin-top:2mm}
+  #printArea .docMeta{font-size:10pt;text-align:end;margin-top:2mm}
+  #printArea .docBoxes{display:flex;gap:8mm;margin:13mm 0}
+  #printArea .docBox{flex:1;border:1.5px solid #111;border-radius:4mm;padding:5mm;font-size:10pt;line-height:1.5}
+  #printArea .docBox b{display:block;font-size:12pt;margin-bottom:2mm}
+  #printArea .docTable{width:100%;border-collapse:collapse;margin:0 0 7mm}
+  #printArea .docTable th,#printArea .docTable td{border:1px solid #111;padding:3mm;font-size:10.5pt;text-align:start}
+  #printArea .docTable th{font-weight:800}
+  #printArea .docTotals{margin-left:auto;width:82mm;border:1.5px solid #111;border-radius:3mm;padding:4mm;font-size:11pt;font-weight:800;text-align:end}
+  #printArea .docTotals div+div{margin-top:2mm;font-size:13pt}
+  #printArea .docNotes{display:flex;justify-content:space-between;gap:10mm;font-size:8pt;margin-top:16mm}
+  #printArea .docNotes>div{flex:1}
+  #printArea .docNotes>div:last-child{text-align:end}
+}

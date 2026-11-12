@@ -829,33 +829,67 @@ function waOpen(phone, text) {
 }
 
 /* ---------------- impression ---------------- */
-function docHTML(d) {
-  const lines = d.lines.map((l) => `<tr><td>${esc(l.label)}</td><td>${esc(l.qty)}</td><td>${money(+l.price)}</td><td>${money((+l.qty || 1) * +l.price)}</td></tr>`).join('');
+function docHTML(d, format) {
   const s = db.settings || {};
   const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
   const contact = [me && me.phone, me && me.email].filter(Boolean).map((x) => esc(x)).join(' · ');
-  return `${s.logo ? `<img class="docLogo" src="${esc(s.logo)}" alt="">` : ''}<h2>${db.shop || 'Assistant Commercial'}</h2>
-    ${s.companyForm ? `<div class="small">${esc(s.companyForm)}</div>` : ''}
-    ${place ? `<div class="small">${esc(place)}</div>` : ''}
-    ${contact ? `<div class="small">${contact}</div>` : ''}
-    <hr>
-    <div class="small">${d.kind === 'DEV' ? T('quote') : T('invoice')} ${esc(d.number)} · ${dayFR(d.date)}</div>
-    <div class="small">${T('client')} : ${esc(d.party || '—')}</div>
-    ${d.clientPhone ? `<div class="small">${T('phone')} : ${esc(d.clientPhone)}</div>` : ''}
-    ${d.clientEmail ? `<div class="small">${T('email')} : ${esc(d.clientEmail)}</div>` : ''}
-    ${d.clientAddress ? `<div class="small">${T('address')} : ${esc(d.clientAddress)}</div>` : ''}
-    <table><thead><tr><th>${T('line')}</th><th>${T('quantity')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
-    <div class="tot"><span>${T('ht')}</span><span>${money(d.total)}</span></div>
-    ${d.vat ? `<div class="tot"><span>${T('vatShort')} ${d.vat} %</span><span>${money(vatOf(d))}</span></div>` : ''}
-    <div class="tot"><span>${T('ttc')}</span><span>${money(amountOf(d))}</span></div>
-    <p class="small">${T('thanks')}</p>`;
+  const title = d.kind === 'DEV' ? T('quote') : T('invoice');
+  const rate = Math.max(0, Number(d.vat) || 0);
+  const lines = d.lines.map((l) => `<tr><td>${esc(l.label)}</td><td>${esc(l.qty)}</td><td>${money(+l.price)}</td><td>${money((+l.qty || 1) * +l.price)}</td></tr>`).join('');
+  if (format === 'ticket') {
+    return `${s.logo ? `<img class="docLogo" src="${esc(s.logo)}" alt="">` : ''}<h2>${db.shop || T('app')}</h2>
+      <div class="small">${title} ${esc(d.number)} · ${dayFR(d.date)}</div>
+      <div class="small">${T('client')} : ${esc(d.party || '—')}</div>
+      ${d.clientPhone ? `<div class="small">${T('phone')} : ${esc(d.clientPhone)}</div>` : ''}
+      <table><thead><tr><th>${T('line')}</th><th>${T('quantity')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
+      <div class="tot"><span>${T('ht')}</span><span>${money(d.total)}</span></div>
+      ${rate ? `<div class="tot"><span>${T('vatShort')} ${rate} %</span><span>${money(vatOf(d))}</span></div>` : ''}
+      <div class="tot"><span>${T('ttc')}</span><span>${money(amountOf(d))}</span></div>
+      <p class="small">${T('thanks')}</p>`;
+  }
+  return `<div class="docSheet">
+    <div class="docBar"></div>
+    <div class="docHead">
+      <div class="docTitleWrap">
+        <div class="docTitle">${title}</div>
+        <div class="docNumber">N° ${esc(d.number)}</div>
+      </div>
+      <div class="docMeta">
+        <div>${T('docNo')} : ${esc(d.number)}</div>
+        <div>${T('docDate')} : ${dayFR(d.date)}</div>
+      </div>
+    </div>
+    <div class="docBoxes">
+      <div class="docBox">${s.logo ? `<img class="docLogo" src="${esc(s.logo)}" alt="">` : ''}<b>${esc(db.shop || T('app'))}</b>
+        ${s.companyForm ? `<div>${esc(s.companyForm)}</div>` : ''}
+        ${place ? `<div>${esc(place)}</div>` : ''}
+        ${contact ? `<div>${esc(contact)}</div>` : ''}
+      </div>
+      <div class="docBox"><b>${T('client')}</b>
+        <div>${esc(d.party || '—')}</div>
+        ${d.clientPhone ? `<div>${esc(d.clientPhone)}</div>` : ''}
+        ${d.clientEmail ? `<div>${esc(d.clientEmail)}</div>` : ''}
+        ${d.clientAddress ? `<div>${esc(d.clientAddress)}</div>` : ''}
+      </div>
+    </div>
+    <table class="docTable"><thead><tr><th>${T('line')}</th><th>${T('quantity')}</th><th>${T('unitPriceHT')}</th><th>${T('ht')}</th></tr></thead><tbody>${lines}</tbody></table>
+    <div class="docTotals">
+      ${rate ? `<div>${T('vatShort')} (${rate} %) : ${money(vatOf(d))}</div>` : ''}
+      <div>${T('ttc')} : ${money(amountOf(d))}</div>
+    </div>
+    <div class="docNotes">
+      <div>${T('docNote1')}</div>
+      <div>${T('docNote2')}</div>
+    </div>
+    <div class="docBar docBarBottom"></div>
+  </div>`;
 }
 function printFormat(id, format) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
   const area = document.getElementById('printArea');
   area.className = format === 'ticket' ? 'ticket' : 'a4';
-  area.innerHTML = docHTML(d);
+  area.innerHTML = docHTML(d, format);
   window.print();
 }
 function imgSize(src) {
@@ -872,61 +906,87 @@ async function docPdf(d) {
   const s = db.settings || {};
   const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
   const contact = [me && me.phone, me && me.email].filter(Boolean).join(' · ');
-  let y = 15;
+  const title = (d.kind === 'DEV' ? T('quote') : T('invoice')).toUpperCase();
+  const rate = Math.max(0, Number(d.vat) || 0);
+  const pm = (n) => money(n).replace(/[\u202f\u00a0]/g, ' ');
+  const bar = (yy) => { pdf.setFillColor(17, 17, 17); pdf.rect(10, yy, 190, 5, 'F'); };
+  bar(10);
+  pdf.setTextColor(17, 17, 17);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(30);
+  pdf.text(title, 14, 33);
+  pdf.setFontSize(16);
+  pdf.text(`N° ${d.number}`, 14, 44);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(9);
+  pdf.text(`${T('docNo')} : ${d.number}`, 196, 26, { align: 'right' });
+  pdf.text(`${T('docDate')} : ${dayFR(d.date)}`, 196, 31, { align: 'right' });
+  const boxTop = 58; const boxH = 34; const boxW = 88;
+  pdf.setDrawColor(17, 17, 17); pdf.setLineWidth(0.4);
+  pdf.roundedRect(12, boxTop, boxW, boxH, 3, 3);
+  pdf.roundedRect(110, boxTop, boxW, boxH, 3, 3);
+  let y = boxTop + 7;
   if (s.logo) {
     const dim = await imgSize(s.logo);
-    const w = 30;
-    const h = Math.min(24, w * dim.h / dim.w);
-    try { pdf.addImage(s.logo, s.logo.indexOf('image/png') === 0 ? 'PNG' : 'JPEG', 14, y, w, h); y += h + 4; } catch {}
+    const w = 18; const h = Math.min(11, w * dim.h / dim.w);
+    try { pdf.addImage(s.logo, s.logo.indexOf('image/png') === 0 ? 'PNG' : 'JPEG', 16, y - 4, w, h); y += h + 1; } catch {}
   }
-  pdf.setTextColor(20, 83, 45);
-  pdf.setFontSize(17);
-  pdf.text(db.shop || 'Assistant Commercial', 14, y);
-  y += 6;
-  pdf.setTextColor(40, 40, 40);
-  pdf.setFontSize(9);
-  [s.companyForm, place, contact].filter(Boolean).forEach((line) => { pdf.text(String(line), 14, y); y += 4.5; });
-  y += 3;
-  pdf.setFontSize(11);
-  pdf.setTextColor(20, 20, 20);
-  pdf.text(`${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)}`, 14, y);
-  y += 6;
-  pdf.setFontSize(10);
-  pdf.text(`${T('client')} : ${d.party || '—'}`, 14, y);
-  y += 5;
-  if (d.clientPhone) { pdf.text(`${T('phone')} : ${d.clientPhone}`, 14, y); y += 4.5; }
-  if (d.clientEmail) { pdf.text(`${T('email')} : ${d.clientEmail}`, 14, y); y += 4.5; }
-  if (d.clientAddress) { pdf.text(`${T('address')} : ${d.clientAddress}`, 14, y); y += 4.5; }
-  y += 3;
-  pdf.setFontSize(9);
-  pdf.text(T('line'), 14, y);
-  pdf.text(T('quantity'), 118, y);
-  pdf.text(T('sellPrice'), 138, y);
-  pdf.text(T('total'), 196, y, { align: 'right' });
-  y += 3;
-  pdf.line(14, y, 196, y);
-  y += 5;
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11);
+  pdf.text(pdf.splitTextToSize(db.shop || T('app'), boxW - 10), 16, y); y += 5;
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5);
+  [s.companyForm, place, contact].filter(Boolean).forEach((line) => {
+    pdf.splitTextToSize(String(line), boxW - 10).forEach((t) => { pdf.text(t, 16, y); y += 4; });
+  });
+  let cy = boxTop + 9;
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11);
+  pdf.text(T('client'), 114, cy); cy += 6;
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+  [d.party || '—', d.clientPhone, d.clientEmail, d.clientAddress].filter(Boolean).forEach((line) => {
+    pdf.splitTextToSize(String(line), boxW - 10).forEach((t) => { pdf.text(t, 114, cy); cy += 4.4; });
+  });
+  const cols = [92, 22, 36, 32];
+  const x0 = 14;
+  const xs = [x0, x0 + cols[0], x0 + cols[0] + cols[1], x0 + cols[0] + cols[1] + cols[2]];
+  const drawHead = (yy) => {
+    const hh = 9;
+    pdf.setDrawColor(17, 17, 17); pdf.setLineWidth(0.4);
+    pdf.rect(x0, yy, 182, hh);
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9);
+    [T('line'), T('quantity'), T('unitPriceHT'), T('ht')].forEach((t, i) => {
+      if (i > 0) pdf.line(xs[i], yy, xs[i], yy + hh);
+      const tx = i >= 2 ? xs[i] + cols[i] - 3 : xs[i] + 3;
+      pdf.text(String(t), tx, yy + 6, { align: i >= 2 ? 'right' : 'left' });
+    });
+    return yy + hh;
+  };
+  y = drawHead(boxTop + boxH + 12);
   for (const l of d.lines) {
-    if (y > 268) { pdf.addPage(); y = 16; }
-    pdf.text(String(l.label).slice(0, 62), 14, y);
-    pdf.text(String(l.qty), 118, y);
-    pdf.text(money(+l.price), 138, y);
-    pdf.text(money((+l.qty || 1) * +l.price), 196, y, { align: 'right' });
-    y += 5.5;
+    const label = pdf.splitTextToSize(String(l.label || ''), cols[0] - 6);
+    const height = Math.max(10, label.length * 4.5 + 5);
+    if (y + height > 248) { pdf.addPage(); y = drawHead(18); }
+    pdf.rect(x0, y, 182, height);
+    for (let i = 1; i < 4; i += 1) pdf.line(xs[i], y, xs[i], y + height);
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+    pdf.text(label, xs[0] + 3, y + 6);
+    pdf.text(String(l.qty), xs[1] + cols[1] / 2, y + 6, { align: 'center' });
+    pdf.text(pm(+l.price), xs[2] + cols[2] - 3, y + 6, { align: 'right' });
+    pdf.text(pm((+l.qty || 1) * +l.price), xs[3] + cols[3] - 3, y + 6, { align: 'right' });
+    y += height;
   }
-  y += 1;
-  pdf.line(14, y, 196, y);
-  y += 7;
-  pdf.setFontSize(11);
-  pdf.text(`${T('ht')} : ${money(d.total)}`, 196, y, { align: 'right' });
-  y += 6;
-  if (d.vat) { pdf.text(`${T('vatShort')} ${d.vat} % : ${money(vatOf(d))}`, 196, y, { align: 'right' }); y += 6; }
-  pdf.setFontSize(13);
-  pdf.text(`${T('ttc')} : ${money(amountOf(d))}`, 196, y, { align: 'right' });
-  y += 10;
-  pdf.setFontSize(8);
-  pdf.setTextColor(90, 90, 90);
-  pdf.text(T('thanks'), 14, y);
+  let ty = y + 10;
+  const tw = 84; const th = rate ? 24 : 18;
+  if (ty + th > 255) { pdf.addPage(); ty = 30; }
+  pdf.setDrawColor(17, 17, 17); pdf.setLineWidth(0.4);
+  pdf.roundedRect(196 - tw, ty, tw, th, 3, 3);
+  let py = ty + 8;
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9.5);
+  if (rate) { pdf.text(`${T('vatShort')} (${rate} %) : ${pm(vatOf(d))}`, 191, py, { align: 'right' }); py += 7; }
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11.5);
+  pdf.text(`${T('ttc')} : ${pm(amountOf(d))}`, 191, py + 1, { align: 'right' });
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(90, 90, 90);
+  pdf.text(pdf.splitTextToSize(T('docNote1'), 80), 14, 272);
+  pdf.text(pdf.splitTextToSize(T('docNote2'), 80), 196, 272, { align: 'right' });
+  bar(288);
   return pdf.output('blob');
 }
 async function docFile(d) {
