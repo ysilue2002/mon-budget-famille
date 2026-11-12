@@ -184,10 +184,29 @@ function stock() {
 }
 
 /* ---------------- Clients / Fournisseurs ---------------- */
+function supplierSummary() {
+  const names = [...new Set([...db.suppliers.map((s) => s.name), ...db.debts.map((d) => d.supplier)].filter(Boolean))];
+  return names.map((name) => {
+    const s = db.suppliers.find((x) => x.name === name) || { name, phone: '', address: '' };
+    const list = db.debts.filter((d) => d.supplier === name);
+    const total = list.reduce((a, d) => a + (Number(d.amount) || 0), 0);
+    const paid = list.reduce((a, d) => a + (Number(d.paid) || 0), 0);
+    const rest = list.reduce((a, d) => a + debtOf(d), 0);
+    const pend = list.filter((d) => d.delivered === false);
+    const last = list.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    return { s, list, total, paid, rest, pend, last };
+  });
+}
 function clients() {
   const due = db.sales.filter((s) => creditOf(s) > 0);
   const names = [...new Set(due.map((s) => s.party || '—'))];
-  const sup = db.debts.filter((d) => debtOf(d) > 0);
+  const sums = supplierSummary();
+  const owedTo = sums.filter((x) => x.rest > 0).sort((a, b) => b.rest - a.rest);
+  const toReceive = sums.filter((x) => x.pend.length).sort((a, b) => (a.last && b.last ? (a.last.date < b.last.date ? -1 : 1) : 0));
+  const uptodate = sums.filter((x) => x.list.length && !x.rest && !x.pend.length);
+  const supTotal = sums.reduce((a, x) => a + x.total, 0);
+  const supRest = sums.reduce((a, x) => a + x.rest, 0);
+  const exps = pendingExpenses();
   return `<div class="kpis">
       <div class="kpi"><span>${T('cashOut')}</span><b>${money(totalDue())}</b></div>
       <div class="kpi"><span>${T('debts')}</span><b>${money(totalDebt())}</b></div>
@@ -224,6 +243,30 @@ function clients() {
         <button class="btn" data-act="addParty">${T('saveClient')}</button>
         <p class="hint">${T('phoneHint')}</p>
       </div>` : `
+      <div class="kpis">
+        <div class="kpi"><span>${T('totalPurchases')}</span><b>${money(supTotal)}</b></div>
+        <div class="kpi"><span>${T('debts')}</span><b>${money(supRest)}</b></div>
+        <div class="kpi"><span>${T('notDelivered')}</span><b>${pendingRows().length + exps.length}</b></div>
+      </div>
+      <div class="card"><h3>${T('debts')}</h3>
+        ${owedTo.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${T('totalPurchases')} ${money(x.total)} · ${T('paid')} ${money(x.paid)}${x.pend.length ? ` · ${x.pend.length} ${T('notDelivered').toLowerCase()}` : ''}</div></div><div class="right">
+          <span class="tag bad">${T('remains')} ${money(x.rest)}</span><br>
+          ${x.s.id ? `<button class="btn small" data-act="supDetail" data-id="${x.s.id}">${T('paySupplier')}</button>` : ''}
+          ${x.s.phone ? `<button class="btn small whats" data-act="waSup" data-name="${esc(x.s.name)}">${T('whatsapp')}</button>` : ''}
+        </div></div>`).join('') || `<p class="empty">${T('noSupDebt')}</p>`}
+      </div>
+      <div class="card"><h3>${T('goodsToReceive')}</h3>
+        ${toReceive.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${x.pend.map((d) => `${dayFR(d.date)} · ${money(d.amount)}`).join('<br>')}</div></div><div class="right">
+          ${x.pend.map((d) => `<button class="btn small out" data-act="deliverDebt" data-id="${d.id}">${T('markDelivered')}</button>`).join(' ')}
+          ${x.s.phone ? `<br><button class="btn small whats" data-act="waPending" data-name="${esc(x.s.name)}">${T('remind')}</button>` : ''}
+        </div></div>`).join('')}
+        ${exps.map((e) => `<div class="row"><div><div class="t">${esc(e.label)}</div><div class="s">${dayFR(e.date)} · ${money(e.amount)}${e.note ? ' · ' + esc(e.note) : ''}</div></div><div class="right">${daysSince(e.date) >= 7 ? `<span class="tag bad">${daysSince(e.date)} ${T('days')}</span> ` : ''}<button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
+        ${toReceive.length || exps.length ? '' : `<p class="empty">${T('noGoodsToReceive')}</p>`}
+        <button class="btn out" data-act="printPending">${T('printList')}</button>
+      </div>
+      <div class="card"><h3>${T('suppliersUpToDate')}</h3>
+        ${uptodate.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${x.last ? `${dayFR(x.last.date)} · ${money(x.total)}` : ''}</div></div><div class="right"><span class="tag ok">${T('paid')}</span> ${x.s.id ? `<button class="btn small" data-act="supDetail" data-id="${x.s.id}">${T('detail')}</button>` : ''}</div></div>`).join('') || `<p class="empty">${T('noUpToDate')}</p>`}
+      </div>
       <div class="card"><h3>${T('supplierList')}</h3>
         ${db.suppliers.map((s) => `<div class="row"><div><div class="t">${esc(s.name)}</div><div class="s">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
           ${s.phone ? `<button class="btn small whats" data-act="waSup" data-name="${esc(s.name)}">${T('whatsapp')}</button>` : ''}
@@ -231,24 +274,15 @@ function clients() {
           <button class="btn small out" data-act="editSupplier" data-id="${s.id}">${T('edit')}</button>
           <button class="btn small out" data-act="delSupplier" data-id="${s.id}">${T('delete')}</button>
         </div></div>`).join('') || `<p class="empty">${T('noSuppliers')}</p>`}
+        <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
       </div>
-      <button class="btn out" data-act="pending">${T('pendingPurchases')}</button>
-      <div class="card"><h3>${T('supplierCard')}</h3>
+      <details class="card"><summary><b>＋ ${T('supplierCard')}</b></summary>
         <label>${T('name')}</label><input id="sName" placeholder="Grossiste Adjamé">
         <label>${T('phone')}</label><input id="sPhone" inputmode="tel">
         <label>${T('address')}</label><input id="sAddress">
         <button class="btn" data-act="addSupplier">${T('saveSupplier')}</button>
-      </div>
-      <div class="card"><h3>${T('debts')}</h3>
-        ${sup.map((d) => `<div class="row"><div><div class="t">${esc(d.supplier)}</div><div class="s">${dayFR(d.date)} · ${T('total')} ${money(d.amount)} · ${T('paid')} ${money(d.paid || 0)}</div></div><div class="right">
-          <span class="tag">${payMode(d)}</span>
-          ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : ''}
-          ${debtOf(d) ? `<span class="tag bad">${T('remains')} ${money(debtOf(d))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
-          ${debtOf(d) ? `<button class="btn small" data-act="payDebt" data-id="${d.id}">${T('paySupplier')}</button>` : ''}
-          ${d.delivered === false ? `<button class="btn small out" data-act="deliverDebt" data-id="${d.id}">${T('markDelivered')}</button>` : ''}
-        </div></div>`).join('') || `<p class="empty">${T('noDebt')}</p>`}
-      </div>
-      <div class="card"><h3>${T('newPurchase')}</h3>
+      </details>
+      <details class="card"><summary><b>＋ ${T('newPurchase')}</b></summary>
         <label>${T('supplier')}</label><input id="dSup" list="supNames" placeholder="Grossiste Adjamé"><datalist id="supNames">${db.suppliers.map((s) => `<option value="${esc(s.name)}"></option>`).join('')}</datalist>
         <label>${T('amount')}</label><input id="dAmt" inputmode="numeric" placeholder="0">
         <label>${T('alreadyPaid')}</label><input id="dPaid" inputmode="numeric" placeholder="0">
@@ -256,7 +290,7 @@ function clients() {
         <label>${T('qty')}</label><input id="dQty" inputmode="numeric" value="1">
         <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="dRecv" checked style="width:auto"><span>${T('received')}</span></label>
         <button class="btn" data-act="addPurchase">${T('saveDebt')}</button>
-      </div>`}`;
+      </details>`}`;
 }
 
 /* ---------------- Documents ---------------- */
@@ -587,11 +621,12 @@ function supplierDetail(id) {
       <div class="kpi"><span>${T('paid')}</span><b>${money(paid)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
     </div>
-    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right"><span class="tag">${payMode(d)}</span> ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
+    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right"><span class="tag">${payMode(d)}</span> ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}${debtOf(d) ? ` <button class="btn small" data-pay="${d.id}">${T('paySupplier')}</button>` : ''}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
     <button class="btn" id="sdPrint">${T('printSheet')}</button>
     <button class="btn out" id="sdNo">${T('close')}</button>`);
   m.querySelector('#sdNo').onclick = () => m.remove();
   m.querySelector('#sdPrint').onclick = () => { m.remove(); printSupplier(id); };
+  m.querySelectorAll('[data-pay]').forEach((b) => { b.onclick = () => { m.remove(); payDebtModal(b.dataset.pay); }; });
 }
 function printSupplier(id) {
   const s = db.suppliers.find((x) => x.id === id);
