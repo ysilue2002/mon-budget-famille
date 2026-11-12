@@ -1347,6 +1347,14 @@ function settingsModal() {
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
+    <h3 style="margin-top:18px">${T('legalInfo')}</h3>
+    <p class="hint">${T('legalInfoHint')}</p>
+    <label>${T('legalName')}</label><input id="lgName" value="${esc((db.settings.legal || {}).name || '')}">
+    <label>${T('legalAddress')}</label><input id="lgAddress" value="${esc((db.settings.legal || {}).address || '')}">
+    <label>${T('legalRccm')}</label><input id="lgRccm" value="${esc((db.settings.legal || {}).rccm || '')}">
+    <label>${T('legalTax')}</label><input id="lgTax" value="${esc((db.settings.legal || {}).taxId || '')}">
+    <label>${T('legalContact')}</label><input id="lgContact" value="${esc((db.settings.legal || {}).contact || '')}">
+    <label>${T('legalPublisher')}</label><input id="lgPublisher" value="${esc((db.settings.legal || {}).publisher || '')}">
     ${accountHTML()}
     ${me ? `<h3 style="margin-top:16px">${T('changePassword')}</h3>
       <label>${T('currentPassword')}</label><input id="pwCur" type="password" autocomplete="current-password">
@@ -1360,11 +1368,15 @@ function settingsModal() {
     <button class="btn out" id="setExport">${T('exportData')}</button>
     <button class="btn out" id="setImport">${T('importData')}</button>
     <p class="hint">${T('backupHint')}</p>
+    <button class="btn out" id="setLegal">${T('legalMentions')}</button>
+    <button class="btn out" id="setTerms">${T('legalTerms')}</button>
     <button class="btn out" id="setNo">${T('close')}</button>`);
   d.querySelector('#setNo').onclick = () => d.remove();
   wireAccount(d);
   d.querySelector('#setShare').onclick = () => { d.remove(); shareModal(); };
   d.querySelector('#setInstall').onclick = () => { d.remove(); installModal(); };
+  d.querySelector('#setLegal').onclick = () => { d.remove(); legalModal('legal'); };
+  d.querySelector('#setTerms').onclick = () => { d.remove(); legalModal('terms'); };
   const pwOk = d.querySelector('#pwOk');
   if (pwOk) pwOk.onclick = async () => {
     const msg = d.querySelector('#pwMsg');
@@ -1405,8 +1417,94 @@ function settingsModal() {
     db.settings.vat = Math.max(0, Math.round(+d.querySelector('#setVat').value || 0));
     db.settings.remindDays = Math.min(365, Math.max(1, Math.round(+d.querySelector('#setRemindDays').value || 30)));
     db.settings.logo = logoDraft;
+    db.settings.legal = {
+      name: d.querySelector('#lgName').value.trim(),
+      address: d.querySelector('#lgAddress').value.trim(),
+      rccm: d.querySelector('#lgRccm').value.trim(),
+      taxId: d.querySelector('#lgTax').value.trim(),
+      contact: d.querySelector('#lgContact').value.trim(),
+      publisher: d.querySelector('#lgPublisher').value.trim(),
+    };
     saveDB(); d.remove(); render();
   };
+}
+function legalBody(kind) {
+  const st = db.settings || {};
+  const lg = st.legal || {};
+  const country = countryName(st.country || 'CI');
+  const place = lg.address || [st.address, st.district, st.city, country].filter(Boolean).join(' · ');
+  const name = lg.name || db.shop || T('app');
+  const form = lg.form || st.companyForm || '';
+  const contact = lg.contact || [me && me.phone, me && me.email].filter(Boolean).join(' · ');
+  const ph = (v) => (v ? esc(v) : `<span class="todo">${T('toComplete')}</span>`);
+  const note = lang() !== 'fr' ? `<p class="hint">${T('legalFrenchOnly')}</p>` : '';
+  const date = dayFR(todayISO());
+  const mentions = `<h2>${T('legalMentions')}</h2>${note}
+    <p class="hint">${T('legalUpdated')} ${date}</p>
+    <h3>Éditeur de l'application</h3>
+    <p>${ph(name)}${form ? ', ' + esc(form) : ''} — ${ph(place)}.</p>
+    <p>Immatriculation : ${ph(lg.rccm)} · Identifiant fiscal : ${ph(lg.taxId)}</p>
+    <p>Contact : ${ph(contact)} · Responsable de la publication : ${ph(lg.publisher)}</p>
+    <h3>Application</h3>
+    <p>Assistant Commercial est une application de gestion pour les commerçants, boutiquiers, grossistes et revendeurs : ventes, dépenses, stock, suivi des clients et des fournisseurs, devis, factures, bilans et documents imprimables. Elle fonctionne dans un navigateur, peut être installée sur un téléphone et se synchronise entre appareils lorsqu'un compte est utilisé.</p>
+    <h3>Hébergement</h3>
+    <p>Application et base de données hébergées par Freebuff Sites, sur l'infrastructure de Cloudflare, Inc., 101 Townsend Street, San Francisco, CA 94107, États-Unis. Base de données : Cloudflare D1. L'envoi d'e-mails, lorsqu'il est activé, utilise le service Resend.</p>
+    <h3>Propriété intellectuelle</h3>
+    <p>L'application, son nom, ses textes et son icône sont la propriété de ${ph(name)}. Toute reproduction ou revente sans autorisation écrite est interdite. Les données saisies par un utilisateur lui appartiennent.</p>
+    <h3>Responsabilité</h3>
+    <p>L'application est un outil de gestion. Elle ne remplace ni un comptable, ni un conseil fiscal ou juridique. ${ph(name)} ne peut pas être tenue responsable d'une décision prise à partir des chiffres affichés, ni d'une perte de données due à un appareil perdu, cassé, réinitialisé, ou à la suppression du compte sans sauvegarde préalable.</p>
+    <h3>Disponibilité</h3>
+    <p>L'application est fournie en l'état, sans garantie d'absence d'interruption ou d'erreur. Ces mentions peuvent être modifiées ; la date de mise à jour figure en haut de la page.</p>
+    <h3>Droit applicable</h3>
+    <p>Droit ${esc(lg.country || country)}. En cas de litige, et à défaut d'accord amiable, les tribunaux de ${ph(lg.city || st.city)} sont compétents.</p>`;
+  const privacy = `<h2>${T('legalPrivacy')}</h2>
+    <h3>Quelles données sont enregistrées</h3>
+    <ul>
+      <li><b>Compte :</b> adresse e-mail et/ou numéro de téléphone, mot de passe (stocké uniquement sous forme hachée, jamais lisible), langue choisie.</li>
+      <li><b>Activité :</b> nom de la boutique, coordonnées professionnelles, ventes, dépenses, articles et stock, clients et fournisseurs (nom, téléphone, adresse), devis et factures, paiements et dettes, bilans.</li>
+      <li><b>Technique :</b> jeton de session dans un cookie, historique de synchronisation conservé 90 jours.</li>
+    </ul>
+    <h3>Pourquoi ces données</h3>
+    <p>Uniquement pour faire fonctionner l'application : afficher vos chiffres, synchroniser vos appareils, éditer et envoyer vos documents, sécuriser votre compte et permettre la récupération du mot de passe. Aucune donnée d'activité n'est revendue, ni utilisée pour de la publicité.</p>
+    <h3>Où elles sont conservées</h3>
+    <p>D'abord sur votre appareil, dans le stockage du navigateur, pour fonctionner sans réseau. Ensuite, lorsque vous êtes connecté, sur les serveurs de l'hébergement (Cloudflare D1), pour retrouver vos données sur vos autres appareils.</p>
+    <h3>Qui peut les voir</h3>
+    <p>Vous, et les personnes qui utilisent votre compte. L'éditeur n'accède pas au contenu de vos ventes, sauf si vous le demandez pour un dépannage. Les prestataires techniques (hébergement, base de données, envoi d'e-mails) traitent les données pour le compte de l'éditeur et ne les utilisent pas à d'autres fins.</p>
+    <h3>Combien de temps</h3>
+    <p>Tant que le compte existe. L'historique technique de synchronisation est conservé 90 jours puis purgé automatiquement. La suppression du compte efface les données du serveur ; elle est définitive.</p>
+    <h3>Cookies et mesure d'audience</h3>
+    <p>Un seul cookie est nécessaire : le cookie de session, qui garde votre connexion ouverte. Il est protégé et n'est pas lisible par un script de la page. Aucune publicité n'est affichée et aucune mesure d'audience n'est utilisée actuellement. Si la publicité est activée plus tard, un bandeau de consentement sera proposé et cette politique sera mise à jour.</p>
+    <h3>Vos droits</h3>
+    <p>Vous pouvez accéder à vos données, les exporter depuis Réglages → Sauvegarde, les corriger dans l'application et demander la suppression du compte et des données. Pour toute demande : ${ph(contact)}.</p>
+    <h3>Sécurité</h3>
+    <p>Connexion chiffrée (HTTPS), mots de passe hachés, accès aux données limité au compte connecté, limitation des tentatives de connexion et des demandes de réinitialisation. Aucune clé secrète n'est placée dans le navigateur.</p>`;
+  const terms = `<h2>${T('legalTerms')}</h2>${note}
+    <p class="hint">${T('legalUpdated')} ${date}</p>
+    <h3>1. Objet</h3>
+    <p>Ces conditions encadrent l'utilisation d'Assistant Commercial, application de gestion destinée aux commerçants : ventes, dépenses, stock, clients et fournisseurs, devis, factures, bilans et documents. En créant un compte ou en utilisant l'application, vous acceptez ces conditions.</p>
+    <h3>2. Compte</h3>
+    <p>Le compte est personnel. Vous vous engagez à donner des informations exactes, à garder votre mot de passe confidentiel et à nous signaler tout usage non autorisé. Un compte est nécessaire pour sauvegarder les données sur le serveur et les retrouver sur un autre appareil.</p>
+    <h3>3. Usage autorisé</h3>
+    <p>L'application est fournie pour un usage professionnel licite. Il est interdit de tenter d'accéder au compte d'une autre personne, de perturber le service, d'extraire ou de revendre l'application, ou d'y enregistrer des contenus illicites.</p>
+    <h3>4. Vos données</h3>
+    <p>Les données que vous saisissez vous appartiennent. Vous êtes responsable de leur exactitude et de leur légalité, notamment des mentions portées sur vos devis et factures et du taux de TVA appliqué. Exportez régulièrement vos données depuis Réglages → Sauvegarde.</p>
+    <h3>5. Disponibilité</h3>
+    <p>L'application fonctionne hors connexion et se synchronise lorsque le réseau revient. Le service est fourni au mieux, sans garantie d'absence d'interruption, de maintenance ou d'erreur. Certaines fonctions dépendent du téléphone, du navigateur ou de la connexion.</p>
+    <h3>6. Propriété</h3>
+    <p>L'application, son nom et ses éléments restent la propriété de ${ph(name)}. Vous bénéficiez d'un droit d'usage personnel et professionnel, sans droit de copie, de revente ni de modification.</p>
+    <h3>7. Responsabilité</h3>
+    <p>L'application est un outil de gestion et ne remplace ni un comptable, ni un conseil fiscal ou juridique. ${ph(name)} ne peut être tenue responsable des décisions prises à partir des chiffres affichés, ni des pertes de données dues à un appareil perdu, cassé ou réinitialisé, ou à la suppression du compte sans sauvegarde.</p>
+    <h3>8. Fin d'utilisation</h3>
+    <p>Vous pouvez cesser d'utiliser l'application et demander la suppression de votre compte à tout moment. La suppression est définitive. Les journaux techniques de synchronisation sont conservés 90 jours puis purgés.</p>
+    <h3>9. Modification des conditions</h3>
+    <p>Ces conditions peuvent évoluer. La version en vigueur est celle publiée dans l'application, avec sa date de mise à jour.</p>
+    <h3>10. Droit applicable</h3>
+    <p>Droit ${esc(lg.country || country)}. En cas de litige, et à défaut d'accord amiable, les tribunaux de ${ph(lg.city || st.city)} sont compétents.</p>`;
+  return kind === 'terms' ? terms : mentions + privacy;
+}
+function legalModal(kind) {
+  const d = modal(`<div class="legal">${legalBody(kind)}<button class="btn out" id="lgNo">${T('close')}</button></div>`);
+  d.querySelector('#lgNo').onclick = () => d.remove();
 }
 function exportDB() {
   const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });

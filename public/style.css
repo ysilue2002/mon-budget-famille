@@ -136,3 +136,11 @@ html[dir="rtl"] .adsBottom button{inset-inline-end:auto;inset-inline-start:8px}
   #printArea .docNotes>div{flex:1}
   #printArea .docNotes>div:last-child{text-align:end}
 }
+
+/* Pages légales */
+.legal{max-height:72vh;overflow:auto;font-size:14px}
+.legal h2{font-size:19px;margin:4px 0 6px;color:var(--vert)}
+.legal h3{font-size:14px;margin:16px 0 2px;color:var(--vert)}
+.legal p,.legal li{margin:6px 0;line-height:1.55}
+.legal ul{padding-inline-start:20px}
+.legal .todo{background:#fff3cd;color:#7a5a00;border-radius:6px;padding:0 5px;font-size:12px}
