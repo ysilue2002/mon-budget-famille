@@ -615,7 +615,7 @@ function docHTML(d) {
     <div class="small">${T('client')} : ${esc(d.party || '—')}</div>
     ${d.clientPhone ? `<div class="small">${T('phone')} : ${esc(d.clientPhone)}</div>` : ''}
     ${d.clientAddress ? `<div class="small">${T('address')} : ${esc(d.clientAddress)}</div>` : ''}
-    <table><thead><tr><th>${T('line')}</th><th>${T('qty')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
+    <table><thead><tr><th>${T('line')}</th><th>${T('quantity')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
     <div class="tot"><span>${T('ht')}</span><span>${money(d.total)}</span></div>
     ${d.vat ? `<div class="tot"><span>${T('vatShort')} ${d.vat} %</span><span>${money(vatOf(d))}</span></div>` : ''}
     <div class="tot"><span>${T('ttc')}</span><span>${money(amountOf(d))}</span></div>
@@ -670,7 +670,7 @@ async function docPdf(d) {
   y += 3;
   pdf.setFontSize(9);
   pdf.text(T('line'), 14, y);
-  pdf.text(T('qty'), 118, y);
+  pdf.text(T('quantity'), 118, y);
   pdf.text(T('sellPrice'), 138, y);
   pdf.text(T('total'), 196, y, { align: 'right' });
   y += 3;
