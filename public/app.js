@@ -181,6 +181,7 @@ function clients() {
       <button class="${side === 'clients' ? 'on' : ''}" data-act="side" data-s="clients">${T('clients')}</button>
       <button class="${side === 'suppliers' ? 'on' : ''}" data-act="side" data-s="suppliers">${T('suppliers')}</button>
     </div>
+    <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
     ${side === 'clients' ? `
       <div class="card"><h3>${T('owed')}</h3>
         ${names.map((n) => {
@@ -206,6 +207,7 @@ function clients() {
       <div class="card"><h3>${T('supplierList')}</h3>
         ${db.suppliers.map((s) => `<div class="row"><div><div class="t">${esc(s.name)}</div><div class="s">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
           ${s.phone ? `<button class="btn small whats" data-act="waSup" data-name="${esc(s.name)}">${T('whatsapp')}</button>` : ''}
+          <button class="btn small" data-act="supDetail" data-id="${s.id}">${T('detail')}</button>
           <button class="btn small out" data-act="editSupplier" data-id="${s.id}">${T('edit')}</button>
           <button class="btn small out" data-act="delSupplier" data-id="${s.id}">${T('delete')}</button>
         </div></div>`).join('') || `<p class="empty">${T('noSuppliers')}</p>`}
@@ -440,6 +442,35 @@ function supplierModal(id) {
     if (name !== old) db.debts.forEach((d) => { if (d.supplier === old) d.supplier = name; });
     saveDB(); m.remove(); render();
   };
+}
+function supplierDetail(id) {
+  const s = db.suppliers.find((x) => x.id === id);
+  if (!s) return;
+  const list = db.debts.filter((d) => d.supplier === s.name).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const total = list.reduce((a, d) => a + (Number(d.amount) || 0), 0);
+  const paid = list.reduce((a, d) => a + (Number(d.paid) || 0), 0);
+  const rest = list.reduce((a, d) => a + debtOf(d), 0);
+  const m = modal(`<h2>${esc(s.name)}</h2>
+    <p class="hint">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</p>
+    <div class="kpis">
+      <div class="kpi"><span>${T('totalPurchases')}</span><b>${money(total)}</b></div>
+      <div class="kpi"><span>${T('paid')}</span><b>${money(paid)}</b></div>
+      <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
+    </div>
+    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right">${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
+    <button class="btn out" id="sdNo">${T('close')}</button>`);
+  m.querySelector('#sdNo').onclick = () => m.remove();
+}
+function exportContacts() {
+  const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const rows = [[T('type'), T('name'), T('phone'), T('address'), T('due')]];
+  db.parties.forEach((p) => rows.push([T('clients'), p.name, p.phone || '', p.address || '', db.sales.filter((s) => (s.party || '—') === p.name).reduce((a, s) => a + creditOf(s), 0)]));
+  db.suppliers.forEach((s) => rows.push([T('suppliers'), s.name, s.phone || '', s.address || '', db.debts.filter((d) => d.supplier === s.name).reduce((a, d) => a + debtOf(d), 0)]));
+  const csv = '\ufeff' + rows.map((r) => r.map(cell).join(';')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = `contacts-${todayISO()}.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 6000);
 }
 function exportCsv() {
   const list = histSales();
@@ -842,6 +873,8 @@ document.addEventListener('click', async (e) => {
     saveDB(); render();
   }
   if (act === 'editSupplier') supplierModal(b.dataset.id);
+  if (act === 'supDetail') supplierDetail(b.dataset.id);
+  if (act === 'exportContacts') exportContacts();
   if (act === 'delSupplier') {
     const s = db.suppliers.find((x) => x.id === b.dataset.id);
     if (!s || !confirm(T('confirmDeleteSupplier'))) return;
