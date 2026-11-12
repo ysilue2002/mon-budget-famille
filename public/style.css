@@ -144,3 +144,15 @@ html[dir="rtl"] .adsBottom button{inset-inline-end:auto;inset-inline-start:8px}
 .legal p,.legal li{margin:6px 0;line-height:1.55}
 .legal ul{padding-inline-start:20px}
 .legal .todo{background:#fff3cd;color:#7a5a00;border-radius:6px;padding:0 5px;font-size:12px}
+
+/* Pages légales : lecture et impression */
+.legal{direction:ltr;text-align:left}
+html[dir="rtl"] .legal .hint[dir="rtl"]{direction:rtl;text-align:right}
+@media print{
+  #printArea.legalP{font-size:10.5pt;line-height:1.5}
+  #printArea.legalP h2{font-size:15pt;margin:6mm 0 2mm;color:#000}
+  #printArea.legalP h3{font-size:11pt;margin:4mm 0 1mm}
+  #printArea.legalP p,#printArea.legalP li{margin:1.5mm 0}
+  #printArea.legalP ul{padding-inline-start:5mm}
+  #printArea.legalP .todo{display:none}
+}

@@ -1437,9 +1437,9 @@ function legalBody(kind) {
   const form = lg.form || st.companyForm || '';
   const contact = lg.contact || [me && me.phone, me && me.email].filter(Boolean).join(' · ');
   const ph = (v) => (v ? esc(v) : `<span class="todo">${T('toComplete')}</span>`);
-  const note = lang() !== 'fr' ? `<p class="hint">${T('legalFrenchOnly')}</p>` : '';
+  const note = lang() !== 'fr' ? `<p class="hint" dir="${lang() === 'ar' ? 'rtl' : 'ltr'}">${T('legalFrenchOnly')}</p>` : '';
   const date = dayFR(todayISO());
-  const mentions = `<h2>${T('legalMentions')}</h2>${note}
+  const mentions = `<h2>Mentions légales</h2>${note}
     <p class="hint">${T('legalUpdated')} ${date}</p>
     <h3>Éditeur de l'application</h3>
     <p>${ph(name)}${form ? ', ' + esc(form) : ''} — ${ph(place)}.</p>
@@ -1457,7 +1457,7 @@ function legalBody(kind) {
     <p>L'application est fournie en l'état, sans garantie d'absence d'interruption ou d'erreur. Ces mentions peuvent être modifiées ; la date de mise à jour figure en haut de la page.</p>
     <h3>Droit applicable</h3>
     <p>Droit ${esc(lg.country || country)}. En cas de litige, et à défaut d'accord amiable, les tribunaux de ${ph(lg.city || st.city)} sont compétents.</p>`;
-  const privacy = `<h2>${T('legalPrivacy')}</h2>
+  const privacy = `<h2>Politique de confidentialité</h2>
     <h3>Quelles données sont enregistrées</h3>
     <ul>
       <li><b>Compte :</b> adresse e-mail et/ou numéro de téléphone, mot de passe (stocké uniquement sous forme hachée, jamais lisible), langue choisie.</li>
@@ -1478,7 +1478,7 @@ function legalBody(kind) {
     <p>Vous pouvez accéder à vos données, les exporter depuis Réglages → Sauvegarde, les corriger dans l'application et demander la suppression du compte et des données. Pour toute demande : ${ph(contact)}.</p>
     <h3>Sécurité</h3>
     <p>Connexion chiffrée (HTTPS), mots de passe hachés, accès aux données limité au compte connecté, limitation des tentatives de connexion et des demandes de réinitialisation. Aucune clé secrète n'est placée dans le navigateur.</p>`;
-  const terms = `<h2>${T('legalTerms')}</h2>${note}
+  const terms = `<h2>Conditions d'utilisation</h2>${note}
     <p class="hint">${T('legalUpdated')} ${date}</p>
     <h3>1. Objet</h3>
     <p>Ces conditions encadrent l'utilisation d'Assistant Commercial, application de gestion destinée aux commerçants : ventes, dépenses, stock, clients et fournisseurs, devis, factures, bilans et documents. En créant un compte ou en utilisant l'application, vous acceptez ces conditions.</p>
@@ -1502,9 +1502,18 @@ function legalBody(kind) {
     <p>Droit ${esc(lg.country || country)}. En cas de litige, et à défaut d'accord amiable, les tribunaux de ${ph(lg.city || st.city)} sont compétents.</p>`;
   return kind === 'terms' ? terms : mentions + privacy;
 }
+function printLegal(kind) {
+  const area = document.getElementById('printArea');
+  area.className = 'a4 legalP';
+  area.innerHTML = `<div class="small">${esc(db.shop || T('app'))} · ${dayFR(todayISO())}</div>${legalBody(kind)}`;
+  window.print();
+}
 function legalModal(kind) {
-  const d = modal(`<div class="legal">${legalBody(kind)}<button class="btn out" id="lgNo">${T('close')}</button></div>`);
+  const d = modal(`<div class="legal" dir="auto">${legalBody(kind)}
+    <button class="btn" id="lgPdf">PDF</button>
+    <button class="btn out" id="lgNo">${T('close')}</button></div>`);
   d.querySelector('#lgNo').onclick = () => d.remove();
+  d.querySelector('#lgPdf').onclick = () => { d.remove(); printLegal(kind); };
 }
 function exportDB() {
   const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
