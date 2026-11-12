@@ -84,6 +84,19 @@ const totalDue = () => db.sales.reduce((a, s) => a + creditOf(s), 0);
 const debtOf = (d) => Math.max(0, d.amount - d.paid);
 const totalDebt = () => db.debts.reduce((a, d) => a + debtOf(d), 0);
 const qtyOf = (p) => (db.moves || []).filter((m) => m.pid === p.id).reduce((a, m) => a + (Number(m.delta) || 0), 0);
+const daysSince = (iso) => Math.max(0, Math.floor((Date.now() - new Date((iso || todayISO()) + 'T00:00:00').getTime()) / 86400000));
+function lateByParty() {
+  const m = new Map();
+  db.sales.filter((s) => creditOf(s) > 0 && daysSince(s.date) >= 30).forEach((s) => {
+    const k = s.party || '—';
+    const cur = m.get(k) || { name: k, sum: 0, days: 0, since: s.date };
+    cur.sum += creditOf(s);
+    cur.days = Math.max(cur.days, daysSince(s.date));
+    if (s.date < cur.since) cur.since = s.date;
+    m.set(k, cur);
+  });
+  return [...m.values()].sort((a, b) => b.days - a.days);
+}
 const stockValue = () => db.products.reduce((a, p) => a + qtyOf(p) * p.buy, 0);
 const num = (kind) => {
   const y = new Date().getFullYear();
@@ -191,6 +204,9 @@ function clients() {
             <button class="btn small" data-act="pay" data-name="${esc(n)}">${T('paidIt')}</button>
             <button class="btn small whats" data-act="wa" data-name="${esc(n)}">${T('whatsapp')}</button></div></div>`;
         }).join('') || `<p class="empty">${T('noClients')}</p>`}
+      </div>
+      <div class="card"><h3>${T('lateClients')}</h3>
+        ${lateByParty().map((x) => `<div class="row"><div><div class="t">${esc(x.name)}</div><div class="s">${money(x.sum)} · ${T('since')} ${dayFR(x.since)}</div></div><div class="right"><span class="tag bad">${x.days} ${T('days')}</span><br><button class="btn small whats" data-act="wa" data-name="${esc(x.name)}">${T('remind')}</button></div></div>`).join('') || `<p class="empty">${T('noLate')}</p>`}
       </div>
       <div class="card"><h3>${T('clientList')}</h3>
         ${db.parties.map((p) => `<div class="row"><div><div class="t">${esc(p.name)}</div><div class="s">${[p.phone, p.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
@@ -380,6 +396,8 @@ function payDebtModal(id) {
   m.querySelector('#pdOk').onclick = () => {
     const v = Math.round(+m.querySelector('#pdAmt').value || 0);
     if (v <= 0) { m.querySelector('#pdErr').textContent = T('errorAmount'); return; }
+    d.pays = Array.isArray(d.pays) ? d.pays : [];
+    d.pays.push({ id: uid(), amount: v, u: Date.now() });
     d.paid = Math.min(d.amount, (Number(d.paid) || 0) + v); d.u = Date.now();
     saveDB(); m.remove(); render();
   };
@@ -527,8 +545,39 @@ function supplierDetail(id) {
       <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
     </div>
     <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right">${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
+    <button class="btn" id="sdPrint">${T('printSheet')}</button>
     <button class="btn out" id="sdNo">${T('close')}</button>`);
   m.querySelector('#sdNo').onclick = () => m.remove();
+  m.querySelector('#sdPrint').onclick = () => { m.remove(); printSupplier(id); };
+}
+function printSupplier(id) {
+  const s = db.suppliers.find((x) => x.id === id);
+  if (!s) return;
+  const list = db.debts.filter((d) => d.supplier === s.name).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const total = list.reduce((a, d) => a + (Number(d.amount) || 0), 0);
+  const paid = list.reduce((a, d) => a + (Number(d.paid) || 0), 0);
+  const rest = list.reduce((a, d) => a + debtOf(d), 0);
+  const payments = [];
+  list.forEach((d) => { if (Array.isArray(d.pays)) d.pays.forEach((p) => payments.push({ date: new Date(p.u || Date.now()).toISOString().slice(0, 10), amount: p.amount, ref: d.date })); });
+  const st = db.settings || {};
+  const place = [st.address, st.district, st.city, countryName(st.country || 'CI')].filter(Boolean).join(' · ');
+  const area = document.getElementById('printArea');
+  area.className = 'a4';
+  area.innerHTML = `${st.logo ? `<img class="docLogo" src="${esc(st.logo)}" alt="">` : ''}<h2>${esc(db.shop || T('app'))}</h2>
+    ${place ? `<div class="small">${esc(place)}</div>` : ''}
+    <hr>
+    <div class="small">${T('supplierCard')} · ${dayFR(todayISO())}</div>
+    <h2 style="margin:3mm 0 1mm">${esc(s.name)}</h2>
+    <div class="small">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</div>
+    <div class="tot"><span>${T('totalPurchases')}</span><span>${money(total)}</span></div>
+    <div class="tot"><span>${T('paid')}</span><span>${money(paid)}</span></div>
+    <div class="tot"><span>${T('remains')}</span><span>${money(rest)}</span></div>
+    <table><thead><tr><th>${T('dueDate')}</th><th>${T('total')}</th><th>${T('paid')}</th><th>${T('remains')}</th><th>${T('received')}</th></tr></thead><tbody>
+      ${list.map((d) => `<tr><td>${dayFR(d.date)}</td><td>${money(d.amount)}</td><td>${money(d.paid || 0)}</td><td>${money(debtOf(d))}</td><td>${d.delivered === false ? T('notDelivered') : T('received')}</td></tr>`).join('') || `<tr><td colspan="5">${T('noPurchases')}</td></tr>`}
+    </tbody></table>
+    ${payments.length ? `<h3 style="margin:4mm 0 1mm">${T('payments')}</h3><table><thead><tr><th>${T('dueDate')}</th><th>${T('amount')}</th><th>${T('line')}</th></tr></thead><tbody>${payments.map((p) => `<tr><td>${dayFR(p.date)}</td><td>${money(p.amount)}</td><td>${T('newPurchase')} ${dayFR(p.ref)}</td></tr>`).join('')}</tbody></table>` : ''}
+    <p class="small">${T('thanks')}</p>`;
+  window.print();
 }
 function exportContacts() {
   const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
