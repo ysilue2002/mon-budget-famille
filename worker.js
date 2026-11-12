@@ -137,6 +137,9 @@ async function api(request, env, url) {
   }
 
   if (path === '/api/signup' && request.method === 'POST') {
+    const ip = request.headers.get('cf-connecting-ip') || 'local';
+    if (await blocked(env, 'signup:' + ip, 10)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'signup:' + ip, 10, 60 * 60000);
     const body = await readBody(request);
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
@@ -191,6 +194,9 @@ async function api(request, env, url) {
   }
 
   if (path === '/api/forgot' && request.method === 'POST') {
+    const ip = request.headers.get('cf-connecting-ip') || 'local';
+    if (await blocked(env, 'forgot:' + ip, 30)) return json({ ok: true, mail: false });
+    await tooMany(env, 'forgot:' + ip, 30, 60 * 60000);
     const body = await readBody(request);
     const email = String(body.email || '').trim().toLowerCase();
     if (!validEmail(email)) return json({ ok: true, mail: false });
