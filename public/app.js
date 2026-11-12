@@ -191,6 +191,11 @@ function clients() {
             <button class="btn small whats" data-act="wa" data-name="${esc(n)}">${T('whatsapp')}</button></div></div>`;
         }).join('') || `<p class="empty">${T('noClients')}</p>`}
       </div>
+      <div class="card"><h3>${T('clientList')}</h3>
+        ${db.parties.map((p) => `<div class="row"><div><div class="t">${esc(p.name)}</div><div class="s">${[p.phone, p.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
+          <button class="btn small out" data-act="editClient" data-id="${p.id}">${T('edit')}</button>
+          <button class="btn small out" data-act="delClient" data-id="${p.id}">${T('delete')}</button></div></div>`).join('') || `<p class="empty">${T('noClientsList')}</p>`}
+      </div>
       <div class="card"><h3>${T('clientCard')}</h3>
         <label>${T('name')}</label><input id="cName" placeholder="Awa Traoré">
         <label>${T('phone')}</label><input id="cPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
@@ -201,6 +206,8 @@ function clients() {
       <div class="card"><h3>${T('supplierList')}</h3>
         ${db.suppliers.map((s) => `<div class="row"><div><div class="t">${esc(s.name)}</div><div class="s">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
           ${s.phone ? `<button class="btn small whats" data-act="waSup" data-name="${esc(s.name)}">${T('whatsapp')}</button>` : ''}
+          <button class="btn small out" data-act="editSupplier" data-id="${s.id}">${T('edit')}</button>
+          <button class="btn small out" data-act="delSupplier" data-id="${s.id}">${T('delete')}</button>
         </div></div>`).join('') || `<p class="empty">${T('noSuppliers')}</p>`}
       </div>
       <div class="card"><h3>${T('supplierCard')}</h3>
@@ -286,6 +293,7 @@ function hist() {
   const methods = [...new Set(db.sales.map((s) => s.method).filter(Boolean))];
   return `<button class="btn out" data-act="back">← ${T('back')}</button>
     <h2 style="margin-top:12px">${T('history')}</h2>
+    <button class="btn out" data-act="exportCsv">${T('exportCsv')}</button>
     <div class="card"><h3>${T('period')}</h3><div class="big">${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}</div></div>
     <div class="card">
       <input id="histSearch" type="search" placeholder="${T('searchSales')}" value="${esc(histQuery)}" autocomplete="off">
@@ -396,6 +404,53 @@ function productModal(id) {
     if (newQty !== q) db.moves.push({ id: uid(), pid: p.id, delta: newQty - q, u: Date.now() });
     saveDB(); m.remove(); render();
   };
+}
+function clientModal(id) {
+  const p = db.parties.find((x) => x.id === id);
+  if (!p) return;
+  const m = modal(`<h2>${T('editClient')}</h2>
+    <label>${T('name')}</label><input id="ecName" value="${esc(p.name)}">
+    <label>${T('phone')}</label><input id="ecPhone" inputmode="tel" value="${esc(p.phone || '')}">
+    <label>${T('address')}</label><input id="ecAddress" value="${esc(p.address || '')}">
+    <button class="btn" id="ecOk">${T('saveChanges')}</button><button class="btn out" id="ecNo">${T('cancel')}</button><p class="err" id="ecErr"></p>`);
+  m.querySelector('#ecNo').onclick = () => m.remove();
+  m.querySelector('#ecOk').onclick = () => {
+    const name = m.querySelector('#ecName').value.trim();
+    if (!name) { m.querySelector('#ecErr').textContent = T('badBusiness'); return; }
+    const old = p.name;
+    p.name = name; p.phone = m.querySelector('#ecPhone').value.trim(); p.address = m.querySelector('#ecAddress').value.trim(); p.u = Date.now();
+    if (name !== old) { db.sales.forEach((s) => { if (s.party === old) s.party = name; }); db.docs.forEach((d) => { if (d.party === old) d.party = name; }); }
+    saveDB(); m.remove(); render();
+  };
+}
+function supplierModal(id) {
+  const s = db.suppliers.find((x) => x.id === id);
+  if (!s) return;
+  const m = modal(`<h2>${T('editSupplier')}</h2>
+    <label>${T('name')}</label><input id="esName" value="${esc(s.name)}">
+    <label>${T('phone')}</label><input id="esPhone" inputmode="tel" value="${esc(s.phone || '')}">
+    <label>${T('address')}</label><input id="esAddress" value="${esc(s.address || '')}">
+    <button class="btn" id="esOk">${T('saveChanges')}</button><button class="btn out" id="esNo">${T('cancel')}</button><p class="err" id="esErr"></p>`);
+  m.querySelector('#esNo').onclick = () => m.remove();
+  m.querySelector('#esOk').onclick = () => {
+    const name = m.querySelector('#esName').value.trim();
+    if (!name) { m.querySelector('#esErr').textContent = T('badBusiness'); return; }
+    const old = s.name;
+    s.name = name; s.phone = m.querySelector('#esPhone').value.trim(); s.address = m.querySelector('#esAddress').value.trim(); s.u = Date.now();
+    if (name !== old) db.debts.forEach((d) => { if (d.supplier === old) d.supplier = name; });
+    saveDB(); m.remove(); render();
+  };
+}
+function exportCsv() {
+  const list = histSales();
+  const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const rows = [[T('dueDate'), T('client'), T('product'), T('qty'), T('total'), T('paid'), T('remains'), T('method')]];
+  list.forEach((s) => rows.push([dayFR(s.date), s.party || '', s.product || '', s.product ? s.qty : '', s.total, paidOf(s), creditOf(s), s.method || '']));
+  const csv = '\ufeff' + rows.map((r) => r.map(cell).join(';')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = `ventes-${histPeriod}-${todayISO()}.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 6000);
 }
 function saleModal() {
   const d = modal(`<h2>${T('sell')}</h2>
@@ -779,6 +834,21 @@ document.addEventListener('click', async (e) => {
     waOpen(s.phone, '');
   }
   if (act === 'editProduct') productModal(b.dataset.id);
+  if (act === 'editClient') clientModal(b.dataset.id);
+  if (act === 'delClient') {
+    const p = db.parties.find((x) => x.id === b.dataset.id);
+    if (!p || !confirm(T('confirmDeleteClient'))) return;
+    db.parties = db.parties.filter((x) => x.id !== p.id);
+    saveDB(); render();
+  }
+  if (act === 'editSupplier') supplierModal(b.dataset.id);
+  if (act === 'delSupplier') {
+    const s = db.suppliers.find((x) => x.id === b.dataset.id);
+    if (!s || !confirm(T('confirmDeleteSupplier'))) return;
+    db.suppliers = db.suppliers.filter((x) => x.id !== s.id);
+    saveDB(); render();
+  }
+  if (act === 'exportCsv') exportCsv();
   if (act === 'delProduct') {
     const p = db.products.find((x) => x.id === b.dataset.id);
     if (!p) return;
