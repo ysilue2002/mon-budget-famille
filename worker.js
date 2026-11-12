@@ -46,7 +46,7 @@ const validPass = (v) => typeof v === 'string' && v.length >= 8 && v.length <= 2
 let schemaReady;
 function ensureSchema(env) {
   schemaReady = schemaReady || env.DB.batch([
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, phone TEXT NOT NULL, phone_digits TEXT, pass TEXT NOT NULL, salt TEXT NOT NULL, created INTEGER NOT NULL)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, phone TEXT, phone_digits TEXT, pass TEXT NOT NULL, salt TEXT NOT NULL, created INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS state (user_id TEXT PRIMARY KEY, json TEXT NOT NULL, rev INTEGER NOT NULL DEFAULT 1, updated INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS resets (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)'),
@@ -54,6 +54,19 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS throttle (key TEXT PRIMARY KEY, hits INTEGER NOT NULL, reset INTEGER NOT NULL)'),
   ]).then(async () => {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
+    // Comptes par téléphone uniquement : l'e-mail et le téléphone deviennent facultatifs.
+    const usersTable = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").first();
+    const usersSql = usersTable ? String(usersTable.sql || '') : '';
+    if (/email\s+TEXT\s+UNIQUE\s+NOT\s+NULL/i.test(usersSql) || /phone\s+TEXT\s+NOT\s+NULL/i.test(usersSql)) {
+      // Migration atomique : tout réussit ou rien ne change.
+      await env.DB.batch([
+        env.DB.prepare('DROP TABLE IF EXISTS users_new'),
+        env.DB.prepare('CREATE TABLE users_new (id TEXT PRIMARY KEY, email TEXT UNIQUE, phone TEXT, phone_digits TEXT, pass TEXT NOT NULL, salt TEXT NOT NULL, created INTEGER NOT NULL)'),
+        env.DB.prepare('INSERT INTO users_new (id, email, phone, phone_digits, pass, salt, created) SELECT id, email, phone, phone_digits, pass, salt, created FROM users'),
+        env.DB.prepare('DROP TABLE users'),
+        env.DB.prepare('ALTER TABLE users_new RENAME TO users'),
+      ]);
+    }
   });
   return schemaReady;
 }
@@ -144,20 +157,26 @@ async function api(request, env, url) {
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
     const password = String(body.password || '');
-    if (!validEmail(email)) return json({ error: 'email' }, 400);
-    if (!validPhone(phone)) return json({ error: 'phone' }, 400);
+    // Un compte peut être créé avec un e-mail, un numéro, ou les deux.
+    if (!email && !phone) return json({ error: 'identifier' }, 400);
+    if (email && !validEmail(email)) return json({ error: 'email' }, 400);
+    if (phone && !validPhone(phone)) return json({ error: 'phone' }, 400);
     if (!validPass(password)) return json({ error: 'password' }, 400);
-    const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
-    if (exists) return json({ error: 'exists' }, 409);
-    const phoneDigits = digitsOf(phone);
-    const samePhone = await env.DB.prepare('SELECT id FROM users WHERE phone_digits = ?').bind(phoneDigits).first();
-    if (samePhone) return json({ error: 'phone_taken' }, 409);
+    if (email) {
+      const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+      if (exists) return json({ error: 'exists' }, 409);
+    }
+    const phoneDigits = phone ? digitsOf(phone) : null;
+    if (phoneDigits) {
+      const samePhone = await env.DB.prepare('SELECT id FROM users WHERE phone_digits = ?').bind(phoneDigits).first();
+      if (samePhone) return json({ error: 'phone_taken' }, 409);
+    }
     const id = crypto.randomUUID();
     const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
     const pass = await pbkdf2(password, salt);
-    await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, email, phone, phoneDigits, pass, salt, Date.now()).run();
+    await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, email || null, phone || null, phoneDigits, pass, salt, Date.now()).run();
     const cookie = await createSession(env, id);
-    return json({ user: { id, email, phone } }, 200, { 'set-cookie': cookie });
+    return json({ user: { id, email: email || null, phone: phone || null } }, 200, { 'set-cookie': cookie });
   }
 
   if (path === '/api/login' && request.method === 'POST') {

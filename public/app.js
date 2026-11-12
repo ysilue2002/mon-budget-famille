@@ -1751,8 +1751,10 @@ async function syncTick() {
   if (syncState === 'pending') await pushNow();
   else await pullNow(false);
 }
-async function signup(email, phone, password) {
-  const r = await api('/api/signup', 'POST', { email, phone, password });
+async function signup(mode, identifier, password) {
+  const body = { mode, password };
+  if (mode === 'email') body.email = identifier; else body.phone = identifier;
+  const r = await api('/api/signup', 'POST', body);
   if (!r.ok) return (r.data && r.data.error) || 'server';
   me = r.data.user;
   markSync('syncing');
@@ -1782,15 +1784,15 @@ async function bootAccount() {
 function accountHTML() {
   if (me) {
     return `<div class="card" style="margin-top:14px"><h3>${T('account')}</h3>
-      <div class="row"><div><div class="t">${esc(me.email)}</div><div class="s">${esc(me.phone)}</div></div><div class="right"><span class="tag ok">${T('cloudOn')}</span></div></div>
+      <div class="row"><div><div class="t">${esc(me.email || me.phone || '')}</div><div class="s">${me.email && me.phone ? esc(me.phone) : (me.email ? T('byEmail') : T('byPhone'))}</div></div><div class="right"><span class="tag ok">${T('cloudOn')}</span></div></div>
       <p class="hint">${T('lastSaved')} ${clock(db.meta.lastSync)}</p>
       <button class="btn out" data-act="syncNow">${T('syncNow')}</button>
       <button class="btn out" data-act="logout">${T('signOut')}</button>
       <p class="hint">${T('multiPhoneHint')}</p></div>`;
   }
   return `<div class="card" style="margin-top:14px"><h3>${T('account')}</h3>
-    <label>${T('email')}</label><input id="acEmail" type="email" autocomplete="email" placeholder="awa@exemple.com">
-    <label>${T('phoneNumber')}</label><input id="acPhone" type="tel" autocomplete="tel" placeholder="+225 07 00 00 00 00">
+    <div class="seg" id="acType"><button type="button" id="acModeEmail" class="on">${T('byEmail')}</button><button type="button" id="acModePhone">${T('byPhone')}</button></div>
+    <label id="acIdLabel">${T('email')}</label><input id="acIdent" type="email" autocomplete="email" placeholder="awa@exemple.com">
     <label>${T('password')}</label><input id="acPass" type="password" autocomplete="new-password">
     <button class="btn" id="acSignup">${T('createAccount')}</button>
     <h3 style="margin-top:16px">${T('signIn')}</h3>
@@ -1804,15 +1806,30 @@ function wireAccount(d) {
   const btn = d.querySelector('#acSignup');
   if (!btn) return;
   const err = d.querySelector('#acErr');
-  const values = () => ({ email: d.querySelector('#acEmail').value.trim(), phone: d.querySelector('#acPhone').value.trim(), pass: d.querySelector('#acPass').value });
+  const identInput = d.querySelector('#acIdent');
+  const identLabel = d.querySelector('#acIdLabel');
+  let mode = 'email';
+  const pickMode = (m) => {
+    mode = m;
+    d.querySelector('#acModeEmail').classList.toggle('on', m === 'email');
+    d.querySelector('#acModePhone').classList.toggle('on', m === 'phone');
+    identInput.type = m === 'email' ? 'email' : 'tel';
+    identInput.autocomplete = m === 'email' ? 'email' : 'tel';
+    identInput.placeholder = m === 'email' ? 'awa@exemple.com' : '+225 07 00 00 00 00';
+    identLabel.textContent = m === 'email' ? T('email') : T('phoneNumber');
+  };
+  d.querySelector('#acModeEmail').onclick = () => pickMode('email');
+  d.querySelector('#acModePhone').onclick = () => pickMode('phone');
+  const values = () => ({ ident: identInput.value.trim(), pass: d.querySelector('#acPass').value, mode });
   btn.onclick = async () => {
     err.textContent = '';
-    const { email, phone, pass } = values();
-    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) { err.textContent = T('badEmail'); return; }
-    if (phone.replace(/\D/g, '').length < 8) { err.textContent = T('badPhone'); return; }
+    const { ident, pass, mode: m } = values();
+    if (m === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(ident)) { err.textContent = T('badEmail'); return; }
+    } else if (ident.replace(/\D/g, '').length < 8) { err.textContent = T('badPhone'); return; }
     if (pass.length < 8) { err.textContent = T('badPass'); return; }
-    const e = await signup(email, phone, pass);
-    if (e) { err.textContent = e === 'exists' ? T('emailTaken') : e === 'phone' ? T('badPhone') : T('badCredentials'); return; }
+    const e = await signup(m, ident, pass);
+    if (e) { err.textContent = e === 'exists' ? T('emailTaken') : e === 'phone_taken' ? T('phoneTaken') : e === 'phone' ? T('badPhone') : e === 'identifier' ? T('badCredentials') : T('badCredentials'); return; }
     d.remove(); render();
   };
   d.querySelector('#acLogin').onclick = async () => {
@@ -1825,7 +1842,7 @@ function wireAccount(d) {
     d.remove(); render();
   };
   const forgot = d.querySelector('#acForgot');
-  if (forgot) forgot.onclick = () => forgotModal(values().email || d.querySelector('#acLoginId').value.trim());
+  if (forgot) forgot.onclick = () => forgotModal((values().mode === 'email' ? values().ident : '') || d.querySelector('#acLoginId').value.trim());
 }
 function forgotModal(email = '') {
   const d = modal(`<h2>${T('forgotTitle')}</h2><p class="hint">${T('forgotHint')}</p>
@@ -1866,6 +1883,7 @@ function resetModal(token) {
 /* ---------------- démarrage ---------------- */
 const LANG_KEY = 'assistant-commercial.langChosen';
 let gateMode = 'signup';
+let signupMode = 'email';
 function askShop() {
   if (db.shop) return;
   const d = modal(`<h2>${T('welcomeTitle')}</h2><p>${T('welcomeAsk')}</p><input id="wShop" placeholder="Chez Awa"><button class="btn" id="wOk">${T('start')}</button>`);
@@ -1925,8 +1943,8 @@ function showAuthGate() {
   };
   function drawForm() {
     form.innerHTML = gateMode === 'signup'
-      ? `<label>${T('email')}</label><input id="gEmail" type="email" autocomplete="email">
-         <label>${T('phoneNumber')}</label><input id="gPhone" type="tel" autocomplete="tel">
+      ? `<div class="seg" id="gIdentType"><button type="button" data-m="email" class="on">${T('byEmail')}</button><button type="button" data-m="phone">${T('byPhone')}</button></div>
+         <label id="gIdentLabel">${T('email')}</label><input id="gIdent" type="email" autocomplete="email">
          <label>${T('password')}</label><input id="gPass" type="password" autocomplete="new-password">
          <label>${T('business')}</label>
          <label>${T('companyForm')}</label><select id="gCompany">${formOptions('')}</select>
@@ -1943,21 +1961,34 @@ function showAuthGate() {
     if (gateMode === 'signup') {
       const csel = form.querySelector('#gCountry');
       csel.onchange = () => { form.querySelector('#gCur').textContent = currencyFor(csel.value); };
+      const typeBox = form.querySelector('#gIdentType');
+      const identInput = form.querySelector('#gIdent');
+      const identLabel = form.querySelector('#gIdentLabel');
+      const pick = (m) => {
+        signupMode = m;
+        typeBox.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
+        identInput.type = m === 'email' ? 'email' : 'tel';
+        identInput.autocomplete = m === 'email' ? 'email' : 'tel';
+        identInput.placeholder = m === 'email' ? 'awa@exemple.com' : '+225 07 00 00 00 00';
+        identLabel.textContent = m === 'email' ? T('email') : T('phoneNumber');
+      };
+      typeBox.querySelectorAll('button').forEach((b) => { b.onclick = () => pick(b.dataset.m); });
+      pick(signupMode);
     }
     go.onclick = async () => {
       const err = form.querySelector('#gErr');
       const pass = form.querySelector('#gPass').value;
       err.textContent = '';
       if (gateMode === 'signup') {
-        const email = form.querySelector('#gEmail').value.trim();
-        const phone = form.querySelector('#gPhone').value.trim();
+        const ident = form.querySelector('#gIdent').value.trim();
         const country = form.querySelector('#gCountry').value;
         const companyForm = form.querySelector('#gCompany').value;
         const city = form.querySelector('#gCity').value.trim();
         const district = form.querySelector('#gDistrict').value.trim();
         const address = form.querySelector('#gAddress').value.trim();
-        if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) { err.textContent = T('badEmail'); return; }
-        if (phone.replace(/\D/g, '').length < 8) { err.textContent = T('badPhone'); return; }
+        if (signupMode === 'email') {
+          if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(ident)) { err.textContent = T('badEmail'); return; }
+        } else if (ident.replace(/\D/g, '').length < 8) { err.textContent = T('badPhone'); return; }
         if (pass.length < 8) { err.textContent = T('badPass'); return; }
         if (!city || !companyForm) { err.textContent = T('badBusiness'); return; }
         db.settings.country = country;
@@ -1968,7 +1999,7 @@ function showAuthGate() {
         db.settings.address = address;
         saveDB(false);
         go.disabled = true;
-        const e = await signup(email, phone, pass);
+        const e = await signup(signupMode, ident, pass);
         if (e) { go.disabled = false; err.textContent = e === 'exists' ? T('emailTaken') : e === 'phone_taken' ? T('phoneTaken') : e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
       } else {
         const identifier = form.querySelector('#gLoginId').value.trim();
