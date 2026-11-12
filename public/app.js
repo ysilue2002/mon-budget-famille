@@ -25,7 +25,7 @@ const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f 
 const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [],
   seq: { DEV: 0, FAC: 0 },
-  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18 },
+  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
 let db = loadDB();
@@ -85,9 +85,10 @@ const debtOf = (d) => Math.max(0, d.amount - d.paid);
 const totalDebt = () => db.debts.reduce((a, d) => a + debtOf(d), 0);
 const qtyOf = (p) => (db.moves || []).filter((m) => m.pid === p.id).reduce((a, m) => a + (Number(m.delta) || 0), 0);
 const daysSince = (iso) => Math.max(0, Math.floor((Date.now() - new Date((iso || todayISO()) + 'T00:00:00').getTime()) / 86400000));
+const remindDays = () => Math.max(1, Math.round(Number(db.settings.remindDays) || 30));
 function lateByParty() {
   const m = new Map();
-  db.sales.filter((s) => creditOf(s) > 0 && daysSince(s.date) >= 30).forEach((s) => {
+  db.sales.filter((s) => creditOf(s) > 0 && daysSince(s.date) >= remindDays()).forEach((s) => {
     const k = s.party || '—';
     const cur = m.get(k) || { name: k, sum: 0, days: 0, since: s.date };
     cur.sum += creditOf(s);
@@ -206,6 +207,7 @@ function clients() {
         }).join('') || `<p class="empty">${T('noClients')}</p>`}
       </div>
       <div class="card"><h3>${T('lateClients')}</h3>
+        <p class="hint">${T('overDays')} ${remindDays()} ${T('days')}</p>
         ${lateByParty().map((x) => `<div class="row"><div><div class="t">${esc(x.name)}</div><div class="s">${money(x.sum)} · ${T('since')} ${dayFR(x.since)}</div></div><div class="right"><span class="tag bad">${x.days} ${T('days')}</span><br><button class="btn small whats" data-act="wa" data-name="${esc(x.name)}">${T('remind')}</button></div></div>`).join('') || `<p class="empty">${T('noLate')}</p>`}
       </div>
       <div class="card"><h3>${T('clientList')}</h3>
@@ -478,8 +480,38 @@ function clientDetail(id) {
       <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
     </div>
     <div class="card">${list.map((s) => `<div class="row"><div><div class="t">${dayFR(s.date)} · ${money(s.total)}</div><div class="s">${esc(s.method)}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}</div></div>`).join('') || `<p class="empty">${T('nothing')}</p>`}</div>
+    <button class="btn" id="cdPrint">${T('printSheet')}</button>
     <button class="btn out" id="cdNo">${T('close')}</button>`);
   m.querySelector('#cdNo').onclick = () => m.remove();
+  m.querySelector('#cdPrint').onclick = () => { m.remove(); printClient(id); };
+}
+function printClient(id) {
+  const p = db.parties.find((x) => x.id === id);
+  if (!p) return;
+  const list = db.sales.filter((s) => (s.party || '—') === p.name).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const docs = db.docs.filter((d) => d.party === p.name).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const total = list.reduce((a, s) => a + (Number(s.total) || 0), 0);
+  const paid = list.reduce((a, s) => a + paidOf(s), 0);
+  const rest = list.reduce((a, s) => a + creditOf(s), 0);
+  const st = db.settings || {};
+  const place = [st.address, st.district, st.city, countryName(st.country || 'CI')].filter(Boolean).join(' · ');
+  const area = document.getElementById('printArea');
+  area.className = 'a4';
+  area.innerHTML = `${st.logo ? `<img class="docLogo" src="${esc(st.logo)}" alt="">` : ''}<h2>${esc(db.shop || T('app'))}</h2>
+    ${place ? `<div class="small">${esc(place)}</div>` : ''}
+    <hr>
+    <div class="small">${T('clientCard')} · ${dayFR(todayISO())}</div>
+    <h2 style="margin:3mm 0 1mm">${esc(p.name)}</h2>
+    <div class="small">${[p.phone, p.address].filter(Boolean).map(esc).join(' · ') || '—'}</div>
+    <div class="tot"><span>${T('revenue')}</span><span>${money(total)}</span></div>
+    <div class="tot"><span>${T('collected')}</span><span>${money(paid)}</span></div>
+    <div class="tot"><span>${T('remains')}</span><span>${money(rest)}</span></div>
+    <table><thead><tr><th>${T('dueDate')}</th><th>${T('article')}</th><th>${T('total')}</th><th>${T('paid')}</th><th>${T('remains')}</th></tr></thead><tbody>
+      ${list.map((s) => `<tr><td>${dayFR(s.date)}</td><td>${esc(s.product || '—')}${s.product ? ' ×' + s.qty : ''}</td><td>${money(s.total)}</td><td>${money(paidOf(s))}</td><td>${money(creditOf(s))}</td></tr>`).join('') || `<tr><td colspan="5">${T('nothing')}</td></tr>`}
+    </tbody></table>
+    ${docs.length ? `<h3 style="margin:4mm 0 1mm">${T('documents')}</h3><table><thead><tr><th>${T('dueDate')}</th><th>${T('line')}</th><th>${T('total')}</th></tr></thead><tbody>${docs.map((d) => `<tr><td>${dayFR(d.date)}</td><td>${d.kind === 'DEV' ? T('quote') : T('invoice')} ${esc(d.number)}</td><td>${money(amountOf(d))}</td></tr>`).join('')}</tbody></table>` : ''}
+    <p class="small">${T('thanks')}</p>`;
+  window.print();
 }
 function pendingRows() {
   return db.debts.filter((d) => d.delivered === false).sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -1143,6 +1175,8 @@ function settingsModal() {
     <label>${T('address')}</label><input id="setAddress" value="${esc(db.settings.address || '')}">
     <label>${T('vat')}</label><input id="setVat" inputmode="numeric" value="${esc(db.settings.vat == null ? 18 : db.settings.vat)}">
     <p class="hint">${T('vatHint')}</p>
+    <label>${T('remindDays')}</label><input id="setRemindDays" inputmode="numeric" value="${esc(db.settings.remindDays == null ? 30 : db.settings.remindDays)}">
+    <p class="hint">${T('remindHint')}</p>
     <p class="hint">${T('currency')} : <b id="setCur">${esc(db.settings.currency || currencyFor(db.settings.country || 'CI'))}</b> — ${T('currencyAuto')}</p>
     <label>${T('logo')}</label>
     <input type="file" id="setLogo" accept="image/*">
@@ -1209,6 +1243,7 @@ function settingsModal() {
     db.settings.district = d.querySelector('#setDistrict').value.trim();
     db.settings.address = d.querySelector('#setAddress').value.trim();
     db.settings.vat = Math.max(0, Math.round(+d.querySelector('#setVat').value || 0));
+    db.settings.remindDays = Math.min(365, Math.max(1, Math.round(+d.querySelector('#setRemindDays').value || 30)));
     db.settings.logo = logoDraft;
     saveDB(); d.remove(); render();
   };
