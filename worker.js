@@ -50,6 +50,8 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS state (user_id TEXT PRIMARY KEY, json TEXT NOT NULL, rev INTEGER NOT NULL DEFAULT 1, updated INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS resets (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS mail_log (user_id TEXT PRIMARY KEY, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS throttle (key TEXT PRIMARY KEY, hits INTEGER NOT NULL, reset INTEGER NOT NULL)'),
   ]).then(async () => {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
   });
@@ -90,6 +92,36 @@ async function sendResetMail(env, to, link) {
   } catch { return false; }
 }
 
+async function sendDocMail(env, to, subject, text, filename, content) {
+  if (!env.RESEND_API_KEY) return false;
+  const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ from, to: [to], subject: String(subject).slice(0, 180), text: String(text).slice(0, 4000), attachments: [{ filename, content }] }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+async function blocked(env, key, limit) {
+  const row = await env.DB.prepare('SELECT hits, reset FROM throttle WHERE key = ?').bind(key).first();
+  return !!row && row.reset > Date.now() && row.hits >= limit;
+}
+
+async function tooMany(env, key, limit, windowMs) {
+  const now = Date.now();
+  const row = await env.DB.prepare('SELECT hits, reset FROM throttle WHERE key = ?').bind(key).first();
+  if (!row || row.reset < now) {
+    await env.DB.prepare('INSERT INTO throttle (key, hits, reset) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET hits = 1, reset = excluded.reset').bind(key, now + windowMs).run();
+    return false;
+  }
+  if (row.hits >= limit) return true;
+  await env.DB.prepare('UPDATE throttle SET hits = hits + 1 WHERE key = ?').bind(key).run();
+  return false;
+}
+
 async function readBody(request) {
   const text = await request.text();
   if (text.length > MAX_BODY) throw new Error('trop volumineux');
@@ -128,6 +160,9 @@ async function api(request, env, url) {
   if (path === '/api/login' && request.method === 'POST') {
     const body = await readBody(request);
     const identifier = String(body.login || body.email || '').trim();
+    const ip = request.headers.get('cf-connecting-ip') || 'local';
+    const ipKey = 'login:' + ip;
+    if (await blocked(env, ipKey, 20)) return json({ error: 'slow' }, 429);
     const password = String(body.password || '');
     let user = null;
     if (identifier.includes('@')) {
@@ -148,9 +183,9 @@ async function api(request, env, url) {
         }
       }
     }
-    if (!user) return json({ error: 'credentials' }, 401);
+    if (!user) { await tooMany(env, ipKey, 20, 15 * 60000); return json({ error: 'credentials' }, 401); }
     const hash = await pbkdf2(password, user.salt);
-    if (!same(hash, user.pass)) return json({ error: 'credentials' }, 401);
+    if (!same(hash, user.pass)) { await tooMany(env, ipKey, 20, 15 * 60000); return json({ error: 'credentials' }, 401); }
     const cookie = await createSession(env, user.id);
     return json({ user: { id: user.id, email: user.email, phone: user.phone } }, 200, { 'set-cookie': cookie });
   }
@@ -197,6 +232,22 @@ async function api(request, env, url) {
 
   const user = await currentUser(request, env);
   if (!user) return json({ error: 'auth' }, 401);
+
+  if (path === '/api/send-doc' && request.method === 'POST') {
+    const body = await readBody(request);
+    const to = String(body.to || '').trim().toLowerCase();
+    if (!validEmail(to)) return json({ error: 'email' }, 400);
+    const filename = String(body.filename || 'document.pdf').replace(/[^\w.-]+/g, '-').slice(0, 80) || 'document.pdf';
+    const pdf = String(body.pdf || '').replace(/\s/g, '');
+    if (pdf.length < 100 || pdf.length > 1600000 || !/^[A-Za-z0-9+/=]+$/.test(pdf)) return json({ error: 'pdf' }, 400);
+    const day = new Date().toISOString().slice(0, 10);
+    const row = await env.DB.prepare('SELECT day, count FROM mail_log WHERE user_id = ?').bind(user.id).first();
+    const count = row && row.day === day ? row.count : 0;
+    if (count >= 20) return json({ ok: true, mail: false, error: 'limit' });
+    await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = CASE WHEN mail_log.day = excluded.day THEN mail_log.count + 1 ELSE 1 END').bind(user.id, day).run();
+    const sent = await sendDocMail(env, to, String(body.subject || 'Document'), String(body.text || ''), filename, pdf);
+    return json({ ok: true, mail: sent });
+  }
 
   if (path === '/api/password' && request.method === 'POST') {
     const body = await readBody(request);
@@ -255,6 +306,12 @@ export default {
         return json({ error: 'server', detail: String(e && e.message ? e.message : e) }, 500);
       }
     }
-    return env.ASSETS.fetch(request);
+    const response = await env.ASSETS.fetch(request);
+    const copy = new Response(response.body, response);
+    copy.headers.set('x-content-type-options', 'nosniff');
+    copy.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
+    copy.headers.set('x-frame-options', 'SAMEORIGIN');
+    copy.headers.set('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+    return copy;
   },
 };

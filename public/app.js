@@ -341,6 +341,7 @@ function docForm() {
     <h2>${T('newQuote')}</h2>
     <label>${T('client')}</label><input id="dParty" value="${esc(draft.party)}">
     <label>${T('clientPhone')}</label><input id="dPhone" inputmode="tel" value="${esc(draft.phone || '')}">
+    <label>${T('clientEmail')}</label><input id="dEmail" type="email" value="${esc(draft.email || '')}">
     <label>${T('clientAddress')}</label><input id="dAddress" value="${esc(draft.address || '')}">
     <div id="lines">${rows}</div>
     <button class="btn out" data-act="addLine">＋ ${T('addLine')}</button>
@@ -799,6 +800,7 @@ function docHTML(d) {
     <div class="small">${d.kind === 'DEV' ? T('quote') : T('invoice')} ${esc(d.number)} · ${dayFR(d.date)}</div>
     <div class="small">${T('client')} : ${esc(d.party || '—')}</div>
     ${d.clientPhone ? `<div class="small">${T('phone')} : ${esc(d.clientPhone)}</div>` : ''}
+    ${d.clientEmail ? `<div class="small">${T('email')} : ${esc(d.clientEmail)}</div>` : ''}
     ${d.clientAddress ? `<div class="small">${T('address')} : ${esc(d.clientAddress)}</div>` : ''}
     <table><thead><tr><th>${T('line')}</th><th>${T('quantity')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
     <div class="tot"><span>${T('ht')}</span><span>${money(d.total)}</span></div>
@@ -851,6 +853,7 @@ async function docPdf(d) {
   pdf.text(`${T('client')} : ${d.party || '—'}`, 14, y);
   y += 5;
   if (d.clientPhone) { pdf.text(`${T('phone')} : ${d.clientPhone}`, 14, y); y += 4.5; }
+  if (d.clientEmail) { pdf.text(`${T('email')} : ${d.clientEmail}`, 14, y); y += 4.5; }
   if (d.clientAddress) { pdf.text(`${T('address')} : ${d.clientAddress}`, 14, y); y += 4.5; }
   y += 3;
   pdf.setFontSize(9);
@@ -923,12 +926,21 @@ async function emailDocPDF(id) {
   const body = `${db.shop || ''}\n${subject} · ${dayFR(d.date)}\n${T('client')} : ${d.party || '—'}\n${T('ttc')} : ${money(amountOf(d))}`;
   try {
     const file = await docFile(d);
+    const to = (d.clientEmail || '').trim();
+    if (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(to)) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+      const r = await api('/api/send-doc', 'POST', { to, subject, text: body, filename: file.name, pdf: btoa(bin) });
+      if (r.ok && r.data && r.data.mail) { alert(T('mailSent')); return; }
+      if (r.ok && r.data && r.data.error === 'limit') { alert(T('mailLimit')); return; }
+    }
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: d.number, text: body });
       return;
     }
+    location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   } catch {}
-  location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 function previewDoc(id) {
   const d = db.docs.find((x) => x.id === id);
@@ -1083,7 +1095,7 @@ document.addEventListener('click', async (e) => {
     const name = b.dataset.name;
     waOpen((db.parties.find((p) => p.name === name) || {}).phone, reminderText(name));
   }
-  if (act === 'newDoc') { draft = { party: '', phone: '', address: '', vat: db.settings.vat || 0, lines: [{ label: '', qty: 1, price: 0 }] }; render(); }
+  if (act === 'newDoc') { draft = { party: '', phone: '', email: '', address: '', vat: db.settings.vat || 0, lines: [{ label: '', qty: 1, price: 0 }] }; render(); }
   if (act === 'addLine') { syncDraft(); draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
   if (act === 'delLine') { syncDraft(); draft.lines.splice(+b.dataset.i, 1); if (!draft.lines.length) draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
   if (act === 'closeDoc') { draft = null; render(); }
@@ -1094,7 +1106,7 @@ document.addEventListener('click', async (e) => {
     if (!lines.length) return;
     const total = Math.round(lines.reduce((a, l) => a + l.qty * l.price, 0));
     const rate = Math.max(0, Number(draft.vat) || 0);
-    db.docs.push({ id: uid(), kind: 'DEV', number: num('DEV'), date: todayISO(), party: draft.party.trim(), clientPhone: (draft.phone || '').trim(), clientAddress: (draft.address || '').trim(), vat: rate, lines, total, status: 'devis', u: Date.now() });
+    db.docs.push({ id: uid(), kind: 'DEV', number: num('DEV'), date: todayISO(), party: draft.party.trim(), clientPhone: (draft.phone || '').trim(), clientEmail: (draft.email || '').trim().toLowerCase(), clientAddress: (draft.address || '').trim(), vat: rate, lines, total, status: 'devis', u: Date.now() });
     draft = null; saveDB(); tab = 'docs'; render();
   }
   if (act === 'toFacture') {
@@ -1149,6 +1161,8 @@ function syncDraft() {
   if (ph) draft.phone = ph.value;
   const ad = document.getElementById('dAddress');
   if (ad) draft.address = ad.value;
+  const em = document.getElementById('dEmail');
+  if (em) draft.email = em.value;
   const vt = document.getElementById('dVat');
   if (vt) draft.vat = Math.max(0, +vt.value || 0);
 }
