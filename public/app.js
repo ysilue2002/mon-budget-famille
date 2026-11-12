@@ -148,7 +148,7 @@ function vendre() {
   const ca = t.reduce((a, s) => a + s.total, 0);
   const list = [
     ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(s.method)}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button></div></div>`),
-    ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div></div>`),
+    ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div>${e.delivered === false ? `<div class="right"><span class="tag warn">${T('saleNotDelivered')}</span><br><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div>` : ''}</div>`),
     ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
   return `<div class="kpis">
@@ -520,6 +520,9 @@ function printClient(id) {
 function pendingRows() {
   return db.debts.filter((d) => d.delivered === false).sort((a, b) => (a.date < b.date ? 1 : -1));
 }
+function pendingExpenses() {
+  return db.expenses.filter((e) => e.delivered === false).sort((a, b) => (a.date < b.date ? 1 : -1));
+}
 function pendingText(name) {
   const rows = pendingRows().filter((d) => d.supplier === name);
   const sum = rows.reduce((a, d) => a + debtOf(d), 0);
@@ -554,6 +557,9 @@ function pending() {
     <h2 style="margin-top:12px">${T('pendingPurchases')}</h2>
     <div class="kpis"><div class="kpi"><span>${T('suppliers')}</span><b>${list.length}</b></div><div class="kpi"><span>${T('remains')}</span><b>${money(total)}</b></div></div>
     <button class="btn" data-act="printPending">${T('printList')}</button>
+    ${pendingExpenses().length ? `<div class="card" style="margin-top:14px"><h3>${T('pendingGoods')}</h3>
+      ${pendingExpenses().map((e) => `<div class="row"><div><div class="t">${dayFR(e.date)} · ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div><div class="right"><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
+    </div>` : ''}
     ${names.map((n) => {
       const rows = list.filter((d) => d.supplier === n);
       const sup = db.suppliers.find((x) => x.name === n) || {};
@@ -977,12 +983,22 @@ document.addEventListener('click', async (e) => {
       <label>${T('reason')}</label><select id="eLabel"><option>Transport</option><option>Loyer</option><option>Électricité</option><option>Salaire</option><option>Marchandise</option><option>Autre</option></select>
       <label>${T('method')}</label><select id="eMethod"><option>Espèces</option><option>Orange Money</option><option>Wave</option><option>MTN</option><option>Moov</option><option>Banque</option></select>
       <label>${T('note')}</label><input id="eNote" placeholder="${T('noteHint')}">
+      <div id="eDelivBox" style="display:none">
+        <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="eDeliv" checked style="width:auto"><span>${T('deliveredGoods')}</span></label>
+        <p class="hint">${T('delivHint')}</p>
+      </div>
       <button class="btn" id="eOk">${T('saveExpense')}</button><button class="btn out" id="eNo">${T('cancel')}</button><p class="err" id="eErr"></p>`);
     d.querySelector('#eNo').onclick = () => d.remove();
+    const eLabel = d.querySelector('#eLabel');
+    const eBox = d.querySelector('#eDelivBox');
+    const syncDeliv = () => { eBox.style.display = eLabel.value === 'Marchandise' ? 'block' : 'none'; };
+    eLabel.onchange = syncDeliv;
+    syncDeliv();
     d.querySelector('#eOk').onclick = () => {
       const amount = Math.round(+d.querySelector('#eAmt').value || 0);
       if (!amount) { d.querySelector('#eErr').textContent = T('errorAmount'); return; }
-      db.expenses.push({ id: uid(), date: todayISO(), amount, label: d.querySelector('#eLabel').value, note: d.querySelector('#eNote').value.trim(), method: d.querySelector('#eMethod').value, u: Date.now() });
+      const label = d.querySelector('#eLabel').value;
+      db.expenses.push({ id: uid(), date: todayISO(), amount, label, note: d.querySelector('#eNote').value.trim(), method: d.querySelector('#eMethod').value, delivered: label === 'Marchandise' ? d.querySelector('#eDeliv').checked : undefined, u: Date.now() });
       saveDB(); d.remove(); render();
     };
   }
@@ -1120,6 +1136,10 @@ document.addEventListener('click', async (e) => {
   if (act === 'deliverSale') {
     const s = db.sales.find((x) => x.id === b.dataset.id);
     if (s) { s.delivered = true; s.u = Date.now(); saveDB(); render(); }
+  }
+  if (act === 'deliverExpense') {
+    const e = db.expenses.find((x) => x.id === b.dataset.id);
+    if (e) { e.delivered = true; e.u = Date.now(); saveDB(); render(); }
   }
   if (act === 'duplicate') {
     const src = db.docs.find((x) => x.id === b.dataset.id);
