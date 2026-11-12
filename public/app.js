@@ -551,14 +551,15 @@ function printPending() {
 }
 function pending() {
   const list = pendingRows();
-  const total = list.reduce((a, d) => a + debtOf(d), 0);
+  const exps = pendingExpenses();
+  const total = list.reduce((a, d) => a + debtOf(d), 0) + exps.reduce((a, e) => a + (Number(e.amount) || 0), 0);
   const names = [...new Set(list.map((d) => d.supplier))];
   return `<button class="btn out" data-act="back">← ${T('back')}</button>
     <h2 style="margin-top:12px">${T('pendingPurchases')}</h2>
-    <div class="kpis"><div class="kpi"><span>${T('suppliers')}</span><b>${list.length}</b></div><div class="kpi"><span>${T('remains')}</span><b>${money(total)}</b></div></div>
+    <div class="kpis"><div class="kpi"><span>${T('pendingPurchases')}</span><b>${list.length + exps.length}</b></div><div class="kpi"><span>${T('totalPending')}</span><b>${money(total)}</b></div></div>
     <button class="btn" data-act="printPending">${T('printList')}</button>
     ${pendingExpenses().length ? `<div class="card" style="margin-top:14px"><h3>${T('pendingGoods')}</h3>
-      ${pendingExpenses().map((e) => `<div class="row"><div><div class="t">${dayFR(e.date)} · ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div><div class="right"><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
+      ${pendingExpenses().map((e) => `<div class="row"><div><div class="t">${dayFR(e.date)} · ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div><div class="right">${daysSince(e.date) >= 7 ? `<span class="tag bad">${daysSince(e.date)} ${T('days')}</span> ` : ''}<button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
     </div>` : ''}
     ${names.map((n) => {
       const rows = list.filter((d) => d.supplier === n);
@@ -566,7 +567,7 @@ function pending() {
       const sum = rows.reduce((a, d) => a + debtOf(d), 0);
       return `<div class="card" style="margin-top:14px"><h3>${esc(n)}</h3>
         <div class="hint">${[sup.phone, sup.address].filter(Boolean).map(esc).join(' · ') || '—'}</div>
-        ${rows.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div></div>`).join('')}
+        ${rows.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right">${daysSince(d.date) >= 7 ? `<span class="tag bad">${daysSince(d.date)} ${T('days')}</span>` : ''}</div></div>`).join('')}
         <div class="row"><div class="t">${T('remains')}</div><div class="t">${money(sum)}</div></div>
         ${sup.phone ? `<button class="btn small whats" data-act="waPending" data-name="${esc(n)}">${T('sendToSupplier')}</button>` : ''}
       </div>`;
@@ -984,6 +985,11 @@ document.addEventListener('click', async (e) => {
       <label>${T('method')}</label><select id="eMethod"><option>Espèces</option><option>Orange Money</option><option>Wave</option><option>MTN</option><option>Moov</option><option>Banque</option></select>
       <label>${T('note')}</label><input id="eNote" placeholder="${T('noteHint')}">
       <div id="eDelivBox" style="display:none">
+        <label>${T('supplier')}</label><input id="eSup" placeholder="Grossiste Adjamé">
+        <label>${T('phone')}</label><input id="eSupPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
+        <label>${T('address')}</label><input id="eSupAddress" placeholder="Adjamé, marché">
+        <label>${T('method')}</label><select id="eMode"><option value="cash">${T('cashPaid')}</option><option value="partial">${T('partial')}</option><option value="credit">${T('onCredit')}</option></select>
+        <div id="ePaidBox" style="display:none"><label>${T('alreadyPaid')}</label><input id="ePaid" inputmode="numeric" placeholder="0"></div>
         <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="eDeliv" checked style="width:auto"><span>${T('deliveredGoods')}</span></label>
         <p class="hint">${T('delivHint')}</p>
       </div>
@@ -994,11 +1000,35 @@ document.addEventListener('click', async (e) => {
     const syncDeliv = () => { eBox.style.display = eLabel.value === 'Marchandise' ? 'block' : 'none'; };
     eLabel.onchange = syncDeliv;
     syncDeliv();
+    const eMode = d.querySelector('#eMode');
+    const ePaidBox = d.querySelector('#ePaidBox');
+    const syncMode = () => { ePaidBox.style.display = eMode.value === 'partial' ? 'block' : 'none'; };
+    eMode.onchange = syncMode;
+    syncMode();
     d.querySelector('#eOk').onclick = () => {
       const amount = Math.round(+d.querySelector('#eAmt').value || 0);
       if (!amount) { d.querySelector('#eErr').textContent = T('errorAmount'); return; }
       const label = d.querySelector('#eLabel').value;
-      db.expenses.push({ id: uid(), date: todayISO(), amount, label, note: d.querySelector('#eNote').value.trim(), method: d.querySelector('#eMethod').value, delivered: label === 'Marchandise' ? d.querySelector('#eDeliv').checked : undefined, u: Date.now() });
+      const note = d.querySelector('#eNote').value.trim();
+      const method = d.querySelector('#eMethod').value;
+      const supplier = label === 'Marchandise' ? d.querySelector('#eSup').value.trim() : '';
+      if (label === 'Marchandise' && !supplier) { d.querySelector('#eErr').textContent = T('errorSupplier'); return; }
+      const exId = uid();
+      const delivered = label === 'Marchandise' ? d.querySelector('#eDeliv').checked : undefined;
+      let paid = amount;
+      if (label === 'Marchandise') {
+        const mode = d.querySelector('#eMode').value;
+        if (mode === 'credit') paid = 0;
+        if (mode === 'partial') paid = Math.max(0, Math.min(amount, Math.round(+d.querySelector('#ePaid').value || 0)));
+      }
+      db.expenses.push({ id: exId, date: todayISO(), amount, label, note, method, supplier, delivered: supplier ? undefined : delivered, u: Date.now() });
+      if (supplier) {
+        const found = db.suppliers.find((s) => s.name.toLowerCase() === supplier.toLowerCase());
+        const phone = d.querySelector('#eSupPhone').value.trim();
+        const address = d.querySelector('#eSupAddress').value.trim();
+        if (found) { if (phone) found.phone = phone; if (address) found.address = address; found.u = Date.now(); } else db.suppliers.push({ id: uid(), name: supplier, phone, address, u: Date.now() });
+        db.debts.push({ id: 'exd-' + exId, date: todayISO(), supplier, amount, paid, delivered, expenseId: exId, u: Date.now() });
+      }
       saveDB(); d.remove(); render();
     };
   }
@@ -1103,6 +1133,7 @@ document.addEventListener('click', async (e) => {
         db.moves.push({ id: 'mv-' + d.id, pid: d.pid, delta: Number(d.qty), u: Date.now() });
         d.stocked = true;
       }
+      if (d.expenseId) { const e = db.expenses.find((x) => x.id === d.expenseId); if (e) e.delivered = true; }
       saveDB(); render();
     }
   }
