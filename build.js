@@ -25,17 +25,51 @@ const html = `<!doctype html>
     <h1>Assistant Commercial</h1>
     <p>L'application a déménagé. <a href="${TARGET}">Ouvrir Assistant Commercial</a>.</p>
   </div>
-  <script>window.location.replace(${JSON.stringify(TARGET)});</script>
+  <script>
+    // Nettoie l'ancienne application installée sur ce domaine, puis redirige.
+    (async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+        }
+        if (window.caches) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+      } catch (e) {}
+      window.location.replace(${JSON.stringify(TARGET)});
+    })();
+  </script>
 </body>
 </html>
 `;
 
 // Render publie selon le réglage « Publish Directory » du service.
 // On écrit la page dans les dossiers les plus courants pour éviter un échec.
+const sw = `// Service worker de nettoyage : désinstalle l'ancienne application
+// et supprime ses caches, puis recharge la page.
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    try { await self.registration.unregister(); } catch (e) {}
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (e) {}
+    try {
+      const list = await self.clients.matchAll({ type: 'window' });
+      list.forEach((c) => c.navigate(c.url));
+    } catch (e) {}
+  })());
+});
+`;
+
 for (const dir of ['dist', 'build', 'out']) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(`${dir}/index.html`, html);
   fs.writeFileSync(`${dir}/404.html`, html);
+  fs.writeFileSync(`${dir}/sw.js`, sw);
 }
 
 console.log('Page de redirection générée dans dist/, build/ et out/.');

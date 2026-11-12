@@ -18,6 +18,21 @@
     <h1>Assistant Commercial</h1>
     <p>L'application a déménagé. <a href="https://site-a48ebaa71ce945cc8ab9ac9be7f59aa8.freebuff.page">Ouvrir Assistant Commercial</a>.</p>
   </div>
-  <script>window.location.replace("https://site-a48ebaa71ce945cc8ab9ac9be7f59aa8.freebuff.page");</script>
+  <script>
+    // Nettoie l'ancienne application installée sur ce domaine, puis redirige.
+    (async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+        }
+        if (window.caches) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+      } catch (e) {}
+      window.location.replace("https://site-a48ebaa71ce945cc8ab9ac9be7f59aa8.freebuff.page");
+    })();
+  </script>
 </body>
 </html>
