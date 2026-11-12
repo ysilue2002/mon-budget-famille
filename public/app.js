@@ -567,7 +567,7 @@ function pending() {
       const sum = rows.reduce((a, d) => a + debtOf(d), 0);
       return `<div class="card" style="margin-top:14px"><h3>${esc(n)}</h3>
         <div class="hint">${[sup.phone, sup.address].filter(Boolean).map(esc).join(' · ') || '—'}</div>
-        ${rows.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right">${daysSince(d.date) >= 7 ? `<span class="tag bad">${daysSince(d.date)} ${T('days')}</span>` : ''}</div></div>`).join('')}
+        ${rows.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right">${daysSince(d.date) >= 7 ? `<span class="tag bad">${daysSince(d.date)} ${T('days')}</span> ` : ''}<button class="btn small out" data-act="deliverDebt" data-id="${d.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
         <div class="row"><div class="t">${T('remains')}</div><div class="t">${money(sum)}</div></div>
         ${sup.phone ? `<button class="btn small whats" data-act="waPending" data-name="${esc(n)}">${T('sendToSupplier')}</button>` : ''}
       </div>`;
