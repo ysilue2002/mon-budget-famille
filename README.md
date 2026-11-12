@@ -46,3 +46,19 @@ Chaque compte possède un état JSON dans la table `state`. À chaque sauvegarde
 le serveur incrémente une révision ; une sauvegarde basée sur une révision
 ancienne est refusée puis fusionnée enregistrement par enregistrement côté
 application (ventes, paiements, stock, documents).
+
+## Ancienne adresse Render
+
+Le dépôt contient un petit serveur (`server.js`) qui ne fait qu'une chose :
+rediriger l'ancienne adresse Render vers l'application en ligne. Aucune donnée
+n'y est stockée.
+
+Sur Render, dans le service existant :
+
+- Build Command : `npm install`
+- Start Command : `npm start`
+- puis « Manual Deploy » → « Clear build cache & deploy ».
+
+L'adresse `https://mon-budget-famille-web.onrender.com` ouvrira alors
+directement Assistant Commercial. Attention : ce service servait l'ancienne
+application « Mon Budget Famille » ; elle sera remplacée par cette redirection.

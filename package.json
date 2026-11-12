@@ -1,0 +1,12 @@
+{
+  "name": "assistant-commercial",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Redirection Render vers l'application Assistant Commercial",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
