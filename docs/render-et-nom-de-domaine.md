@@ -6,16 +6,25 @@ Le dépôt GitHub contient maintenant deux petits fichiers, `package.json` et
 `server.js`. Ce serveur ne stocke rien : il redirige simplement vers
 l'application en ligne.
 
+Le service Render `mon-budget-famille-web` est un **site statique** : il publie
+des fichiers, il n'exécute pas de serveur. Le dépôt contient donc un script
+`build.js` qui fabrique une page de redirection dans `dist/`, `build/` et `out/`.
+
 Étapes sur Render (compte « mon budget famille ») :
 
 1. Ouvrir le service `mon-budget-famille-web`.
 2. Aller dans **Settings**.
-3. **Build Command** : écrire `npm install`.
-4. **Start Command** : écrire `npm start`.
+3. **Build Command** : `npm ci --include=dev && npm run build`.
+4. **Publish Directory** : `dist` (si le champ existe ; sinon `build` ou `out`,
+   les trois dossiers contiennent la même page).
 5. Enregistrer, puis **Manual Deploy** → **Clear build cache & deploy**.
 6. Attendre la fin du déploiement, puis ouvrir
    `https://mon-budget-famille-web.onrender.com` : la page doit basculer
    immédiatement vers Assistant Commercial.
+
+Si le service est en réalité un **Web Service** Node (et non un site statique),
+garder **Start Command** : `npm start` — le fichier `server.js` renvoie alors un
+vrai code 302 vers l'application.
 
 À savoir : ce service faisait tourner l'ancienne application « Mon Budget
 Famille ». Elle sera remplacée par cette redirection. Si vous voulez la garder,
