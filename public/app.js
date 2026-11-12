@@ -111,7 +111,7 @@ function render() {
     const k = b.querySelector('[data-k]');
     if (k) k.textContent = T(k.dataset.k);
   });
-  const view = { vendre, stock, clients, docs, bilans, hist }[tab]();
+  const view = { vendre, stock, clients, docs, bilans, hist, pending }[tab]();
   const ads = adsHTML();
   document.getElementById('app').innerHTML = (tab === 'vendre' ? ads.top : '') + view + (tab === 'vendre' ? ads.bottom : '');
   if (draft) document.getElementById('app').insertAdjacentHTML('beforeend', docForm());
@@ -194,6 +194,7 @@ function clients() {
       </div>
       <div class="card"><h3>${T('clientList')}</h3>
         ${db.parties.map((p) => `<div class="row"><div><div class="t">${esc(p.name)}</div><div class="s">${[p.phone, p.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
+          <button class="btn small" data-act="clientDetail" data-id="${p.id}">${T('detail')}</button>
           <button class="btn small out" data-act="editClient" data-id="${p.id}">${T('edit')}</button>
           <button class="btn small out" data-act="delClient" data-id="${p.id}">${T('delete')}</button></div></div>`).join('') || `<p class="empty">${T('noClientsList')}</p>`}
       </div>
@@ -212,6 +213,7 @@ function clients() {
           <button class="btn small out" data-act="delSupplier" data-id="${s.id}">${T('delete')}</button>
         </div></div>`).join('') || `<p class="empty">${T('noSuppliers')}</p>`}
       </div>
+      <button class="btn out" data-act="pending">${T('pendingPurchases')}</button>
       <div class="card"><h3>${T('supplierCard')}</h3>
         <label>${T('name')}</label><input id="sName" placeholder="Grossiste Adjamé">
         <label>${T('phone')}</label><input id="sPhone" inputmode="tel">
@@ -442,6 +444,73 @@ function supplierModal(id) {
     if (name !== old) db.debts.forEach((d) => { if (d.supplier === old) d.supplier = name; });
     saveDB(); m.remove(); render();
   };
+}
+function clientDetail(id) {
+  const p = db.parties.find((x) => x.id === id);
+  if (!p) return;
+  const list = db.sales.filter((s) => (s.party || '—') === p.name).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const total = list.reduce((a, s) => a + (Number(s.total) || 0), 0);
+  const paid = list.reduce((a, s) => a + paidOf(s), 0);
+  const rest = list.reduce((a, s) => a + creditOf(s), 0);
+  const m = modal(`<h2>${esc(p.name)}</h2>
+    <p class="hint">${[p.phone, p.address].filter(Boolean).map(esc).join(' · ') || '—'}</p>
+    <div class="kpis">
+      <div class="kpi"><span>${T('revenue')}</span><b>${money(total)}</b></div>
+      <div class="kpi"><span>${T('collected')}</span><b>${money(paid)}</b></div>
+      <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
+    </div>
+    <div class="card">${list.map((s) => `<div class="row"><div><div class="t">${dayFR(s.date)} · ${money(s.total)}</div><div class="s">${esc(s.method)}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}</div></div>`).join('') || `<p class="empty">${T('nothing')}</p>`}</div>
+    <button class="btn out" id="cdNo">${T('close')}</button>`);
+  m.querySelector('#cdNo').onclick = () => m.remove();
+}
+function pendingRows() {
+  return db.debts.filter((d) => d.delivered === false).sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+function pendingText(name) {
+  const rows = pendingRows().filter((d) => d.supplier === name);
+  const sum = rows.reduce((a, d) => a + debtOf(d), 0);
+  return [`${db.shop || T('app')}`, T('pendingPurchases'), ...rows.map((d) => `${dayFR(d.date)} · ${T('total')} ${money(d.amount)} · ${T('remains')} ${money(debtOf(d))}`), `${T('remains')} : ${money(sum)}`, T('thanks')].join('\n');
+}
+function printPending() {
+  const list = pendingRows();
+  const names = [...new Set(list.map((d) => d.supplier))];
+  const total = list.reduce((a, d) => a + debtOf(d), 0);
+  const s = db.settings || {};
+  const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
+  const supLine = (n) => { const sup = db.suppliers.find((x) => x.name === n) || {}; return [sup.phone, sup.address].filter(Boolean).map(esc).join(' · '); };
+  const area = document.getElementById('printArea');
+  area.className = 'a4';
+  area.innerHTML = `${s.logo ? `<img class="docLogo" src="${esc(s.logo)}" alt="">` : ''}<h2>${esc(db.shop || T('app'))}</h2>
+    ${place ? `<div class="small">${esc(place)}</div>` : ''}
+    <hr>
+    <div class="small">${T('pendingPurchases')} · ${dayFR(todayISO())}</div>
+    ${names.map((n) => `<div style="margin-top:6mm"><b>${esc(n)}</b>${supLine(n) ? `<div class="small">${supLine(n)}</div>` : ''}
+      <table><thead><tr><th>${T('dueDate')}</th><th>${T('total')}</th><th>${T('paid')}</th><th>${T('remains')}</th></tr></thead><tbody>
+      ${list.filter((d) => d.supplier === n).map((d) => `<tr><td>${dayFR(d.date)}</td><td>${money(d.amount)}</td><td>${money(d.paid || 0)}</td><td>${money(debtOf(d))}</td></tr>`).join('')}
+      </tbody></table></div>`).join('')}
+    <div class="tot"><span>${T('remains')}</span><span>${money(total)}</span></div>
+    <p class="small">${T('thanks')}</p>`;
+  window.print();
+}
+function pending() {
+  const list = pendingRows();
+  const total = list.reduce((a, d) => a + debtOf(d), 0);
+  const names = [...new Set(list.map((d) => d.supplier))];
+  return `<button class="btn out" data-act="back">← ${T('back')}</button>
+    <h2 style="margin-top:12px">${T('pendingPurchases')}</h2>
+    <div class="kpis"><div class="kpi"><span>${T('suppliers')}</span><b>${list.length}</b></div><div class="kpi"><span>${T('remains')}</span><b>${money(total)}</b></div></div>
+    <button class="btn" data-act="printPending">${T('printList')}</button>
+    ${names.map((n) => {
+      const rows = list.filter((d) => d.supplier === n);
+      const sup = db.suppliers.find((x) => x.name === n) || {};
+      const sum = rows.reduce((a, d) => a + debtOf(d), 0);
+      return `<div class="card" style="margin-top:14px"><h3>${esc(n)}</h3>
+        <div class="hint">${[sup.phone, sup.address].filter(Boolean).map(esc).join(' · ') || '—'}</div>
+        ${rows.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div></div>`).join('')}
+        <div class="row"><div class="t">${T('remains')}</div><div class="t">${money(sum)}</div></div>
+        ${sup.phone ? `<button class="btn small whats" data-act="waPending" data-name="${esc(n)}">${T('sendToSupplier')}</button>` : ''}
+      </div>`;
+    }).join('') || `<p class="empty">${T('noPending')}</p>`}`;
 }
 function supplierDetail(id) {
   const s = db.suppliers.find((x) => x.id === id);
@@ -874,6 +943,13 @@ document.addEventListener('click', async (e) => {
   }
   if (act === 'editSupplier') supplierModal(b.dataset.id);
   if (act === 'supDetail') supplierDetail(b.dataset.id);
+  if (act === 'clientDetail') clientDetail(b.dataset.id);
+  if (act === 'pending') { tab = 'pending'; render(); }
+  if (act === 'printPending') printPending();
+  if (act === 'waPending') {
+    const s = db.suppliers.find((x) => x.name === b.dataset.name) || {};
+    waOpen(s.phone, pendingText(b.dataset.name));
+  }
   if (act === 'exportContacts') exportContacts();
   if (act === 'delSupplier') {
     const s = db.suppliers.find((x) => x.id === b.dataset.id);

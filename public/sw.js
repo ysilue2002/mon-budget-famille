@@ -1,4 +1,4 @@
-const CACHE = 'assistant-commercial-v17';
+const CACHE = 'assistant-commercial-v18';
 const FILES = ['./', './index.html', './manifest.webmanifest', './qrcode.js', './jspdf.umd.min.js', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
