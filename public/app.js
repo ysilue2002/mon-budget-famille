@@ -82,6 +82,7 @@ const creditOf = (s) => Math.max(0, s.total - (Number(s.paid) || 0) - paysOf(s))
 const paidOf = (s) => Math.min(Number(s.total) || 0, (Number(s.paid) || 0) + paysOf(s));
 const totalDue = () => db.sales.reduce((a, s) => a + creditOf(s), 0);
 const debtOf = (d) => Math.max(0, d.amount - d.paid);
+const payMode = (d) => ((Number(d.paid) || 0) <= 0 ? T('onCredit') : debtOf(d) <= 0 ? T('cashPaid') : T('partial'));
 const totalDebt = () => db.debts.reduce((a, d) => a + debtOf(d), 0);
 const qtyOf = (p) => (db.moves || []).filter((m) => m.pid === p.id).reduce((a, m) => a + (Number(m.delta) || 0), 0);
 const daysSince = (iso) => Math.max(0, Math.floor((Date.now() - new Date((iso || todayISO()) + 'T00:00:00').getTime()) / 86400000));
@@ -146,7 +147,7 @@ function vendre() {
   const t = db.sales.filter((s) => s.date === todayISO());
   const ca = t.reduce((a, s) => a + s.total, 0);
   const list = [
-    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(s.method)}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button></div></div>`),
+    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(s.method)}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button></div></div>`),
     ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div></div>`),
     ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
@@ -240,6 +241,7 @@ function clients() {
       </div>
       <div class="card"><h3>${T('debts')}</h3>
         ${sup.map((d) => `<div class="row"><div><div class="t">${esc(d.supplier)}</div><div class="s">${dayFR(d.date)} · ${T('total')} ${money(d.amount)} · ${T('paid')} ${money(d.paid || 0)}</div></div><div class="right">
+          <span class="tag">${payMode(d)}</span>
           ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : ''}
           ${debtOf(d) ? `<span class="tag bad">${T('remains')} ${money(debtOf(d))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
           ${debtOf(d) ? `<button class="btn small" data-act="payDebt" data-id="${d.id}">${T('paySupplier')}</button>` : ''}
@@ -304,7 +306,8 @@ function histSummary(list) {
 }
 function histRows(list) {
   return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div><div class="s">${dayFR(s.date)} · ${esc(s.method)}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">
-      ${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
+      ${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
+      ${s.delivered === false ? `<button class="btn small out" data-act="deliverSale" data-id="${s.id}">${T('markSaleDelivered')}</button>` : ''}
       <button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button>
       <button class="btn small pdf" data-act="receiptPdf" data-id="${s.id}">${T('pdf')}</button>
     </div></div>`).join('') || `<p class="empty">${T('noSalesFound')}</p>`;
@@ -576,7 +579,7 @@ function supplierDetail(id) {
       <div class="kpi"><span>${T('paid')}</span><b>${money(paid)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
     </div>
-    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right">${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
+    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right"><span class="tag">${payMode(d)}</span> ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
     <button class="btn" id="sdPrint">${T('printSheet')}</button>
     <button class="btn out" id="sdNo">${T('close')}</button>`);
   m.querySelector('#sdNo').onclick = () => m.remove();
@@ -604,8 +607,8 @@ function printSupplier(id) {
     <div class="tot"><span>${T('totalPurchases')}</span><span>${money(total)}</span></div>
     <div class="tot"><span>${T('paid')}</span><span>${money(paid)}</span></div>
     <div class="tot"><span>${T('remains')}</span><span>${money(rest)}</span></div>
-    <table><thead><tr><th>${T('dueDate')}</th><th>${T('total')}</th><th>${T('paid')}</th><th>${T('remains')}</th><th>${T('received')}</th></tr></thead><tbody>
-      ${list.map((d) => `<tr><td>${dayFR(d.date)}</td><td>${money(d.amount)}</td><td>${money(d.paid || 0)}</td><td>${money(debtOf(d))}</td><td>${d.delivered === false ? T('notDelivered') : T('received')}</td></tr>`).join('') || `<tr><td colspan="5">${T('noPurchases')}</td></tr>`}
+    <table><thead><tr><th>${T('dueDate')}</th><th>${T('type')}</th><th>${T('total')}</th><th>${T('paid')}</th><th>${T('remains')}</th><th>${T('received')}</th></tr></thead><tbody>
+      ${list.map((d) => `<tr><td>${dayFR(d.date)}</td><td>${payMode(d)}</td><td>${money(d.amount)}</td><td>${money(d.paid || 0)}</td><td>${money(debtOf(d))}</td><td>${d.delivered === false ? T('notDelivered') : T('received')}</td></tr>`).join('') || `<tr><td colspan="6">${T('noPurchases')}</td></tr>`}
     </tbody></table>
     ${payments.length ? `<h3 style="margin:4mm 0 1mm">${T('payments')}</h3><table><thead><tr><th>${T('dueDate')}</th><th>${T('amount')}</th><th>${T('line')}</th></tr></thead><tbody>${payments.map((p) => `<tr><td>${dayFR(p.date)}</td><td>${money(p.amount)}</td><td>${T('newPurchase')} ${dayFR(p.ref)}</td></tr>`).join('')}</tbody></table>` : ''}
     <p class="small">${T('thanks')}</p>`;
@@ -641,6 +644,7 @@ function saleModal() {
     <label>${T('qty')}</label><input id="sQty" inputmode="numeric" value="1">
     <label>${T('client')}</label><input id="sParty">
     <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="sCredit" style="width:auto"><span>${T('creditLater')}</span></label>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="sDeliv" checked style="width:auto"><span>${T('deliveredGoods')}</span></label>
     <button class="btn" id="sOk">${T('saveSale')}</button>
     <button class="btn out" id="sNo">${T('cancel')}</button><p class="err" id="sErr"></p>`);
   d.querySelector('#sNo').onclick = () => d.remove();
@@ -664,7 +668,7 @@ function saleModal() {
     }
     const sid = uid();
     const now = Date.now();
-    const sale = { id: sid, date: todayISO(), total, paid: credit ? 0 : total, method: d.querySelector('#sMethod').value, party, pid: pid || '', product, qty: product ? qty : 0, cost, u: now };
+    const sale = { id: sid, date: todayISO(), total, paid: credit ? 0 : total, method: d.querySelector('#sMethod').value, party, pid: pid || '', product, qty: product ? qty : 0, cost, delivered: d.querySelector('#sDeliv').checked, u: now };
     db.sales.push(sale);
     if (pid) db.moves.push({ id: 'mv-' + sid, pid, delta: -qty, u: now });
     if (party && !db.parties.some((x) => x.name.toLowerCase() === party.toLowerCase())) db.parties.push({ id: uid(), name: party, phone: '', u: now });
@@ -1101,6 +1105,10 @@ document.addEventListener('click', async (e) => {
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
   if (act === 'waSale') waSale(b.dataset.id);
   if (act === 'receiptPdf') shareReceiptPDF(b.dataset.id);
+  if (act === 'deliverSale') {
+    const s = db.sales.find((x) => x.id === b.dataset.id);
+    if (s) { s.delivered = true; s.u = Date.now(); saveDB(); render(); }
+  }
   if (act === 'duplicate') {
     const src = db.docs.find((x) => x.id === b.dataset.id);
     if (src) {
