@@ -25,7 +25,7 @@ const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f 
 const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [],
   seq: { DEV: 0, FAC: 0 },
-  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '' },
+  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
 let db = loadDB();
@@ -91,6 +91,9 @@ const num = (kind) => {
   return kind + '-' + y + '-' + String(db.seq[kind]).padStart(3, '0');
 };
 const lang = () => db.settings.lang || 'fr';
+const vatOf = (d) => Math.round(((Number(d.total) || 0) * (Number(d.vat) || 0)) / 100);
+const ttcOf = (d) => (Number(d.total) || 0) + vatOf(d);
+const amountOf = (d) => (Number(d.vat) ? ttcOf(d) : Number(d.total) || 0);
 
 /* ---------------- rendu ---------------- */
 function applyLang() {
@@ -130,7 +133,7 @@ function vendre() {
   const ca = t.reduce((a, s) => a + s.total, 0);
   const list = [
     ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(s.method)}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button></div></div>`),
-    ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)} · ${esc(e.method)}</div></div></div>`),
+    ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div></div>`),
     ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
   return `<div class="kpis">
@@ -153,7 +156,7 @@ function stock() {
       <div class="kpi"><span>${T('toRenew')}</span><b>${p.filter((x) => qtyOf(x) <= x.alert).length}</b></div>
     </div>
     <div class="card"><h3>${T('articles')}</h3>
-      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)}</div><div class="s">${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}</div></div><div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}</div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
+      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)}</div><div class="s">${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button><button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button></div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
     </div>
     <div class="card"><h3>${T('addArticle')}</h3>
       <label>${T('name')}</label><input id="pName" placeholder="Savon">
@@ -191,17 +194,37 @@ function clients() {
       <div class="card"><h3>${T('clientCard')}</h3>
         <label>${T('name')}</label><input id="cName" placeholder="Awa Traoré">
         <label>${T('phone')}</label><input id="cPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
+        <label>${T('address')}</label><input id="cAddress" placeholder="Cocody, près de la pharmacie">
         <button class="btn" data-act="addParty">${T('saveClient')}</button>
         <p class="hint">${T('phoneHint')}</p>
       </div>` : `
-      <div class="card"><h3>${T('debts')}</h3>
-        ${sup.map((d) => `<div class="row"><div><div class="t">${esc(d.supplier)}</div><div class="s">${dayFR(d.date)} · ${money(debtOf(d))}</div></div><div class="right">
-          <button class="btn small" data-act="payDebt" data-id="${d.id}">${T('debtPaid')}</button></div></div>`).join('') || `<p class="empty">${T('noDebt')}</p>`}
+      <div class="card"><h3>${T('supplierList')}</h3>
+        ${db.suppliers.map((s) => `<div class="row"><div><div class="t">${esc(s.name)}</div><div class="s">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
+          ${s.phone ? `<button class="btn small whats" data-act="waSup" data-name="${esc(s.name)}">${T('whatsapp')}</button>` : ''}
+        </div></div>`).join('') || `<p class="empty">${T('noSuppliers')}</p>`}
       </div>
-      <div class="card"><h3>${T('newDebt')}</h3>
-        <label>${T('supplier')}</label><input id="dSup" placeholder="Grossiste Adjamé">
+      <div class="card"><h3>${T('supplierCard')}</h3>
+        <label>${T('name')}</label><input id="sName" placeholder="Grossiste Adjamé">
+        <label>${T('phone')}</label><input id="sPhone" inputmode="tel">
+        <label>${T('address')}</label><input id="sAddress">
+        <button class="btn" data-act="addSupplier">${T('saveSupplier')}</button>
+      </div>
+      <div class="card"><h3>${T('debts')}</h3>
+        ${sup.map((d) => `<div class="row"><div><div class="t">${esc(d.supplier)}</div><div class="s">${dayFR(d.date)} · ${T('total')} ${money(d.amount)} · ${T('paid')} ${money(d.paid || 0)}</div></div><div class="right">
+          ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : ''}
+          ${debtOf(d) ? `<span class="tag bad">${T('remains')} ${money(debtOf(d))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
+          ${debtOf(d) ? `<button class="btn small" data-act="payDebt" data-id="${d.id}">${T('paySupplier')}</button>` : ''}
+          ${d.delivered === false ? `<button class="btn small out" data-act="deliverDebt" data-id="${d.id}">${T('markDelivered')}</button>` : ''}
+        </div></div>`).join('') || `<p class="empty">${T('noDebt')}</p>`}
+      </div>
+      <div class="card"><h3>${T('newPurchase')}</h3>
+        <label>${T('supplier')}</label><input id="dSup" list="supNames" placeholder="Grossiste Adjamé"><datalist id="supNames">${db.suppliers.map((s) => `<option value="${esc(s.name)}"></option>`).join('')}</datalist>
         <label>${T('amount')}</label><input id="dAmt" inputmode="numeric" placeholder="0">
-        <button class="btn" data-act="addDebt">${T('saveDebt')}</button>
+        <label>${T('alreadyPaid')}</label><input id="dPaid" inputmode="numeric" placeholder="0">
+        <label>${T('articleOptional')}</label><select id="dPid"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+        <label>${T('qty')}</label><input id="dQty" inputmode="numeric" value="1">
+        <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="dRecv" checked style="width:auto"><span>${T('received')}</span></label>
+        <button class="btn" data-act="addPurchase">${T('saveDebt')}</button>
       </div>`}`;
 }
 
@@ -210,13 +233,14 @@ function filterDocs(q) {
   const term = String(q || '').trim().toLowerCase();
   const list = [...db.docs].sort((a, b) => (a.date < b.date ? 1 : -1));
   if (!term) return list;
-  return list.filter((d) => [d.number, d.party, d.date, dayFR(d.date), d.kind === 'DEV' ? T('quote') : T('invoice'), String(d.total), money(d.total)].join(' ').toLowerCase().includes(term));
+  return list.filter((d) => [d.number, d.party, d.clientPhone, d.clientAddress, d.date, dayFR(d.date), d.kind === 'DEV' ? T('quote') : T('invoice'), String(d.total), money(d.total), money(amountOf(d))].join(' ').toLowerCase().includes(term));
 }
 function docsList(list) {
-  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)}</div><div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(d.total)}</div></div><div class="right">
+  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}</div></div><div class="right">
         <button class="btn small" data-act="print" data-id="${d.id}">${T('print')}</button>
         <button class="btn small whats" data-act="waDoc" data-id="${d.id}">${T('whatsapp')}</button>
         <button class="btn small pdf" data-act="waPdf" data-id="${d.id}">${T('pdf')}</button>
+        <button class="btn small out" data-act="dlPdf" data-id="${d.id}">${T('download')}</button>
         <button class="btn small out" data-act="duplicate" data-id="${d.id}">${T('duplicate')}</button>
         <button class="btn small mail" data-act="mailDoc" data-id="${d.id}">${T('email')}</button>
         ${d.kind === 'DEV' ? `<button class="btn small out" data-act="toFacture" data-id="${d.id}">${T('toInvoice')}</button>` : ''}
@@ -278,12 +302,19 @@ function docForm() {
     <input data-l="price" data-i="${i}" inputmode="numeric" value="${esc(l.price)}">
     <button data-act="delLine" data-i="${i}">✕</button></div>`).join('');
   const total = draft.lines.reduce((a, l) => a + (+l.qty || 0) * (+l.price || 0), 0);
+  const rate = Math.max(0, Number(draft.vat) || 0);
+  const vat = Math.round((total * rate) / 100);
   return `<div class="modal"><div class="sheet">
     <h2>${T('newQuote')}</h2>
     <label>${T('client')}</label><input id="dParty" value="${esc(draft.party)}">
+    <label>${T('clientPhone')}</label><input id="dPhone" inputmode="tel" value="${esc(draft.phone || '')}">
+    <label>${T('clientAddress')}</label><input id="dAddress" value="${esc(draft.address || '')}">
     <div id="lines">${rows}</div>
     <button class="btn out" data-act="addLine">＋ ${T('addLine')}</button>
-    <div class="row" style="margin-top:10px"><div class="t">${T('total')}</div><div class="t">${money(total)}</div></div>
+    <label>${T('vat')}</label><input id="dVat" inputmode="numeric" value="${esc(rate)}">
+    <div class="row" style="margin-top:10px"><div class="t">${T('ht')}</div><div class="t">${money(total)}</div></div>
+    ${rate ? `<div class="row"><div class="t">${T('vatShort')} ${rate} %</div><div class="t">${money(vat)}</div></div>` : ''}
+    <div class="row"><div class="t">${T('ttc')}</div><div class="t">${money(total + vat)}</div></div>
     <button class="btn" data-act="saveDoc">${T('saveQuote')}</button>
     <button class="btn out" data-act="closeDoc">${T('cancel')}</button>
   </div></div>`;
@@ -326,6 +357,45 @@ function modal(html) {
   d.addEventListener('click', (e) => { if (e.target === d) d.remove(); });
   document.body.appendChild(d);
   return d;
+}
+function payDebtModal(id) {
+  const d = db.debts.find((x) => x.id === id);
+  if (!d) return;
+  const m = modal(`<h2>${esc(d.supplier)}</h2><p class="hint">${T('remains')} ${money(debtOf(d))}</p>
+    <label>${T('payReceived')}</label><input id="pdAmt" inputmode="numeric" value="${debtOf(d)}">
+    <button class="btn" id="pdOk">${T('savePayment')}</button><button class="btn out" id="pdNo">${T('cancel')}</button><p class="err" id="pdErr"></p>`);
+  m.querySelector('#pdNo').onclick = () => m.remove();
+  m.querySelector('#pdOk').onclick = () => {
+    const v = Math.round(+m.querySelector('#pdAmt').value || 0);
+    if (v <= 0) { m.querySelector('#pdErr').textContent = T('errorAmount'); return; }
+    d.paid = Math.min(d.amount, (Number(d.paid) || 0) + v); d.u = Date.now();
+    saveDB(); m.remove(); render();
+  };
+}
+function productModal(id) {
+  const p = db.products.find((x) => x.id === id);
+  if (!p) return;
+  const q = qtyOf(p);
+  const m = modal(`<h2>${T('editArticle')}</h2>
+    <label>${T('name')}</label><input id="epName" value="${esc(p.name)}">
+    <label>${T('buyPrice')}</label><input id="epBuy" inputmode="numeric" value="${esc(p.buy)}">
+    <label>${T('sellPrice')}</label><input id="epSell" inputmode="numeric" value="${esc(p.sell)}">
+    <label>${T('qty')}</label><input id="epQty" inputmode="numeric" value="${esc(q)}">
+    <label>${T('alertAt')}</label><input id="epAlert" inputmode="numeric" value="${esc(p.alert)}">
+    <button class="btn" id="epOk">${T('saveChanges')}</button><button class="btn out" id="epNo">${T('cancel')}</button><p class="err" id="epErr"></p>`);
+  m.querySelector('#epNo').onclick = () => m.remove();
+  m.querySelector('#epOk').onclick = () => {
+    const name = m.querySelector('#epName').value.trim();
+    if (!name) { m.querySelector('#epErr').textContent = T('badBusiness'); return; }
+    const newQty = Math.max(0, Math.round(+m.querySelector('#epQty').value || 0));
+    p.name = name;
+    p.buy = Math.round(+m.querySelector('#epBuy').value || 0);
+    p.sell = Math.round(+m.querySelector('#epSell').value || 0);
+    p.alert = Math.round(+m.querySelector('#epAlert').value || 0);
+    p.u = Date.now();
+    if (newQty !== q) db.moves.push({ id: uid(), pid: p.id, delta: newQty - q, u: Date.now() });
+    saveDB(); m.remove(); render();
+  };
 }
 function saleModal() {
   const d = modal(`<h2>${T('sell')}</h2>
@@ -488,8 +558,12 @@ function docHTML(d) {
     <hr>
     <div class="small">${d.kind === 'DEV' ? T('quote') : T('invoice')} ${esc(d.number)} · ${dayFR(d.date)}</div>
     <div class="small">${T('client')} : ${esc(d.party || '—')}</div>
+    ${d.clientPhone ? `<div class="small">${T('phone')} : ${esc(d.clientPhone)}</div>` : ''}
+    ${d.clientAddress ? `<div class="small">${T('address')} : ${esc(d.clientAddress)}</div>` : ''}
     <table><thead><tr><th>${T('line')}</th><th>${T('qty')}</th><th>${T('sellPrice')}</th><th>${T('total')}</th></tr></thead><tbody>${lines}</tbody></table>
-    <div class="tot"><span>${T('total')}</span><span>${money(d.total)}</span></div>
+    <div class="tot"><span>${T('ht')}</span><span>${money(d.total)}</span></div>
+    ${d.vat ? `<div class="tot"><span>${T('vatShort')} ${d.vat} %</span><span>${money(vatOf(d))}</span></div>` : ''}
+    <div class="tot"><span>${T('ttc')}</span><span>${money(amountOf(d))}</span></div>
     <p class="small">${T('thanks')}</p>`;
 }
 function printFormat(id, format) {
@@ -535,7 +609,10 @@ async function docPdf(d) {
   y += 6;
   pdf.setFontSize(10);
   pdf.text(`${T('client')} : ${d.party || '—'}`, 14, y);
-  y += 8;
+  y += 5;
+  if (d.clientPhone) { pdf.text(`${T('phone')} : ${d.clientPhone}`, 14, y); y += 4.5; }
+  if (d.clientAddress) { pdf.text(`${T('address')} : ${d.clientAddress}`, 14, y); y += 4.5; }
+  y += 3;
   pdf.setFontSize(9);
   pdf.text(T('line'), 14, y);
   pdf.text(T('qty'), 118, y);
@@ -555,31 +632,63 @@ async function docPdf(d) {
   y += 1;
   pdf.line(14, y, 196, y);
   y += 7;
+  pdf.setFontSize(11);
+  pdf.text(`${T('ht')} : ${money(d.total)}`, 196, y, { align: 'right' });
+  y += 6;
+  if (d.vat) { pdf.text(`${T('vatShort')} ${d.vat} % : ${money(vatOf(d))}`, 196, y, { align: 'right' }); y += 6; }
   pdf.setFontSize(13);
-  pdf.text(`${T('total')} : ${money(d.total)}`, 196, y, { align: 'right' });
+  pdf.text(`${T('ttc')} : ${money(amountOf(d))}`, 196, y, { align: 'right' });
   y += 10;
   pdf.setFontSize(8);
   pdf.setTextColor(90, 90, 90);
   pdf.text(T('thanks'), 14, y);
   return pdf.output('blob');
 }
+async function docFile(d) {
+  const blob = await docPdf(d);
+  return new File([blob], d.number + '.pdf', { type: 'application/pdf' });
+}
 async function shareDocPDF(id) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
   try {
-    const blob = await docPdf(d);
-    const file = new File([blob], d.number + '.pdf', { type: 'application/pdf' });
+    const file = await docFile(d);
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: d.number, text: `${db.shop || ''} · ${d.number} · ${money(d.total)}` });
+      await navigator.share({ files: [file], title: d.number, text: `${db.shop || ''} · ${d.number} · ${money(amountOf(d))}` });
       return;
     }
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url; a.download = file.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 6000);
+    alert(T('pdfSaved'));
+    waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(amountOf(d))} — ${db.shop || ''}`);
+  } catch { alert(T('pdfFail')); }
+}
+async function downloadDocPDF(id) {
+  const d = db.docs.find((x) => x.id === id);
+  if (!d) return;
+  try {
+    const url = URL.createObjectURL(await docPdf(d));
     const a = document.createElement('a');
     a.href = url; a.download = d.number + '.pdf'; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 6000);
     alert(T('pdfSaved'));
-    waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(d.total)} — ${db.shop || ''}`);
   } catch { alert(T('pdfFail')); }
+}
+async function emailDocPDF(id) {
+  const d = db.docs.find((x) => x.id === id);
+  if (!d) return;
+  const subject = `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number}`;
+  const body = `${db.shop || ''}\n${subject} · ${dayFR(d.date)}\n${T('client')} : ${d.party || '—'}\n${T('ttc')} : ${money(amountOf(d))}`;
+  try {
+    const file = await docFile(d);
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: d.number, text: body });
+      return;
+    }
+  } catch {}
+  location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 function previewDoc(id) {
   const d = db.docs.find((x) => x.id === id);
@@ -615,12 +724,13 @@ document.addEventListener('click', async (e) => {
     const d = modal(`<h2>${T('expense')}</h2><label>${T('amount')}</label><input id="eAmt" inputmode="numeric">
       <label>${T('reason')}</label><select id="eLabel"><option>Transport</option><option>Loyer</option><option>Électricité</option><option>Salaire</option><option>Marchandise</option><option>Autre</option></select>
       <label>${T('method')}</label><select id="eMethod"><option>Espèces</option><option>Orange Money</option><option>Wave</option><option>MTN</option><option>Moov</option><option>Banque</option></select>
+      <label>${T('note')}</label><input id="eNote" placeholder="${T('noteHint')}">
       <button class="btn" id="eOk">${T('saveExpense')}</button><button class="btn out" id="eNo">${T('cancel')}</button><p class="err" id="eErr"></p>`);
     d.querySelector('#eNo').onclick = () => d.remove();
     d.querySelector('#eOk').onclick = () => {
       const amount = Math.round(+d.querySelector('#eAmt').value || 0);
       if (!amount) { d.querySelector('#eErr').textContent = T('errorAmount'); return; }
-      db.expenses.push({ id: uid(), date: todayISO(), amount, label: d.querySelector('#eLabel').value, method: d.querySelector('#eMethod').value, u: Date.now() });
+      db.expenses.push({ id: uid(), date: todayISO(), amount, label: d.querySelector('#eLabel').value, note: d.querySelector('#eNote').value.trim(), method: d.querySelector('#eMethod').value, u: Date.now() });
       saveDB(); d.remove(); render();
     };
   }
@@ -650,28 +760,66 @@ document.addEventListener('click', async (e) => {
     const name = document.getElementById('cName').value.trim();
     if (!name) return;
     const phone = document.getElementById('cPhone').value.trim();
+    const address = document.getElementById('cAddress').value.trim();
     const found = db.parties.find((p) => p.name.toLowerCase() === name.toLowerCase());
-    if (found) { found.phone = phone; found.u = Date.now(); } else db.parties.push({ id: uid(), name, phone, u: Date.now() });
+    if (found) { found.phone = phone; found.address = address; found.u = Date.now(); } else db.parties.push({ id: uid(), name, phone, address, u: Date.now() });
     saveDB(); render();
   }
-  if (act === 'addDebt') {
+  if (act === 'addSupplier') {
+    const name = document.getElementById('sName').value.trim();
+    if (!name) return;
+    const phone = document.getElementById('sPhone').value.trim();
+    const address = document.getElementById('sAddress').value.trim();
+    const found = db.suppliers.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    if (found) { found.phone = phone; found.address = address; found.u = Date.now(); } else db.suppliers.push({ id: uid(), name, phone, address, u: Date.now() });
+    saveDB(); render();
+  }
+  if (act === 'waSup') {
+    const s = db.suppliers.find((x) => x.name === b.dataset.name) || {};
+    waOpen(s.phone, '');
+  }
+  if (act === 'editProduct') productModal(b.dataset.id);
+  if (act === 'delProduct') {
+    const p = db.products.find((x) => x.id === b.dataset.id);
+    if (!p) return;
+    if (!confirm(T('confirmDelete'))) return;
+    db.products = db.products.filter((x) => x.id !== p.id);
+    db.moves = (db.moves || []).filter((m) => m.pid !== p.id);
+    saveDB(); render();
+  }
+  if (act === 'addPurchase') {
     const supplier = document.getElementById('dSup').value.trim();
     const amount = Math.round(+document.getElementById('dAmt').value || 0);
+    const paid = Math.max(0, Math.min(amount, Math.round(+document.getElementById('dPaid').value || 0)));
+    const pid = document.getElementById('dPid').value;
+    const qty = Math.max(0, Math.round(+document.getElementById('dQty').value || 0));
+    const receivedIn = document.getElementById('dRecv').checked;
     if (!supplier || !amount) return;
-    if (!db.suppliers.some((s) => s.name.toLowerCase() === supplier.toLowerCase())) db.suppliers.push({ id: uid(), name: supplier, phone: '', u: Date.now() });
-    db.debts.push({ id: uid(), date: todayISO(), supplier, amount, paid: 0, u: Date.now() });
+    if (!db.suppliers.some((s) => s.name.toLowerCase() === supplier.toLowerCase())) db.suppliers.push({ id: uid(), name: supplier, phone: '', address: '', u: Date.now() });
+    const id = uid();
+    const now = Date.now();
+    db.debts.push({ id, date: todayISO(), supplier, amount, paid, delivered: receivedIn, stocked: receivedIn && !!pid, pid: pid || '', qty: pid ? qty : 0, u: now });
+    if (receivedIn && pid && qty > 0) db.moves.push({ id: 'mv-' + id, pid, delta: qty, u: now });
     saveDB(); render();
   }
-  if (act === 'payDebt') {
+  if (act === 'payDebt') payDebtModal(b.dataset.id);
+  if (act === 'deliverDebt') {
     const d = db.debts.find((x) => x.id === b.dataset.id);
-    if (d) { d.paid = d.amount; d.u = Date.now(); saveDB(); render(); }
+    if (d && d.delivered === false) {
+      d.delivered = true; d.u = Date.now();
+      if (d.pid && Number(d.qty) > 0 && !d.stocked) {
+        db.moves.push({ id: 'mv-' + d.id, pid: d.pid, delta: Number(d.qty), u: Date.now() });
+        d.stocked = true;
+      }
+      saveDB(); render();
+    }
   }
   if (act === 'pay') payModal(b.dataset.name);
   if (act === 'wa') {
     const name = b.dataset.name;
     waOpen((db.parties.find((p) => p.name === name) || {}).phone, reminderText(name));
   }
-  if (act === 'newDoc') { draft = { party: '', lines: [{ label: '', qty: 1, price: 0 }] }; render(); }
+  if (act === 'newDoc') { draft = { party: '', phone: '', address: '', vat: db.settings.vat || 0, lines: [{ label: '', qty: 1, price: 0 }] }; render(); }
   if (act === 'addLine') { syncDraft(); draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
   if (act === 'delLine') { syncDraft(); draft.lines.splice(+b.dataset.i, 1); if (!draft.lines.length) draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
   if (act === 'closeDoc') { draft = null; render(); }
@@ -680,8 +828,9 @@ document.addEventListener('click', async (e) => {
     const lines = draft.lines.filter((l) => String(l.label).trim() && +l.price > 0)
       .map((l) => ({ label: String(l.label).trim(), qty: +l.qty || 1, price: +l.price }));
     if (!lines.length) return;
-    const total = lines.reduce((a, l) => a + l.qty * l.price, 0);
-    db.docs.push({ id: uid(), kind: 'DEV', number: num('DEV'), date: todayISO(), party: draft.party.trim(), lines, total, status: 'devis', u: Date.now() });
+    const total = Math.round(lines.reduce((a, l) => a + l.qty * l.price, 0));
+    const rate = Math.max(0, Number(draft.vat) || 0);
+    db.docs.push({ id: uid(), kind: 'DEV', number: num('DEV'), date: todayISO(), party: draft.party.trim(), clientPhone: (draft.phone || '').trim(), clientAddress: (draft.address || '').trim(), vat: rate, lines, total, status: 'devis', u: Date.now() });
     draft = null; saveDB(); tab = 'docs'; render();
   }
   if (act === 'toFacture') {
@@ -708,10 +857,8 @@ document.addEventListener('click', async (e) => {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (d) waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(d.total)} — ${db.shop || ''}`);
   }
-  if (act === 'mailDoc') {
-    const d = db.docs.find((x) => x.id === b.dataset.id);
-    if (d) location.href = `mailto:?subject=${encodeURIComponent(`${d.kind} ${d.number}`)}&body=${encodeURIComponent(`${db.shop || ''}\n${d.kind} ${d.number} · ${dayFR(d.date)}\n${T('total')} : ${money(d.total)}`)}`;
-  }
+  if (act === 'mailDoc') emailDocPDF(b.dataset.id);
+  if (act === 'dlPdf') downloadDocPDF(b.dataset.id);
   if (act === 'openSettings') settingsModal();
   if (act === 'syncNow') pushNow();
   if (act === 'logout') {
@@ -730,6 +877,12 @@ function syncDraft() {
   });
   const p = document.getElementById('dParty');
   if (p) draft.party = p.value;
+  const ph = document.getElementById('dPhone');
+  if (ph) draft.phone = ph.value;
+  const ad = document.getElementById('dAddress');
+  if (ad) draft.address = ad.value;
+  const vt = document.getElementById('dVat');
+  if (vt) draft.vat = Math.max(0, +vt.value || 0);
 }
 
 /* ---------------- réglages ---------------- */
@@ -760,6 +913,8 @@ function settingsModal() {
     <label>${T('city')}</label><input id="setCity" value="${esc(db.settings.city || '')}">
     <label>${T('district')}</label><input id="setDistrict" value="${esc(db.settings.district || '')}">
     <label>${T('address')}</label><input id="setAddress" value="${esc(db.settings.address || '')}">
+    <label>${T('vat')}</label><input id="setVat" inputmode="numeric" value="${esc(db.settings.vat == null ? 18 : db.settings.vat)}">
+    <p class="hint">${T('vatHint')}</p>
     <p class="hint">${T('currency')} : <b id="setCur">${esc(db.settings.currency || currencyFor(db.settings.country || 'CI'))}</b> — ${T('currencyAuto')}</p>
     <label>${T('logo')}</label>
     <input type="file" id="setLogo" accept="image/*">
@@ -825,6 +980,7 @@ function settingsModal() {
     db.settings.city = d.querySelector('#setCity').value.trim();
     db.settings.district = d.querySelector('#setDistrict').value.trim();
     db.settings.address = d.querySelector('#setAddress').value.trim();
+    db.settings.vat = Math.max(0, Math.round(+d.querySelector('#setVat').value || 0));
     db.settings.logo = logoDraft;
     saveDB(); d.remove(); render();
   };
@@ -1315,6 +1471,15 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'histMethod') { histMethod = e.target.value; render(); }
+  if (e.target.id === 'dParty') {
+    const p = db.parties.find((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase());
+    if (p) {
+      const ph = document.getElementById('dPhone');
+      const ad = document.getElementById('dAddress');
+      if (ph && !ph.value && p.phone) ph.value = p.phone;
+      if (ad && !ad.value && p.address) ad.value = p.address;
+    }
+  }
 });
 window.addEventListener('online', () => { render(); syncTick(); });
 window.addEventListener('offline', render);
