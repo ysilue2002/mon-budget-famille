@@ -236,13 +236,7 @@ function clients() {
           <button class="btn small out" data-act="editClient" data-id="${p.id}">${T('edit')}</button>
           <button class="btn small out" data-act="delClient" data-id="${p.id}">${T('delete')}</button></div></div>`).join('') || `<p class="empty">${T('noClientsList')}</p>`}
       </div>
-      <div class="card"><h3>${T('clientCard')}</h3>
-        <label>${T('name')}</label><input id="cName" placeholder="Awa Traoré">
-        <label>${T('phone')}</label><input id="cPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
-        <label>${T('address')}</label><input id="cAddress" placeholder="Cocody, près de la pharmacie">
-        <button class="btn" data-act="addParty">${T('saveClient')}</button>
-        <p class="hint">${T('phoneHint')}</p>
-      </div>` : `
+` : `
       <div class="kpis">
         <div class="kpi"><span>${T('totalPurchases')}</span><b>${money(supTotal)}</b></div>
         <div class="kpi"><span>${T('debts')}</span><b>${money(supRest)}</b></div>
@@ -276,21 +270,7 @@ function clients() {
         </div></div>`).join('') || `<p class="empty">${T('noSuppliers')}</p>`}
         <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
       </div>
-      <details class="card"><summary><b>＋ ${T('supplierCard')}</b></summary>
-        <label>${T('name')}</label><input id="sName" placeholder="Grossiste Adjamé">
-        <label>${T('phone')}</label><input id="sPhone" inputmode="tel">
-        <label>${T('address')}</label><input id="sAddress">
-        <button class="btn" data-act="addSupplier">${T('saveSupplier')}</button>
-      </details>
-      <details class="card"><summary><b>＋ ${T('newPurchase')}</b></summary>
-        <label>${T('supplier')}</label><input id="dSup" list="supNames" placeholder="Grossiste Adjamé"><datalist id="supNames">${db.suppliers.map((s) => `<option value="${esc(s.name)}"></option>`).join('')}</datalist>
-        <label>${T('amount')}</label><input id="dAmt" inputmode="numeric" placeholder="0">
-        <label>${T('alreadyPaid')}</label><input id="dPaid" inputmode="numeric" placeholder="0">
-        <label>${T('articleOptional')}</label><select id="dPid"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
-        <label>${T('qty')}</label><input id="dQty" inputmode="numeric" value="1">
-        <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="dRecv" checked style="width:auto"><span>${T('received')}</span></label>
-        <button class="btn" data-act="addPurchase">${T('saveDebt')}</button>
-      </details>`}`;
+`}`;
 }
 
 /* ---------------- Documents ---------------- */
@@ -303,11 +283,8 @@ function filterDocs(q) {
 function docsList(list) {
   return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}</div></div><div class="right">
         <button class="btn small" data-act="print" data-id="${d.id}">${T('print')}</button>
-        <button class="btn small whats" data-act="waDoc" data-id="${d.id}">${T('whatsapp')}</button>
-        <button class="btn small pdf" data-act="waPdf" data-id="${d.id}">${T('pdf')}</button>
+        <button class="btn small whats" data-act="waPdf" data-id="${d.id}">${T('sendWhatsApp')}</button>
         <button class="btn small out" data-act="dlPdf" data-id="${d.id}">${T('download')}</button>
-        <button class="btn small out" data-act="duplicate" data-id="${d.id}">${T('duplicate')}</button>
-        <button class="btn small mail" data-act="mailDoc" data-id="${d.id}">${T('email')}</button>
         ${d.kind === 'DEV' ? `<button class="btn small out" data-act="toFacture" data-id="${d.id}">${T('toInvoice')}</button>` : ''}
       </div></div>`).join('') || `<p class="empty">${T('noDocs')}</p>`;
 }
@@ -409,6 +386,8 @@ function bilans() {
       <div class="kpi"><span>${T('profit')}</span><b>${money(profit)}</b></div>
     </div>
     <div class="card">
+      <div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>
+      <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(Math.max(0, ca - cash))}</div></div>
       <div class="row"><div class="t">${T('cashOut')}</div><div class="t">${money(totalDue())}</div></div>
       <div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>
       <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
@@ -686,6 +665,8 @@ function saleModal() {
     <label>${T('product')}</label><select id="sProduct"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}">${esc(p.name)} (${qtyOf(p)})</option>`).join('')}</select>
     <label>${T('qty')}</label><input id="sQty" inputmode="numeric" value="1">
     <label>${T('client')}</label><input id="sParty">
+    <label>${T('clientPhone')}</label><input id="sPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
+    <label>${T('clientAddress')}</label><input id="sAddress" placeholder="Cocody, près de la pharmacie">
     <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="sCredit" style="width:auto"><span>${T('creditLater')}</span></label>
     <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="sDeliv" checked style="width:auto"><span>${T('deliveredGoods')}</span></label>
     <button class="btn" id="sOk">${T('saveSale')}</button>
@@ -714,7 +695,18 @@ function saleModal() {
     const sale = { id: sid, date: todayISO(), total, paid: credit ? 0 : total, method: d.querySelector('#sMethod').value, party, pid: pid || '', product, qty: product ? qty : 0, cost, delivered: d.querySelector('#sDeliv').checked, u: now };
     db.sales.push(sale);
     if (pid) db.moves.push({ id: 'mv-' + sid, pid, delta: -qty, u: now });
-    if (party && !db.parties.some((x) => x.name.toLowerCase() === party.toLowerCase())) db.parties.push({ id: uid(), name: party, phone: '', u: now });
+    if (party) {
+      const phone = d.querySelector('#sPhone').value.trim();
+      const address = d.querySelector('#sAddress').value.trim();
+      const known = db.parties.find((x) => x.name.toLowerCase() === party.toLowerCase());
+      if (known) {
+        if (phone && !known.phone) known.phone = phone;
+        if (address && !known.address) known.address = address;
+        known.u = now;
+      } else {
+        db.parties.push({ id: uid(), name: party, phone, address, u: now });
+      }
+    }
     saveDB(); d.remove(); render(); saleDone(sale);
   };
 }
