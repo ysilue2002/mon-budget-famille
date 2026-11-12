@@ -444,7 +444,7 @@ function supplierModal(id) {
 function exportCsv() {
   const list = histSales();
   const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-  const rows = [[T('dueDate'), T('client'), T('product'), T('qty'), T('total'), T('paid'), T('remains'), T('method')]];
+  const rows = [[T('dueDate'), T('client'), T('article'), T('quantity'), T('total'), T('paid'), T('remains'), T('method')]];
   list.forEach((s) => rows.push([dayFR(s.date), s.party || '', s.product || '', s.product ? s.qty : '', s.total, paidOf(s), creditOf(s), s.method || '']));
   const csv = '\ufeff' + rows.map((r) => r.map(cell).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
