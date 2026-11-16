@@ -52,6 +52,8 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS resets (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS mail_log (user_id TEXT PRIMARY KEY, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS throttle (key TEXT PRIMARY KEY, hits INTEGER NOT NULL, reset INTEGER NOT NULL)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS state_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, rev INTEGER NOT NULL, json TEXT NOT NULL, updated INTEGER NOT NULL, saved INTEGER NOT NULL)'),
+    env.DB.prepare('CREATE INDEX IF NOT EXISTS state_history_user ON state_history(user_id, id)'),
   ]).then(async () => {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
     // Comptes par téléphone uniquement : l'e-mail et le téléphone deviennent facultatifs.
@@ -139,6 +141,17 @@ async function readBody(request) {
   const text = await request.text();
   if (text.length > MAX_BODY) throw new Error('trop volumineux');
   return text ? JSON.parse(text) : {};
+}
+
+/* Dix versions suffisent pour rattraper une erreur sans faire grossir la base. */
+const HISTORY_KEEP = 10;
+async function rememberState(env, userId, rev, json, updated) {
+  await env.DB.prepare('INSERT INTO state_history (user_id, rev, json, updated, saved) VALUES (?, ?, ?, ?, ?)')
+    .bind(userId, rev, json, updated, Date.now())
+    .run();
+  await env.DB.prepare(
+    'DELETE FROM state_history WHERE user_id = ? AND id NOT IN (SELECT id FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT ?)',
+  ).bind(userId, userId, HISTORY_KEEP).run();
 }
 
 async function api(request, env, url) {
@@ -309,6 +322,28 @@ async function api(request, env, url) {
     return json(row ? { json: row.json, rev: row.rev, updated: row.updated } : { json: null, rev: 0, updated: 0 });
   }
 
+  if (path === '/api/data/history' && request.method === 'GET') {
+    const rows = await env.DB.prepare(
+      'SELECT id, rev, updated, saved, length(json) AS bytes FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT 20',
+    ).bind(user.id).all();
+    return json({ versions: rows.results || [] });
+  }
+
+  if (path === '/api/data/restore' && request.method === 'POST') {
+    const body = await readBody(request);
+    const id = Number(body.id) || 0;
+    const version = await env.DB.prepare('SELECT json, rev, updated FROM state_history WHERE user_id = ? AND id = ?').bind(user.id, id).first();
+    if (!version) return json({ error: 'notfound' }, 404);
+    const current = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(user.id).first();
+    /* L'état remplacé part dans l'historique : une restauration reste réversible. */
+    if (current) await rememberState(env, user.id, current.rev, current.json, current.updated);
+    const rev = (current ? current.rev : 0) + 1;
+    await env.DB.prepare(
+      'INSERT INTO state (user_id, json, rev, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, rev = excluded.rev, updated = excluded.updated',
+    ).bind(user.id, version.json, rev, Date.now()).run();
+    return json({ restored: true, rev });
+  }
+
   if (path === '/api/data' && request.method === 'PUT') {
     const body = await readBody(request);
     const incoming = Number(body.updated) || 0;
@@ -318,6 +353,9 @@ async function api(request, env, url) {
     if (row && row.rev > incomingRev) {
       return json({ saved: false, json: row.json, rev: row.rev, updated: row.updated });
     }
+    /* La version écrasée est conservée avant écriture : c'est le filet de
+       sécurité si une synchronisation remplace un état par erreur. */
+    if (row && row.json !== payload) await rememberState(env, user.id, row.rev, row.json, row.updated);
     const rev = (row ? row.rev : 0) + 1;
     await env.DB.prepare(
       'INSERT INTO state (user_id, json, rev, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, rev = excluded.rev, updated = excluded.updated',

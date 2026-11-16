@@ -1,0 +1,16 @@
+# Dépendances et état local de Wrangler (base D1 de développement)
+node_modules/
+.wrangler/
+
+# Sorties générées par build.js pour l'ancienne adresse Render
+dist/
+build/
+out/
+.tmp-build/
+
+# Journal du serveur de développement
+vite.log
+dev.log
+
+.DS_Store
+Thumbs.db

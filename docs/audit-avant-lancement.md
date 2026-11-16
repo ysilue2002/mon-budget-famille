@@ -1,5 +1,35 @@
 # Tour complet avant de montrer l'application aux commerçants
 
+## État au 13 novembre 2026 (corrections faites dans le code local)
+
+Traités et vérifiés sur l'application servie localement, au format téléphone
+(390 px), en français et en arabe :
+
+1. **Débordement de l'écran Documents : corrigé.** La page mesure maintenant
+   390 px pour un écran de 390 px ; les boutons (Imprimer, WhatsApp,
+   Télécharger, Facture, Modifier, Supprimer) passent à la ligne. Vérifié aussi
+   sur Vendre, Stock, Clients, Bilans et Historique.
+2. **Corriger ou supprimer une écriture : fait.** Une vente, une dépense, un
+   devis, une facture, un paiement (client ou fournisseur) et un achat
+   fournisseur peuvent être modifiés ou supprimés, avec confirmation. Le stock
+   est recalculé (une vente modifiée ou supprimée rend ou reprend la
+   marchandise), le total encaissé suit le nouveau montant, et une dépense
+   « Marchandise » met à jour l'achat fournisseur lié. Une suppression ne
+   revient pas après synchronisation avec un autre téléphone (pierres
+   tombales conservées 90 jours).
+4. **Bénéfice des ventes sans article : corrigé.** La fenêtre de vente demande
+   le coût d'achat quand la vente n'est pas liée au stock ; sans ce coût, le
+   bilan affiche « Bénéfice estimé » et le nombre de ventes à compléter.
+5. **WhatsApp sans PDF sur ordinateur : expliqué** par une phrase sous la
+   liste des documents.
+
+Restent à faire : le point 3 (envoi réel des e-mails avec Resend, qui demande
+une clé et une adresse d'expédition), et les améliorations 6 à 18.
+
+---
+
+# Tour complet (état d'origine)
+
 Vérification faite sur la version en ligne, avec le compte de test, sur un écran
 de téléphone (390 et 430 px), en français et en arabe. Aucune erreur dans la
 console du navigateur, aucun débordement sauf celui noté ci-dessous.

@@ -23,11 +23,15 @@ const currencyFor = (code) => countryOf(code)[2];
 const countryOptions = (sel) => COUNTRIES.map((c) => `<option value="${c[0]}" ${c[0] === sel ? 'selected' : ''}>${c[1]} — ${c[2]}</option>`).join('');
 const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f === sel ? 'selected' : ''}>${f}</option>`).join('');
 const fresh = () => ({
-  shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [],
+  shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], tomb: [],
   seq: { DEV: 0, FAC: 0 },
   settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
+/* Garde-fou de taille : le serveur refuse au-delà de 2 Mo (worker.js). Prévenir
+   bien avant, sinon les sauvegardes échouent en silence. */
+const MAX_STATE = 1800000;
+const stateBytes = () => { try { return JSON.stringify(db).length; } catch { return 0; } };
 let db = loadDB();
 let tab = 'vendre';
 let side = 'clients';
@@ -38,6 +42,12 @@ let docQuery = '';
 let histQuery = '';
 let histMethod = 'all';
 let histPeriod = 'mois';
+/* L'historique s'affiche par paliers : les totaux, les filtres et l'export
+   continuent de porter sur la liste complète (histSales), pas sur les lignes visibles. */
+const HIST_PAGE = 50;
+let histShown = HIST_PAGE;
+/* Version du cache, lue dans version.json (fichier généré par scripts/cache.js). */
+let appVersion = '';
 
 function loadDB() {
   try {
@@ -47,6 +57,7 @@ function loadDB() {
     const base = fresh();
     const out = Object.assign(base, parsed, { settings: Object.assign(base.settings, parsed.settings || {}) });
     migrate(out);
+    try { out.meta.tooBig = JSON.stringify(out).length > MAX_STATE; } catch {}
     return out;
   } catch { return fresh(); }
 }
@@ -54,21 +65,48 @@ function loadDB() {
 function migrate(d) {
   d.meta = d.meta || {};
   d.moves = Array.isArray(d.moves) ? d.moves : [];
+  /* Pierres tombales : un enregistrement supprimé sur un téléphone ne doit pas
+     revenir lors de la fusion avec un autre téléphone. Conservées 90 jours. */
+  d.tomb = Array.isArray(d.tomb) ? d.tomb.filter((t) => t && t.id && Date.now() - (t.u || 0) < 90 * 86400000) : [];
   if (!d.meta.mv) {
     for (const p of d.products || []) if (!d.moves.some((m) => m.pid === p.id)) d.moves.push({ id: 'mv-' + p.id, pid: p.id, delta: Number(p.qty) || 0, u: 1 });
     d.meta.mv = 1;
   }
 }
+/* Supprime définitivement un enregistrement, localement et après fusion. */
+function delRecord(kind, id) {
+  db[kind] = (db[kind] || []).filter((x) => x.id !== id);
+  db.tomb = Array.isArray(db.tomb) ? db.tomb : [];
+  if (!db.tomb.some((t) => t.id === id)) db.tomb.push({ id, k: kind, u: Date.now() });
+}
+/* Des modifications locales ne sont pas encore confirmées par le serveur.
+   Sans ce drapeau, un envoi raté laissait l'application en erreur définitive :
+   la synchronisation périodique ne faisait plus que tirer l'état distant. */
+let dirty = false;
 function saveDB(toucher = true) {
-  if (toucher) db.meta.updated = Date.now();
-  try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
+  if (toucher) { db.meta.updated = Date.now(); dirty = true; }
+  try {
+    const text = JSON.stringify(db);
+    db.meta.tooBig = text.length > MAX_STATE;
+    localStorage.setItem(KEY, text);
+  } catch {}
   if (toucher) queueSync();
 }
 const T = (k) => (I18N[db.settings.lang] || I18N.fr)[k] || I18N.fr[k] || k;
 const uid = () => Math.random().toString(36).slice(2, 10);
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const fr = (n) => Math.round(n || 0).toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ');
+/* Date du calendrier local : en UTC, une vente saisie après minuit (fuseau à l'est
+   de Greenwich) serait classée la veille. */
+const todayISO = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+/* Le séparateur de milliers reste insécable : avec une espace normale, l'affichage
+   en arabe (RTL) coupe « 5 » et « 000 » en deux blocs et inverse leur ordre. */
+const fr = (n) => Math.round(n || 0).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g, '\u00a0');
 const money = (n) => fr(n) + ' ' + ((db.settings && db.settings.currency) || 'FCFA');
+const sizeWarning = () => (db.meta && db.meta.tooBig
+  ? `<div class="card warnCard"><b>${T('tooBigTitle')}</b><p class="hint">${T('tooBigHint')}</p><p class="hint">${Math.round(stateBytes() / 1000)} Ko / 2 000 Ko</p></div>`
+  : '');
 const dayFR = (iso) => (iso || '').split('-').reverse().join('/');
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const inPeriod = (date, p) => {
@@ -128,8 +166,9 @@ function render() {
   });
   const view = { vendre, stock, clients, docs, bilans, hist, pending }[tab]();
   const ads = adsHTML();
-  document.getElementById('app').innerHTML = (tab === 'vendre' ? ads.top : '') + view + (tab === 'vendre' ? ads.bottom : '');
+  document.getElementById('app').innerHTML = sizeWarning() + (tab === 'vendre' ? ads.top : '') + view + (tab === 'vendre' ? ads.bottom : '');
   if (draft) document.getElementById('app').insertAdjacentHTML('beforeend', docForm());
+  linkLabels(document.getElementById('app'));
 }
 
 /* ---------------- publicité (désactivée par défaut) ---------------- */
@@ -147,8 +186,8 @@ function vendre() {
   const t = db.sales.filter((s) => s.date === todayISO());
   const ca = t.reduce((a, s) => a + s.total, 0);
   const list = [
-    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(s.method)}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button></div></div>`),
-    ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div>${e.delivered === false ? `<div class="right"><span class="tag warn">${T('saleNotDelivered')}</span><br><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div>` : ''}</div>`),
+    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(methodLabel(s.method))}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button><button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button></div></div>`),
+    ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(methodLabel(e.method))}</div></div><div class="right">${e.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button>` : ''}<button class="btn small out" data-act="editExpense" data-id="${e.id}">${T('edit')}</button></div></div>`),
     ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
   return `<div class="kpis">
@@ -286,6 +325,8 @@ function docsList(list) {
         <button class="btn small whats" data-act="waPdf" data-id="${d.id}">${T('sendWhatsApp')}</button>
         <button class="btn small out" data-act="dlPdf" data-id="${d.id}">${T('download')}</button>
         ${d.kind === 'DEV' ? `<button class="btn small out" data-act="toFacture" data-id="${d.id}">${T('toInvoice')}</button>` : ''}
+        <button class="btn small out" data-act="editDoc" data-id="${d.id}">${T('edit')}</button>
+        <button class="btn small out" data-act="delDoc" data-id="${d.id}">${T('delete')}</button>
       </div></div>`).join('') || `<p class="empty">${T('noDocs')}</p>`;
 }
 function docs() {
@@ -297,6 +338,7 @@ function docs() {
     <div class="card" style="margin-top:16px"><h3>${T('myDocs')}</h3>
       <input id="docSearch" type="search" placeholder="${T('searchDocs')}" value="${esc(docQuery)}" autocomplete="off">
       <div id="docList">${docsList(filterDocs(docQuery))}</div>
+      <p class="hint">${T('pdfDesktopHint')}</p>
     </div>`;
 }
 /* ---------------- Historique des ventes ---------------- */
@@ -316,12 +358,18 @@ function histSummary(list) {
       <div class="kpi"><span>${T('remains')}</span><b>${money(Math.max(0, ca - cash))}</b></div>`;
 }
 function histRows(list) {
-  return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div><div class="s">${dayFR(s.date)} · ${esc(s.method)}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">
+  return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div><div class="s">${dayFR(s.date)} · ${esc(methodLabel(s.method))}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">
       ${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
       ${s.delivered === false ? `<button class="btn small out" data-act="deliverSale" data-id="${s.id}">${T('markSaleDelivered')}</button>` : ''}
       <button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button>
       <button class="btn small pdf" data-act="receiptPdf" data-id="${s.id}">${T('pdf')}</button>
+      <button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button>
     </div></div>`).join('') || `<p class="empty">${T('noSalesFound')}</p>`;
+}
+function histListHTML(list, shown) {
+  const n = Math.min(shown, list.length);
+  const more = n < list.length ? `<button class="btn out" data-act="histMore">${T('showMore')} · ${n} / ${list.length}</button>` : '';
+  return histRows(list.slice(0, n)) + `<div id="histMoreWrap">${more}</div>`;
 }
 function hist() {
   const list = histSales();
@@ -334,12 +382,13 @@ function hist() {
     <div class="card">
       <input id="histSearch" type="search" placeholder="${T('searchSales')}" value="${esc(histQuery)}" autocomplete="off">
       <label>${T('method')}</label>
-      <select id="histMethod"><option value="all">${T('allMethods')}</option>${methods.map((m) => `<option value="${esc(m)}" ${m === histMethod ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>
+      <select id="histMethod"><option value="all">${T('allMethods')}</option>${methods.map((m) => `<option value="${esc(m)}" ${m === histMethod ? 'selected' : ''}>${esc(methodLabel(m))}</option>`).join('')}</select>
     </div>
     <div class="kpis" id="histSum">${histSummary(list)}</div>
-    <div class="card" id="histList">${histRows(list)}</div>`;
+    <div class="card" id="histList">${histListHTML(list, histShown)}</div>`;
 }
 function docForm() {
+  const editing = !!draft.id;
   const rows = draft.lines.map((l, i) => `<div class="line-row">
     <input data-l="label" data-i="${i}" placeholder="${T('line')}" value="${esc(l.label)}">
     <input data-l="qty" data-i="${i}" inputmode="numeric" value="${esc(l.qty)}">
@@ -349,7 +398,7 @@ function docForm() {
   const rate = Math.max(0, Number(draft.vat) || 0);
   const vat = Math.round((total * rate) / 100);
   return `<div class="modal"><div class="sheet">
-    <h2>${T('newQuote')}</h2>
+    <h2>${editing ? T('editDoc') : T('newQuote')}</h2>
     <label>${T('client')}</label><input id="dParty" value="${esc(draft.party)}">
     <label>${T('clientPhone')}</label><input id="dPhone" inputmode="tel" value="${esc(draft.phone || '')}">
     <label>${T('clientEmail')}</label><input id="dEmail" type="email" value="${esc(draft.email || '')}">
@@ -360,8 +409,9 @@ function docForm() {
     <div class="row" style="margin-top:10px"><div class="t">${T('ht')}</div><div class="t">${money(total)}</div></div>
     ${rate ? `<div class="row"><div class="t">${T('vatShort')} ${rate} %</div><div class="t">${money(vat)}</div></div>` : ''}
     <div class="row"><div class="t">${T('ttc')}</div><div class="t">${money(total + vat)}</div></div>
-    <button class="btn" data-act="saveDoc">${T('saveQuote')}</button>
+    <button class="btn" data-act="saveDoc">${editing ? T('saveChanges') : T('saveQuote')}</button>
     <button class="btn out" data-act="closeDoc">${T('cancel')}</button>
+    ${editing ? `<button class="btn out" data-act="delDoc" data-id="${draft.id}" style="color:#b91c1c;border-color:#b91c1c">${T('deleteDoc')}</button>` : ''}
   </div></div>`;
 }
 
@@ -374,6 +424,8 @@ function bilans() {
   const dep = exp.reduce((a, e) => a + e.amount, 0);
   const cogs = sales.reduce((a, s) => a + (s.cost || 0), 0);
   const profit = ca - cogs - dep;
+  /* Sans prix d'achat connu, le bénéfice est surestimé : on le dit clairement. */
+  const unknownCost = sales.filter((s) => (Number(s.total) || 0) > 0 && !s.costKnown);
   const wd = db.withdrawals.filter((w) => inPeriod(w.date, period)).reduce((a, w) => a + w.amount, 0);
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
@@ -383,8 +435,9 @@ function bilans() {
       <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
       <div class="kpi"><span>${T('expenses')}</span><b>${money(dep)}</b></div>
-      <div class="kpi"><span>${T('profit')}</span><b>${money(profit)}</b></div>
+      <div class="kpi"><span>${unknownCost.length ? T('profitEstimated') : T('profit')}</span><b>${money(profit)}</b></div>
     </div>
+    ${unknownCost.length ? `<div class="card" style="border-color:#f3d08a;background:#fffaeb"><p class="hint" style="margin:0">${T('profitUnknownHint')} <b>${unknownCost.length}</b> ${T('salesNoCost')}</p><button class="btn out" data-act="hist">${T('fixSalesCost')}</button></div>` : ''}
     <div class="card">
       <div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>
       <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(Math.max(0, ca - cash))}</div></div>
@@ -397,21 +450,53 @@ function bilans() {
 }
 
 /* ---------------- modales ---------------- */
+/* Un lecteur d'écran a besoin de savoir quel libellé décrit quel champ : on relie
+   chaque <label> au premier champ qui le suit, partout dans l'application. */
+function linkLabels(root) {
+  (root || document).querySelectorAll('label').forEach((label) => {
+    if (label.htmlFor) return;
+    let el = label.nextElementSibling;
+    while (el && !['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) el = el.nextElementSibling;
+    if (el && el.id) label.htmlFor = el.id;
+  });
+}
+/* L'écran de connexion couvre l'application : le contenu dessous ne doit plus être
+   atteignable au clavier ni annoncé par un lecteur d'écran. */
+function setBackgroundInert(on) {
+  ['header', 'main', '#nav', '#printArea'].forEach((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    el.inert = on;
+    if (on) el.setAttribute('aria-hidden', 'true'); else el.removeAttribute('aria-hidden');
+  });
+}
 function modal(html) {
   const d = document.createElement('div');
   d.className = 'modal';
   d.innerHTML = `<div class="sheet">${html}</div>`;
   d.addEventListener('click', (e) => { if (e.target === d) d.remove(); });
   document.body.appendChild(d);
+  linkLabels(d);
   return d;
 }
 function payDebtModal(id) {
   const d = db.debts.find((x) => x.id === id);
   if (!d) return;
+  const pays = Array.isArray(d.pays) ? d.pays : [];
   const m = modal(`<h2>${esc(d.supplier)}</h2><p class="hint">${T('remains')} ${money(debtOf(d))}</p>
+    ${pays.length ? `<h3>${T('payments')}</h3>${pays.map((p) => `<div class="row"><div class="t">${money(p.amount)}</div><div class="right"><button class="btn small out" data-delpay="${p.id}">${T('delete')}</button></div></div>`).join('')}` : ''}
     <label>${T('payReceived')}</label><input id="pdAmt" inputmode="numeric" value="${debtOf(d)}">
     <button class="btn" id="pdOk">${T('savePayment')}</button><button class="btn out" id="pdNo">${T('cancel')}</button><p class="err" id="pdErr"></p>`);
   m.querySelector('#pdNo').onclick = () => m.remove();
+  m.querySelectorAll('[data-delpay]').forEach((btn) => {
+    btn.onclick = () => {
+      if (!confirm(T('confirmDeletePayment'))) return;
+      const p = (d.pays || []).find((x) => x.id === btn.dataset.delpay);
+      d.pays = (d.pays || []).filter((x) => x.id !== btn.dataset.delpay);
+      d.paid = Math.max(0, (Number(d.paid) || 0) - (Number(p && p.amount) || 0));
+      d.u = Date.now(); saveDB(); m.remove(); render(); payDebtModal(id);
+    };
+  });
   m.querySelector('#pdOk').onclick = () => {
     const v = Math.round(+m.querySelector('#pdAmt').value || 0);
     if (v <= 0) { m.querySelector('#pdErr').textContent = T('errorAmount'); return; }
@@ -496,7 +581,7 @@ function clientDetail(id) {
       <div class="kpi"><span>${T('collected')}</span><b>${money(paid)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
     </div>
-    <div class="card">${list.map((s) => `<div class="row"><div><div class="t">${dayFR(s.date)} · ${money(s.total)}</div><div class="s">${esc(s.method)}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}</div></div>`).join('') || `<p class="empty">${T('nothing')}</p>`}</div>
+    <div class="card">${list.map((s) => `<div class="row"><div><div class="t">${dayFR(s.date)} · ${money(s.total)}</div><div class="s">${esc(methodLabel(s.method))}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}</div></div>`).join('') || `<p class="empty">${T('nothing')}</p>`}</div>
     <button class="btn" id="cdPrint">${T('printSheet')}</button>
     <button class="btn out" id="cdNo">${T('close')}</button>`);
   m.querySelector('#cdNo').onclick = () => m.remove();
@@ -572,7 +657,7 @@ function pending() {
     <div class="kpis"><div class="kpi"><span>${T('pendingPurchases')}</span><b>${list.length + exps.length}</b></div><div class="kpi"><span>${T('totalPending')}</span><b>${money(total)}</b></div></div>
     <button class="btn" data-act="printPending">${T('printList')}</button>
     ${pendingExpenses().length ? `<div class="card" style="margin-top:14px"><h3>${T('pendingGoods')}</h3>
-      ${pendingExpenses().map((e) => `<div class="row"><div><div class="t">${dayFR(e.date)} · ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(e.method)}</div></div><div class="right">${daysSince(e.date) >= 7 ? `<span class="tag bad">${daysSince(e.date)} ${T('days')}</span> ` : ''}<button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
+      ${pendingExpenses().map((e) => `<div class="row"><div><div class="t">${dayFR(e.date)} · ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(methodLabel(e.method))}</div></div><div class="right">${daysSince(e.date) >= 7 ? `<span class="tag bad">${daysSince(e.date)} ${T('days')}</span> ` : ''}<button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
     </div>` : ''}
     ${names.map((n) => {
       const rows = list.filter((d) => d.supplier === n);
@@ -600,7 +685,7 @@ function supplierDetail(id) {
       <div class="kpi"><span>${T('paid')}</span><b>${money(paid)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
     </div>
-    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right"><span class="tag">${payMode(d)}</span> ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}${debtOf(d) ? ` <button class="btn small" data-pay="${d.id}">${T('paySupplier')}</button>` : ''}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
+    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right"><span class="tag">${payMode(d)}</span> ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}${debtOf(d) ? ` <button class="btn small" data-pay="${d.id}">${T('paySupplier')}</button>` : ''} <button class="btn small out" data-act="delDebt" data-id="${d.id}">${T('delete')}</button></div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
     <button class="btn" id="sdPrint">${T('printSheet')}</button>
     <button class="btn out" id="sdNo">${T('close')}</button>`);
   m.querySelector('#sdNo').onclick = () => m.remove();
@@ -658,24 +743,59 @@ function exportCsv() {
   a.href = url; a.download = `ventes-${histPeriod}-${todayISO()}.csv`; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 6000);
 }
-function saleModal() {
-  const d = modal(`<h2>${T('sell')}</h2>
-    <label>${T('amount')}</label><input id="sAmount" inputmode="numeric" placeholder="0">
-    <label>${T('method')}</label><select id="sMethod"><option>Espèces</option><option>Orange Money</option><option>Wave</option><option>MTN</option><option>Moov</option><option>Banque</option></select>
-    <label>${T('product')}</label><select id="sProduct"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}">${esc(p.name)} (${qtyOf(p)})</option>`).join('')}</select>
-    <label>${T('qty')}</label><input id="sQty" inputmode="numeric" value="1">
-    <label>${T('client')}</label><input id="sParty">
-    <label>${T('clientPhone')}</label><input id="sPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
-    <label>${T('clientAddress')}</label><input id="sAddress" placeholder="Cocody, près de la pharmacie">
-    <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="sCredit" style="width:auto"><span>${T('creditLater')}</span></label>
-    <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="sDeliv" checked style="width:auto"><span>${T('deliveredGoods')}</span></label>
-    <button class="btn" id="sOk">${T('saveSale')}</button>
-    <button class="btn out" id="sNo">${T('cancel')}</button><p class="err" id="sErr"></p>`);
+const METHODS = ['Espèces', 'Orange Money', 'Wave', 'MTN', 'Moov', 'Banque'];
+/* Les moyens de paiement sont enregistrés en français ; seul l'affichage est traduit
+   (les noms de services restent inchangés dans toutes les langues). */
+const METHOD_NAME = { 'Espèces': 'methodCash', 'Banque': 'methodBank' };
+const methodLabel = (m) => (m && METHOD_NAME[m] ? T(METHOD_NAME[m]) : m || '');
+const methodOptions = (sel) => [...new Set([...METHODS, ...(sel ? [sel] : [])])]
+  .map((m) => `<option value="${esc(m)}" ${m === sel ? 'selected' : ''}>${esc(methodLabel(m))}</option>`).join('');
+function saleModal(saleId) {
+  const src = saleId ? db.sales.find((x) => x.id === saleId) : null;
+  const known = src ? db.parties.find((p) => p.name === src.party) || {} : {};
+  const pays = src && Array.isArray(src.pays) ? src.pays : [];
+  const d = modal(`<div class="sheetHead"><h2>${src ? T('editSale') : T('sell')}</h2><button type="button" class="sheetClose" id="sClose" aria-label="${T('close')}">✕</button></div>
+    <label>${T('amount')}</label><input id="sAmount" inputmode="numeric" placeholder="0" value="${src ? esc(src.total) : ''}">
+    <label>${T('method')}</label><select id="sMethod">${methodOptions(src ? src.method : 'Espèces')}</select>
+    <label>${T('product')}</label><select id="sProduct"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}" ${src && src.pid === p.id ? 'selected' : ''}>${esc(p.name)} (${qtyOf(p) + (src && src.pid === p.id ? src.qty : 0)})</option>`).join('')}</select>
+    <label>${T('qtySold')}</label><input id="sQty" inputmode="numeric" value="${src && src.product ? esc(src.qty) : 1}">
+    <div id="sCostBox" style="display:${src && src.product ? 'none' : 'block'}">
+      <label>${T('costOptional')}</label><input id="sCost" inputmode="numeric" placeholder="0" value="${src && !src.product && src.cost ? esc(src.cost) : ''}">
+      <p class="hint">${T('costHint')}</p>
+    </div>
+    <label>${T('client')}</label><input id="sParty" value="${src ? esc(src.party) : ''}">
+    <label>${T('clientPhone')}</label><input id="sPhone" inputmode="tel" placeholder="+225 07 00 00 00 00" value="${esc(known.phone || '')}">
+    <label>${T('clientAddress')}</label><input id="sAddress" placeholder="Cocody, près de la pharmacie" value="${esc(known.address || '')}">
+    <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="sCredit" style="width:auto" ${src && creditOf(src) > 0 ? 'checked' : ''}><span>${T('creditLater')}</span></label>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="sDeliv" ${src ? (src.delivered === false ? '' : 'checked') : 'checked'} style="width:auto"><span>${T('deliveredGoods')}</span></label>
+    ${pays.length ? `<h3 style="margin-top:16px">${T('payments')}</h3>
+      ${pays.map((p) => `<div class="row"><div class="t">${money(p.amount)}</div><div class="right"><button class="btn small out" data-delpay="${p.id}">${T('delete')}</button></div></div>`).join('')}` : ''}
+    <div class="sheetFoot"><p class="err" id="sErr"></p>
+    <button class="btn" id="sOk">${src ? T('saveChanges') : T('saveSale')}</button>
+    <button class="btn out" id="sNo">${T('cancel')}</button>${src ? `<button class="btn out" id="sDel" style="color:#b91c1c;border-color:#b91c1c">${T('deleteSale')}</button>` : ''}</div>`);
   d.querySelector('#sNo').onclick = () => d.remove();
+  d.querySelector('#sClose').onclick = () => d.remove();
+  const prodSel = d.querySelector('#sProduct');
+  const costBox = d.querySelector('#sCostBox');
+  prodSel.onchange = () => { costBox.style.display = prodSel.value ? 'none' : 'block'; };
+  d.querySelectorAll('[data-delpay]').forEach((b) => {
+    b.onclick = () => {
+      if (!confirm(T('confirmDeletePayment'))) return;
+      src.pays = (src.pays || []).filter((p) => p.id !== b.dataset.delpay);
+      src.u = Date.now(); saveDB(); d.remove(); render(); saleModal(saleId);
+    };
+  });
+  const del = d.querySelector('#sDel');
+  if (del) del.onclick = () => {
+    if (!confirm(T('confirmDeleteSale'))) return;
+    delRecord('sales', src.id);
+    delRecord('moves', 'mv-' + src.id);
+    saveDB(); d.remove(); render();
+  };
   d.querySelector('#sOk').onclick = () => {
     let total = Math.round(+d.querySelector('#sAmount').value || 0);
     const qty = Math.max(1, Math.round(+d.querySelector('#sQty').value || 1));
-    const pid = d.querySelector('#sProduct').value;
+    const pid = prodSel.value;
     const credit = d.querySelector('#sCredit').checked;
     const party = d.querySelector('#sParty').value.trim();
     if (total <= 0 && !pid) { d.querySelector('#sErr').textContent = T('errorAmount'); return; }
@@ -684,30 +804,132 @@ function saleModal() {
     if (pid) {
       const p = db.products.find((x) => x.id === pid);
       if (p) {
-        const q = qtyOf(p);
+        const back = src && src.pid === pid ? src.qty : 0;
+        const q = qtyOf(p) + back;
         if (q < qty) { d.querySelector('#sErr').textContent = T('errorStock') + ' ' + q + '.'; return; }
         product = p.name; cost = qty * p.buy;
         if (!total) total = qty * p.sell;
       }
+    } else {
+      cost = Math.max(0, Math.round(+d.querySelector('#sCost').value || 0));
     }
-    const sid = uid();
+    const costKnown = pid ? true : d.querySelector('#sCost').value.trim() !== '';
     const now = Date.now();
-    const sale = { id: sid, date: todayISO(), total, paid: credit ? 0 : total, method: d.querySelector('#sMethod').value, party, pid: pid || '', product, qty: product ? qty : 0, cost, delivered: d.querySelector('#sDeliv').checked, u: now };
-    db.sales.push(sale);
-    if (pid) db.moves.push({ id: 'mv-' + sid, pid, delta: -qty, u: now });
+    const sid = src ? src.id : uid();
+    const sale = src || { id: sid, date: todayISO(), paid: 0 };
+    sale.total = total;
+    sale.method = d.querySelector('#sMethod').value;
+    sale.party = party;
+    sale.pid = pid || '';
+    sale.product = product;
+    sale.qty = product ? qty : 0;
+    sale.cost = cost;
+    sale.costKnown = costKnown;
+    sale.delivered = d.querySelector('#sDeliv').checked;
+    sale.u = now;
+    /* Le montant déjà encaissé suit le mode de paiement choisi. */
+    const paidBefore = src ? Math.min(Number(src.paid) || 0, total) : 0;
+    sale.paid = credit ? paidBefore : total;
+    if (!src) db.sales.push(sale);
+    if (pid) {
+      const move = (db.moves || []).find((m) => m.id === 'mv-' + sid);
+      if (move) { move.pid = pid; move.delta = -qty; move.u = now; } else db.moves.push({ id: 'mv-' + sid, pid, delta: -qty, u: now });
+    } else if ((db.moves || []).some((m) => m.id === 'mv-' + sid)) {
+      delRecord('moves', 'mv-' + sid);
+    }
     if (party) {
       const phone = d.querySelector('#sPhone').value.trim();
       const address = d.querySelector('#sAddress').value.trim();
-      const known = db.parties.find((x) => x.name.toLowerCase() === party.toLowerCase());
-      if (known) {
-        if (phone && !known.phone) known.phone = phone;
-        if (address && !known.address) known.address = address;
-        known.u = now;
+      const found = db.parties.find((x) => x.name.toLowerCase() === party.toLowerCase());
+      if (found) {
+        if (phone) found.phone = phone;
+        if (address) found.address = address;
+        found.u = now;
       } else {
         db.parties.push({ id: uid(), name: party, phone, address, u: now });
       }
     }
-    saveDB(); d.remove(); render(); saleDone(sale);
+    saveDB(); d.remove(); render(); if (!src) saleDone(sale);
+  };
+}
+const EXPENSE_LABELS = ['Transport', 'Loyer', 'Électricité', 'Salaire', 'Marchandise', 'Autre'];
+function expenseModal(id) {
+  const src = id ? db.expenses.find((x) => x.id === id) : null;
+  const labels = [...new Set([...EXPENSE_LABELS, ...(src && !EXPENSE_LABELS.includes(src.label) ? [src.label] : [])])];
+  const linked = src ? db.debts.find((x) => x.expenseId === src.id) : null;
+  const d = modal(`<h2>${src ? T('editExpense') : T('expense')}</h2>
+    <label>${T('amount')}</label><input id="eAmt" inputmode="numeric" value="${src ? esc(src.amount) : ''}">
+    <label>${T('reason')}</label><select id="eLabel">${labels.map((l) => `<option ${src && src.label === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    <label>${T('method')}</label><select id="eMethod">${methodOptions(src ? src.method : 'Espèces')}</select>
+    <label>${T('note')}</label><input id="eNote" placeholder="${T('noteHint')}" value="${src ? esc(src.note || '') : ''}">
+    <div id="eDelivBox" style="display:none">
+      ${src ? '' : `<label>${T('supplier')}</label><input id="eSup" placeholder="Grossiste Adjamé">
+      <label>${T('phone')}</label><input id="eSupPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
+      <label>${T('address')}</label><input id="eSupAddress" placeholder="Adjamé, marché">
+      <label>${T('method')}</label><select id="eMode"><option value="cash">${T('cashPaid')}</option><option value="partial">${T('partial')}</option><option value="credit">${T('onCredit')}</option></select>
+      <div id="ePaidBox" style="display:none"><label>${T('alreadyPaid')}</label><input id="ePaid" inputmode="numeric" placeholder="0"></div>`}
+      <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="eDeliv" ${src && src.delivered === false ? '' : 'checked'} style="width:auto"><span>${T('deliveredGoods')}</span></label>
+      <p class="hint">${src ? T('supplierLockedHint') : T('delivHint')}</p>
+    </div>
+    <button class="btn" id="eOk">${src ? T('saveChanges') : T('saveExpense')}</button>
+    <button class="btn out" id="eNo">${T('cancel')}</button>${src ? `<button class="btn out" id="eDel" style="color:#b91c1c;border-color:#b91c1c">${T('deleteExpense')}</button>` : ''}<p class="err" id="eErr"></p>`);
+  d.querySelector('#eNo').onclick = () => d.remove();
+  const eLabel = d.querySelector('#eLabel');
+  const eBox = d.querySelector('#eDelivBox');
+  const syncDeliv = () => { eBox.style.display = eLabel.value === 'Marchandise' ? 'block' : 'none'; };
+  eLabel.onchange = syncDeliv;
+  syncDeliv();
+  const eMode = d.querySelector('#eMode');
+  if (eMode) {
+    const ePaidBox = d.querySelector('#ePaidBox');
+    const syncMode = () => { ePaidBox.style.display = eMode.value === 'partial' ? 'block' : 'none'; };
+    eMode.onchange = syncMode;
+    syncMode();
+  }
+  const del = d.querySelector('#eDel');
+  if (del) del.onclick = () => {
+    if (!confirm(linked && (Number(linked.paid) || 0) > 0 ? T('confirmDeleteExpensePaid') : T('confirmDeleteExpense'))) return;
+    delRecord('expenses', src.id);
+    if (linked) delRecord('debts', linked.id);
+    saveDB(); d.remove(); render();
+  };
+  d.querySelector('#eOk').onclick = () => {
+    const amount = Math.round(+d.querySelector('#eAmt').value || 0);
+    if (!amount) { d.querySelector('#eErr').textContent = T('errorAmount'); return; }
+    const label = eLabel.value;
+    const note = d.querySelector('#eNote').value.trim();
+    const method = d.querySelector('#eMethod').value;
+    const delivered = label === 'Marchandise' ? d.querySelector('#eDeliv').checked : undefined;
+    if (src) {
+      src.amount = amount; src.label = label; src.note = note; src.method = method;
+      if (label === 'Marchandise') src.delivered = delivered; else delete src.delivered;
+      src.u = Date.now();
+      if (linked) {
+        linked.amount = amount;
+        linked.paid = Math.min(Number(linked.paid) || 0, amount);
+        if (label === 'Marchandise') linked.delivered = delivered;
+        linked.u = Date.now();
+      }
+      saveDB(); d.remove(); render(); return;
+    }
+    const supplier = label === 'Marchandise' ? d.querySelector('#eSup').value.trim() : '';
+    if (label === 'Marchandise' && !supplier) { d.querySelector('#eErr').textContent = T('errorSupplier'); return; }
+    const exId = uid();
+    let paid = amount;
+    if (label === 'Marchandise') {
+      const mode = d.querySelector('#eMode').value;
+      if (mode === 'credit') paid = 0;
+      if (mode === 'partial') paid = Math.max(0, Math.min(amount, Math.round(+d.querySelector('#ePaid').value || 0)));
+    }
+    db.expenses.push({ id: exId, date: todayISO(), amount, label, note, method, supplier, delivered: supplier ? undefined : delivered, u: Date.now() });
+    if (supplier) {
+      const found = db.suppliers.find((s) => s.name.toLowerCase() === supplier.toLowerCase());
+      const phone = d.querySelector('#eSupPhone').value.trim();
+      const address = d.querySelector('#eSupAddress').value.trim();
+      if (found) { if (phone) found.phone = phone; if (address) found.address = address; found.u = Date.now(); } else db.suppliers.push({ id: uid(), name: supplier, phone, address, u: Date.now() });
+      db.debts.push({ id: 'exd-' + exId, date: todayISO(), supplier, amount, paid, delivered, expenseId: exId, u: Date.now() });
+    }
+    saveDB(); d.remove(); render();
   };
 }
 function payModal(name) {
@@ -1060,65 +1282,27 @@ document.addEventListener('click', async (e) => {
   if (!b) return;
   const act = b.dataset.act;
   if (act === 'sale') saleModal();
-  if (act === 'hist') { tab = 'hist'; render(); }
-  if (act === 'histPeriod') { histPeriod = b.dataset.p; render(); }
+  if (act === 'editSale') saleModal(b.dataset.id);
+  if (act === 'editExpense') expenseModal(b.dataset.id);
+  if (act === 'hist') { tab = 'hist'; histShown = HIST_PAGE; render(); }
+  if (act === 'histPeriod') { histPeriod = b.dataset.p; histShown = HIST_PAGE; render(); }
+  if (act === 'histMore') {
+    const list = histSales();
+    const start = Math.min(histShown, list.length);
+    if (start < list.length) {
+      histShown = Math.min(start + HIST_PAGE, list.length);
+      const wrap = document.getElementById('histMoreWrap');
+      if (wrap) {
+        wrap.insertAdjacentHTML('beforebegin', histRows(list.slice(start, histShown)));
+        wrap.innerHTML = histShown < list.length ? `<button class="btn out" data-act="histMore">${T('showMore')} · ${histShown} / ${list.length}</button>` : '';
+      }
+    }
+  }
   if (act === 'back') { tab = 'vendre'; render(); }
   if (act === 'side') { side = b.dataset.s; render(); }
   if (act === 'period') { period = b.dataset.p; render(); }
   if (act === 'closeAds') { adsClosed = true; render(); }
-  if (act === 'expense') {
-    const d = modal(`<h2>${T('expense')}</h2><label>${T('amount')}</label><input id="eAmt" inputmode="numeric">
-      <label>${T('reason')}</label><select id="eLabel"><option>Transport</option><option>Loyer</option><option>Électricité</option><option>Salaire</option><option>Marchandise</option><option>Autre</option></select>
-      <label>${T('method')}</label><select id="eMethod"><option>Espèces</option><option>Orange Money</option><option>Wave</option><option>MTN</option><option>Moov</option><option>Banque</option></select>
-      <label>${T('note')}</label><input id="eNote" placeholder="${T('noteHint')}">
-      <div id="eDelivBox" style="display:none">
-        <label>${T('supplier')}</label><input id="eSup" placeholder="Grossiste Adjamé">
-        <label>${T('phone')}</label><input id="eSupPhone" inputmode="tel" placeholder="+225 07 00 00 00 00">
-        <label>${T('address')}</label><input id="eSupAddress" placeholder="Adjamé, marché">
-        <label>${T('method')}</label><select id="eMode"><option value="cash">${T('cashPaid')}</option><option value="partial">${T('partial')}</option><option value="credit">${T('onCredit')}</option></select>
-        <div id="ePaidBox" style="display:none"><label>${T('alreadyPaid')}</label><input id="ePaid" inputmode="numeric" placeholder="0"></div>
-        <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="eDeliv" checked style="width:auto"><span>${T('deliveredGoods')}</span></label>
-        <p class="hint">${T('delivHint')}</p>
-      </div>
-      <button class="btn" id="eOk">${T('saveExpense')}</button><button class="btn out" id="eNo">${T('cancel')}</button><p class="err" id="eErr"></p>`);
-    d.querySelector('#eNo').onclick = () => d.remove();
-    const eLabel = d.querySelector('#eLabel');
-    const eBox = d.querySelector('#eDelivBox');
-    const syncDeliv = () => { eBox.style.display = eLabel.value === 'Marchandise' ? 'block' : 'none'; };
-    eLabel.onchange = syncDeliv;
-    syncDeliv();
-    const eMode = d.querySelector('#eMode');
-    const ePaidBox = d.querySelector('#ePaidBox');
-    const syncMode = () => { ePaidBox.style.display = eMode.value === 'partial' ? 'block' : 'none'; };
-    eMode.onchange = syncMode;
-    syncMode();
-    d.querySelector('#eOk').onclick = () => {
-      const amount = Math.round(+d.querySelector('#eAmt').value || 0);
-      if (!amount) { d.querySelector('#eErr').textContent = T('errorAmount'); return; }
-      const label = d.querySelector('#eLabel').value;
-      const note = d.querySelector('#eNote').value.trim();
-      const method = d.querySelector('#eMethod').value;
-      const supplier = label === 'Marchandise' ? d.querySelector('#eSup').value.trim() : '';
-      if (label === 'Marchandise' && !supplier) { d.querySelector('#eErr').textContent = T('errorSupplier'); return; }
-      const exId = uid();
-      const delivered = label === 'Marchandise' ? d.querySelector('#eDeliv').checked : undefined;
-      let paid = amount;
-      if (label === 'Marchandise') {
-        const mode = d.querySelector('#eMode').value;
-        if (mode === 'credit') paid = 0;
-        if (mode === 'partial') paid = Math.max(0, Math.min(amount, Math.round(+d.querySelector('#ePaid').value || 0)));
-      }
-      db.expenses.push({ id: exId, date: todayISO(), amount, label, note, method, supplier, delivered: supplier ? undefined : delivered, u: Date.now() });
-      if (supplier) {
-        const found = db.suppliers.find((s) => s.name.toLowerCase() === supplier.toLowerCase());
-        const phone = d.querySelector('#eSupPhone').value.trim();
-        const address = d.querySelector('#eSupAddress').value.trim();
-        if (found) { if (phone) found.phone = phone; if (address) found.address = address; found.u = Date.now(); } else db.suppliers.push({ id: uid(), name: supplier, phone, address, u: Date.now() });
-        db.debts.push({ id: 'exd-' + exId, date: todayISO(), supplier, amount, paid, delivered, expenseId: exId, u: Date.now() });
-      }
-      saveDB(); d.remove(); render();
-    };
-  }
+  if (act === 'expense') expenseModal();
   if (act === 'withdraw') {
     const d = modal(`<h2>${T('withdraw')}</h2><p class="hint">${T('profitHint')}</p>
       <label>${T('amount')}</label><input id="wAmt" inputmode="numeric">
@@ -1212,6 +1396,16 @@ document.addEventListener('click', async (e) => {
     saveDB(); render();
   }
   if (act === 'payDebt') payDebtModal(b.dataset.id);
+  if (act === 'delDebt') {
+    const dbt = db.debts.find((x) => x.id === b.dataset.id);
+    if (!dbt || !confirm(dbt.expenseId ? T('confirmDeletePurchaseExpense') : T('confirmDeletePurchase'))) return;
+    delRecord('debts', dbt.id);
+    (db.moves || []).filter((m) => m.id === 'mv-' + dbt.id).forEach((m) => delRecord('moves', m.id));
+    if (dbt.expenseId) delRecord('expenses', dbt.expenseId);
+    const openModal = document.querySelector('.modal');
+    if (openModal) openModal.remove();
+    saveDB(); render();
+  }
   if (act === 'deliverDebt') {
     const d = db.debts.find((x) => x.id === b.dataset.id);
     if (d && d.delivered === false) {
@@ -1240,7 +1434,22 @@ document.addEventListener('click', async (e) => {
     if (!lines.length) return;
     const total = Math.round(lines.reduce((a, l) => a + l.qty * l.price, 0));
     const rate = Math.max(0, Number(draft.vat) || 0);
-    db.docs.push({ id: uid(), kind: 'DEV', number: num('DEV'), date: todayISO(), party: draft.party.trim(), clientPhone: (draft.phone || '').trim(), clientEmail: (draft.email || '').trim().toLowerCase(), clientAddress: (draft.address || '').trim(), vat: rate, lines, total, status: 'devis', u: Date.now() });
+    const fields = { party: draft.party.trim(), clientPhone: (draft.phone || '').trim(), clientEmail: (draft.email || '').trim().toLowerCase(), clientAddress: (draft.address || '').trim(), vat: rate, lines, total, u: Date.now() };
+    const edited = draft.id ? db.docs.find((x) => x.id === draft.id) : null;
+    if (edited) Object.assign(edited, fields);
+    else db.docs.push({ id: uid(), kind: 'DEV', number: num('DEV'), date: todayISO(), status: 'devis', ...fields });
+    draft = null; saveDB(); tab = 'docs'; render();
+  }
+  if (act === 'editDoc') {
+    const doc = db.docs.find((x) => x.id === b.dataset.id);
+    if (!doc) return;
+    draft = { id: doc.id, kind: doc.kind, party: doc.party || '', phone: doc.clientPhone || '', email: doc.clientEmail || '', address: doc.clientAddress || '', vat: doc.vat || 0, lines: (doc.lines || [{ label: '', qty: 1, price: 0 }]).map((l) => ({ ...l })) };
+    tab = 'docs'; render();
+  }
+  if (act === 'delDoc') {
+    const doc = db.docs.find((x) => x.id === b.dataset.id);
+    if (!doc || !confirm(T('confirmDeleteDoc'))) return;
+    delRecord('docs', doc.id);
     draft = null; saveDB(); tab = 'docs'; render();
   }
   if (act === 'toFacture') {
@@ -1335,20 +1544,58 @@ function readLogo(file, cb) {
   };
   reader.readAsDataURL(file);
 }
+/* ---------------- Versions enregistrées ---------------- */
+/* Le serveur garde les dix derniers états : une mauvaise manipulation ou une
+   synchronisation malheureuse reste réparable, sans dépendre d'un export. */
+async function versionsModal() {
+  const d = modal(`<div class="sheetHead"><h2>${T('versions')}</h2><button type="button" class="sheetClose" id="vClose" aria-label="${T('close')}">✕</button></div>
+    <div id="vList"><p class="hint">…</p></div>`);
+  d.querySelector('#vClose').onclick = () => d.remove();
+  const list = d.querySelector('#vList');
+  const locale = lang() === 'ar' ? 'ar' : lang() === 'en' ? 'en-GB' : 'fr-FR';
+  const r = await api('/api/data/history');
+  if (!r.ok) { list.innerHTML = `<p class="err">${T('syncPending')}</p>`; return; }
+  const versions = (r.data && r.data.versions) || [];
+  if (!versions.length) { list.innerHTML = `<p class="hint">${T('noVersions')}</p>`; return; }
+  list.innerHTML = versions
+    .map((v) => `<div class="row"><div><div class="t">${new Date(v.saved).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}</div><div class="s">${T('version')} ${esc(v.rev)} · ${Math.round((Number(v.bytes) || 0) / 1024)} Ko</div></div><div class="right"><button class="btn small" data-v="${esc(v.id)}">${T('restore')}</button></div></div>`)
+    .join('');
+  list.querySelectorAll('button[data-v]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm(T('confirmRestore'))) return;
+      b.disabled = true;
+      const res = await api('/api/data/restore', 'POST', { id: Number(b.dataset.v) });
+      if (!res.ok) {
+        b.disabled = false;
+        list.insertAdjacentHTML('afterbegin', `<p class="err">${T('syncPending')}</p>`);
+        return;
+      }
+      d.remove();
+      await pullNow(true);
+      render();
+    };
+  });
+}
+
 function settingsModal() {
   let logoDraft = db.settings.logo || '';
-  const d = modal(`<h2>${T('settings')}</h2>
+  const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
+    <details><summary>${T('secShop')}</summary>
     <label>${T('shopName')}</label><input id="setShop" value="${esc(db.shop)}">
     <label>${T('companyForm')}</label><select id="setForm">${formOptions(db.settings.companyForm || '')}</select>
     <label>${T('country')}</label><select id="setCountry">${countryOptions(db.settings.country || 'CI')}</select>
+    <p class="hint">${T('currency')} : <b id="setCur">${esc(db.settings.currency || currencyFor(db.settings.country || 'CI'))}</b> — ${T('currencyAuto')}</p>
     <label>${T('city')}</label><input id="setCity" value="${esc(db.settings.city || '')}">
     <label>${T('district')}</label><input id="setDistrict" value="${esc(db.settings.district || '')}">
     <label>${T('address')}</label><input id="setAddress" value="${esc(db.settings.address || '')}">
+    </details>
+    <details><summary>${T('secSales')}</summary>
     <label>${T('vat')}</label><input id="setVat" inputmode="numeric" value="${esc(db.settings.vat == null ? 18 : db.settings.vat)}">
     <p class="hint">${T('vatHint')}</p>
     <label>${T('remindDays')}</label><input id="setRemindDays" inputmode="numeric" value="${esc(db.settings.remindDays == null ? 30 : db.settings.remindDays)}">
     <p class="hint">${T('remindHint')}</p>
-    <p class="hint">${T('currency')} : <b id="setCur">${esc(db.settings.currency || currencyFor(db.settings.country || 'CI'))}</b> — ${T('currencyAuto')}</p>
+    </details>
+    <details><summary>${T('secLook')}</summary>
     <label>${T('logo')}</label>
     <input type="file" id="setLogo" accept="image/*">
     <div id="logoPrev" style="margin-top:8px">${logoDraft ? `<img src="${esc(logoDraft)}" class="logoPrev" alt="">` : ''}</div>
@@ -1358,14 +1605,8 @@ function settingsModal() {
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
-    <h3 style="margin-top:18px">${T('legalInfo')}</h3>
-    <p class="hint">${T('legalInfoHint')}</p>
-    <label>${T('legalName')}</label><input id="lgName" value="${esc((db.settings.legal || {}).name || '')}">
-    <label>${T('legalAddress')}</label><input id="lgAddress" value="${esc((db.settings.legal || {}).address || '')}">
-    <label>${T('legalRccm')}</label><input id="lgRccm" value="${esc((db.settings.legal || {}).rccm || '')}">
-    <label>${T('legalTax')}</label><input id="lgTax" value="${esc((db.settings.legal || {}).taxId || '')}">
-    <label>${T('legalContact')}</label><input id="lgContact" value="${esc((db.settings.legal || {}).contact || '')}">
-    <label>${T('legalPublisher')}</label><input id="lgPublisher" value="${esc((db.settings.legal || {}).publisher || '')}">
+    </details>
+    <details><summary>${T('secAccount')}</summary>
     ${accountHTML()}
     ${me ? `<h3 style="margin-top:16px">${T('changePassword')}</h3>
       <label>${T('currentPassword')}</label><input id="pwCur" type="password" autocomplete="current-password">
@@ -1373,17 +1614,34 @@ function settingsModal() {
       <label>${T('confirmPassword')}</label><input id="pwNew2" type="password" autocomplete="new-password">
       <button class="btn out" id="pwOk">${T('savePassword')}</button>
       <p class="hint" id="pwMsg"></p>` : ''}
-    <button class="btn" id="setOk">${T('save')}</button>
-    <button class="btn out" id="setShare">${T('share')}</button>
-    <button class="btn out" id="setInstall">${T('install')}</button>
+    </details>
+    <details><summary>${T('legalInfo')}</summary>
+    <p class="hint">${T('legalInfoHint')}</p>
+    <label>${T('legalName')}</label><input id="lgName" value="${esc((db.settings.legal || {}).name || '')}">
+    <label>${T('legalAddress')}</label><input id="lgAddress" value="${esc((db.settings.legal || {}).address || '')}">
+    <label>${T('legalRccm')}</label><input id="lgRccm" value="${esc((db.settings.legal || {}).rccm || '')}">
+    <label>${T('legalTax')}</label><input id="lgTax" value="${esc((db.settings.legal || {}).taxId || '')}">
+    <label>${T('legalContact')}</label><input id="lgContact" value="${esc((db.settings.legal || {}).contact || '')}">
+    <label>${T('legalPublisher')}</label><input id="lgPublisher" value="${esc((db.settings.legal || {}).publisher || '')}">
+    </details>
+    <details><summary>${T('secBackup')}</summary>
     <button class="btn out" id="setExport">${T('exportData')}</button>
     <button class="btn out" id="setImport">${T('importData')}</button>
+    <button class="btn out" id="setHistory">${T('versions')}</button>
     <p class="hint">${T('backupHint')}</p>
+    <button class="btn out" id="setShare">${T('share')}</button>
+    <button class="btn out" id="setInstall">${T('install')}</button>
     <button class="btn out" id="setLegal">${T('legalMentions')}</button>
     <button class="btn out" id="setTerms">${T('legalTerms')}</button>
-    <button class="btn out" id="setNo">${T('close')}</button>`);
+    <p class="hint" id="setVersion">${T('version')} ${esc(appVersion || '—')}</p>
+    </details>
+    <div class="sheetFoot compact">
+      <button class="btn" id="setOk">${T('save')}</button>
+      <button class="btn out" id="setNo">${T('close')}</button>
+    </div>`);
   d.querySelector('#setNo').onclick = () => d.remove();
   wireAccount(d);
+  d.querySelector('#setHistory').onclick = () => { d.remove(); versionsModal(); };
   d.querySelector('#setShare').onclick = () => { d.remove(); shareModal(); };
   d.querySelector('#setInstall').onclick = () => { d.remove(); installModal(); };
   d.querySelector('#setLegal').onclick = () => { d.remove(); legalModal('legal'); };
@@ -1646,6 +1904,9 @@ function mergeStates(local, remote) {
   out.shop = local.shop || remote.shop || '';
   out.settings = Object.assign(fresh().settings, (localNewer ? local.settings : remote.settings) || {});
   ARRAYS.forEach((k) => { out[k] = unionArray(local[k], remote[k]); });
+  out.tomb = unionArray(local.tomb, remote.tomb);
+  const dead = new Set(out.tomb.map((t) => t.id));
+  ARRAYS.forEach((k) => { out[k] = (out[k] || []).filter((x) => !dead.has(x.id)); });
   out.seq = { DEV: Math.max(local.seq?.DEV || 0, remote.seq?.DEV || 0), FAC: Math.max(local.seq?.FAC || 0, remote.seq?.FAC || 0) };
   out.meta = { lastSync: Date.now(), updated: Math.max(local.meta.updated || 0, remote.meta.updated || 0), rev: Math.max(local.meta.rev || 0, remote.meta.rev || 0), mv: 1 };
   ensureMoves(out);
@@ -1663,8 +1924,8 @@ const clock = (ts) => (ts ? new Date(ts).toLocaleTimeString(lang() === 'ar' ? 'a
 function updatePill() {
   const pill = document.getElementById('netState');
   if (!pill) return;
-  const synced = { synced: T('synced'), syncing: T('syncing'), pending: T('syncPending'), error: T('syncPending') }[syncState] || T('synced');
-  pill.textContent = !navigator.onLine ? T('offline') : me ? synced : T('online');
+  const synced = { synced: T('synced'), syncing: T('syncing'), pending: T('syncPending'), error: T('syncPending'), toobig: T('syncTooBig'), auth: T('sessionExpired') }[syncState] || T('synced');
+  pill.textContent = !navigator.onLine ? T('offline') : me ? synced : T('notSignedIn');
   pill.classList.toggle('on', navigator.onLine && (!me || syncState === 'synced'));
   pill.title = me ? T('lastSaved') + ' ' + clock(db.meta.lastSync) : T('accountHint');
 }
@@ -1684,9 +1945,33 @@ async function api(path, method = 'GET', body) {
     return { ok: r.ok, status: r.status, data };
   } catch { return { ok: false, status: 0, data: null }; }
 }
+/* Identité connue du dernier passage. Sans elle, ouvrir l'application hors
+   ligne afficherait l'écran de connexion alors que la boutique est en local.
+   Ce n'est qu'un souvenir d'affichage : la session reste le cookie HttpOnly,
+   et un vrai refus du serveur (401) efface ce souvenir. */
+function storedMe() {
+  try { return JSON.parse(localStorage.getItem(KEY + '.me') || 'null'); } catch { return null; }
+}
+function rememberMe(user) {
+  try {
+    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null }));
+    else localStorage.removeItem(KEY + '.me');
+  } catch {}
+}
 async function refreshMe() {
   const r = await api('/api/me');
-  me = r.ok && r.data ? r.data.user : null;
+  if (r.ok && r.data) {
+    me = r.data.user;
+    rememberMe(me);
+    return me;
+  }
+  if (r.status === 401) {
+    me = null;
+    rememberMe(null);
+    return me;
+  }
+  /* Réseau indisponible : on garde l'identité connue, la synchro reprendra. */
+  me = storedMe();
   return me;
 }
 function applyRemote(text, updated, rev) {
@@ -1698,6 +1983,7 @@ function applyRemote(text, updated, rev) {
     db.meta.updated = updated || Date.now();
     db.meta.rev = rev || 0;
     db.meta.lastSync = Date.now();
+    dirty = false;
     saveDB(false);
     render();
     markSync('synced');
@@ -1707,21 +1993,41 @@ async function pushNow() {
   if (!me) return;
   if (syncingNow) { clearTimeout(syncTimer); syncTimer = setTimeout(pushNow, 1500); return; }
   syncingNow = true;
-  markSync('syncing');
   try {
+    if (stateBytes() > MAX_STATE) {
+      if (!db.meta.tooBig) { db.meta.tooBig = true; saveDB(false); render(); }
+      markSync('toobig');
+      return;
+    }
+    if (db.meta.tooBig) { db.meta.tooBig = false; saveDB(false); render(); }
+    markSync('syncing');
     const r = await api('/api/data', 'PUT', { json: JSON.stringify(db), updated: db.meta.updated, rev: db.meta.rev || 0 });
-    if (!r.ok) { markSync(navigator.onLine ? 'error' : 'pending'); return; }
+    if (!r.ok) {
+      const detail = String((r.data && (r.data.detail || r.data.error)) || '');
+      if (r.status === 413 || /volumineux/i.test(detail)) {
+        db.meta.tooBig = true; saveDB(false); render(); markSync('toobig');
+        return;
+      }
+      /* Session expirée : ce n'est pas un problème de réseau, il faut se reconnecter. */
+      if (r.status === 401) { markSync('auth'); return; }
+      markSync(navigator.onLine ? 'error' : 'pending');
+      return;
+    }
     if (r.data && r.data.saved === false && r.data.json) {
       const merged = mergeStates(db, JSON.parse(r.data.json));
       db = merged;
       db.meta.rev = r.data.rev || db.meta.rev || 0;
       db.meta.lastSync = Date.now();
-      saveDB(false); render(); markSync('synced');
+      saveDB(false); render();
+      /* La fusion locale n'est pas encore sur le serveur : ne pas afficher
+         « sauvegardé » avant que le renvoi ait réussi. */
+      markSync('pending');
       clearTimeout(syncTimer); syncTimer = setTimeout(pushNow, 400);
       return;
     }
     db.meta.rev = (r.data && r.data.rev) || db.meta.rev || 0;
     db.meta.lastSync = Date.now();
+    dirty = false;
     saveDB(false);
     markSync('synced');
   } finally { syncingNow = false; }
@@ -1759,7 +2065,7 @@ function queueSync() {
 /* Un autre téléphone a pu enregistrer : on regarde le cloud régulièrement et dès que l'app revient à l'écran. */
 async function syncTick() {
   if (!me || !navigator.onLine || syncingNow || document.visibilityState === 'hidden') return;
-  if (syncState === 'pending') await pushNow();
+  if (dirty || syncState === 'pending') await pushNow();
   else await pullNow(false);
 }
 async function signup(mode, identifier, password) {
@@ -1785,6 +2091,8 @@ async function logout() {
   if (me) await pushNow();
   await api('/api/logout', 'POST', {});
   me = null;
+  dirty = false;
+  rememberMe(null);
   markSync('idle');
 }
 async function bootAccount() {
@@ -1794,8 +2102,7 @@ async function bootAccount() {
 }
 function accountHTML() {
   if (me) {
-    return `<div class="card" style="margin-top:14px"><h3>${T('account')}</h3>
-      <div class="row"><div><div class="t">${esc(me.email || me.phone || '')}</div><div class="s">${me.email && me.phone ? esc(me.phone) : (me.email ? T('byEmail') : T('byPhone'))}</div></div><div class="right"><span class="tag ok">${T('cloudOn')}</span></div></div>
+    return `<div class="row"><div><div class="t">${esc(me.email || me.phone || '')}</div><div class="s">${me.email && me.phone ? esc(me.phone) : (me.email ? T('byEmail') : T('byPhone'))}</div></div><div class="right"><span class="tag ok">${T('cloudOn')}</span></div></div>
       <p class="hint">${T('lastSaved')} ${clock(db.meta.lastSync)}</p>
       <button class="btn out" data-act="syncNow">${T('syncNow')}</button>
       <button class="btn out" data-act="logout">${T('signOut')}</button>
@@ -1803,10 +2110,9 @@ function accountHTML() {
       ${me.email ? '' : `<h3 style="margin-top:16px">${T('addEmail')}</h3>
       <p class="hint">${T('addEmailHint')}</p>
       <label>${T('email')}</label><input id="acAddEmail" type="email" autocomplete="email" placeholder="awa@exemple.com">
-      <button class="btn out" data-act="addEmail">${T('addEmail')}</button>`}</div>`;
+      <button class="btn out" data-act="addEmail">${T('addEmail')}</button>`}`;
   }
-  return `<div class="card" style="margin-top:14px"><h3>${T('account')}</h3>
-    <div class="seg" id="acType"><button type="button" id="acModeEmail" class="on">${T('byEmail')}</button><button type="button" id="acModePhone">${T('byPhone')}</button></div>
+  return `<div class="seg" id="acType"><button type="button" id="acModeEmail" class="on">${T('byEmail')}</button><button type="button" id="acModePhone">${T('byPhone')}</button></div>
     <label id="acIdLabel">${T('email')}</label><input id="acIdent" type="email" autocomplete="email" placeholder="awa@exemple.com">
     <label>${T('password')}</label><input id="acPass" type="password" autocomplete="new-password">
     <button class="btn" id="acSignup">${T('createAccount')}</button>
@@ -1815,7 +2121,7 @@ function accountHTML() {
     <label>${T('password')}</label><input id="acLoginPass" type="password" autocomplete="current-password">
     <button class="btn out" id="acLogin">${T('signIn')}</button>
     <button class="btn out" id="acForgot">${T('forgot')}</button>
-    <p class="hint">${T('accountHint')}</p><p class="err" id="acErr"></p></div>`;
+    <p class="hint">${T('accountHint')}</p><p class="err" id="acErr"></p>`;
 }
 function wireAccount(d) {
   const btn = d.querySelector('#acSignup');
@@ -1908,7 +2214,7 @@ function askShop() {
     db.shop = v; saveDB(); d.remove(); render();
   };
 }
-function closeGate() { const g = document.getElementById('gate'); if (g) g.remove(); }
+function closeGate() { const g = document.getElementById('gate'); if (g) g.remove(); setBackgroundInert(false); }
 function afterGate() { closeGate(); askShop(); render(); }
 function showLangGate() {
   closeGate();
@@ -1923,6 +2229,7 @@ function showLangGate() {
     <button class="btn out lang" data-lang="ar" dir="rtl">العربية</button>
     <p class="hint">${T('chooseLangHint')}</p></div>`;
   document.body.appendChild(g);
+  setBackgroundInert(true);
   g.querySelectorAll('[data-lang]').forEach((b) => {
     b.onclick = () => {
       db.settings.lang = b.dataset.lang;
@@ -1946,6 +2253,7 @@ function showAuthGate() {
     <div class="card" id="gForm"></div>
     <p class="hint">${T('gateRequired')}</p></div>`;
   document.body.appendChild(g);
+  setBackgroundInert(true);
   const tabs = { signup: g.querySelector('#gSignup'), login: g.querySelector('#gLogin') };
   const form = g.querySelector('#gForm');
   const setMode = (m) => {
@@ -2038,15 +2346,16 @@ document.addEventListener('input', (e) => {
   }
   if (e.target.id === 'histSearch') {
     histQuery = e.target.value;
+    histShown = HIST_PAGE;
     const list = histSales();
     const box = document.getElementById('histList');
-    if (box) box.innerHTML = histRows(list);
+    if (box) box.innerHTML = histListHTML(list, histShown);
     const sum = document.getElementById('histSum');
     if (sum) sum.innerHTML = histSummary(list);
   }
 });
 document.addEventListener('change', (e) => {
-  if (e.target.id === 'histMethod') { histMethod = e.target.value; render(); }
+  if (e.target.id === 'histMethod') { histMethod = e.target.value; histShown = HIST_PAGE; render(); }
   if (e.target.id === 'dParty') {
     const p = db.parties.find((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase());
     if (p) {
@@ -2061,14 +2370,64 @@ window.addEventListener('online', () => { render(); syncTick(); });
 window.addEventListener('offline', render);
 window.addEventListener('focus', syncTick);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncTick(); });
-setInterval(syncTick, 20000);
-render();
-const resetToken = new URLSearchParams(location.search).get('reset');
-(async () => {
-  await bootAccount();
-  if (resetToken) { resetModal(resetToken); return; }
-  if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
-  if (!me) { gateMode = db.shop ? 'login' : 'signup'; showAuthGate(); return; }
-  askShop();
-})();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+/* ---------------- Service worker ---------------- */
+/* La nouvelle version est proposée, jamais imposée : remplacer le code pendant
+   une saisie peut vider un formulaire en cours. */
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  /* En développement, le cache masque chaque modification : on le désactive,
+     sauf demande explicite (?sw=1) pour tester une mise à jour. */
+  if (local && !new URLSearchParams(location.search).has('sw')) {
+    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+    return;
+  }
+  const hadController = !!navigator.serviceWorker.controller;
+  const proposer = (worker) => {
+    if (!worker || document.getElementById('swUpdate')) return;
+    const box = document.createElement('div');
+    box.id = 'swUpdate';
+    box.className = 'swUpdate';
+    box.innerHTML = `<span>${esc(T('newVersion'))}</span><button class="btn small" id="swReload">${esc(T('reload'))}</button>`;
+    document.body.appendChild(box);
+    box.querySelector('#swReload').addEventListener('click', () => worker.postMessage('skip-waiting'));
+  };
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    /* Recharger seulement si un contrôleur existait déjà : au premier
+       enregistrement, clients.claim() déclenche aussi cet événement. */
+    if (hadController) location.reload();
+  });
+  navigator.serviceWorker
+    .register('sw.js')
+    .then((reg) => {
+      if (reg.waiting && hadController) proposer(reg.waiting);
+      reg.addEventListener('updatefound', () => {
+        const w = reg.installing;
+        if (!w) return;
+        w.addEventListener('statechange', () => {
+          if (w.state === 'installed' && navigator.serviceWorker.controller) proposer(w);
+        });
+      });
+    })
+    .catch(() => {});
+}
+
+/* Sous test (node --test), seul le code ci-dessus est chargé : pas de rendu, pas
+   de réseau, pas de service worker. */
+if (!globalThis.__AC_TEST__) {
+  setInterval(syncTick, 20000);
+  render();
+  const resetToken = new URLSearchParams(location.search).get('reset');
+  (async () => {
+    await bootAccount();
+    if (resetToken) { resetModal(resetToken); return; }
+    if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
+    if (!me) { gateMode = db.shop ? 'login' : 'signup'; showAuthGate(); return; }
+    askShop();
+  })();
+  fetch('version.json', { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((v) => { appVersion = v && v.version ? String(v.version) : ''; })
+    .catch(() => {});
+  setupServiceWorker();
+}

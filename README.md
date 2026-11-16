@@ -4,6 +4,12 @@ Application de gestion pour commerçants : ventes, dépenses, stock, crédit
 clients, dettes fournisseurs, devis et factures, bilans, trois langues
 (français, anglais, arabe) et sauvegarde dans le cloud.
 
+Toute écriture enregistrée peut être corrigée ou supprimée (vente, dépense,
+devis, facture, paiement, achat fournisseur) : les totaux et le stock sont
+recalculés, et la suppression ne revient pas après synchronisation. Le coût
+d'achat est demandé sur les ventes hors stock, et le bilan le signale quand il
+manque (bénéfice estimé).
+
 ## Ce qu'il y a ici
 
 - `public/` : l'application (HTML, CSS, JavaScript, service worker, icônes).
@@ -31,14 +37,33 @@ lien « mot de passe oublié » est désactivé.
 
 ## Développement local
 
-Servir le dossier `public/` avec n'importe quel serveur statique, par exemple :
-
 ```bash
-npx serve public
+npm install     # une seule fois (installe Wrangler)
+npm run dev     # Worker + application + base D1 locale sur http://127.0.0.1:8787
 ```
 
-La synchronisation et les comptes nécessitent le Worker et la base D1 ; sans
-eux, l'application reste utilisable hors ligne sur l'appareil.
+`npm run dev` démarre Wrangler avec la configuration `wrangler.jsonc` : les
+assets de `public/`, l'API `/api/*` et une base D1 **locale** (aucun compte
+Cloudflare, aucune donnée en ligne). On peut donc créer un compte, se
+connecter et vérifier la synchronisation entre deux navigateurs.
+
+- Les données locales sont dans `.wrangler/state` ; `npm run dev:reset` les
+efface (comptes et boutiques comprises).
+- `npm test` vérifie les calculs (crédit, TVA, stock, montants) et la fusion
+  entre deux appareils, sans dépendance : `node --test`.
+- `public/sw.js` et `public/version.json` sont **générés** : `npm run cache`
+  (appelé aussi par `npm run dev`) calcule une version à partir du contenu de
+  `public/` et la liste des fichiers préchargés. Ne pas les modifier à la main ;
+  `npm test` échoue si `sw.js` est périmé.
+- En développement, le service worker est désactivé pour que chaque
+  modification soit visible ; `http://127.0.0.1:8787/?sw=1` l'active pour
+  tester une mise à jour (bannière « Nouvelle version prête »).
+- `npx wrangler d1 execute assistant-commercial --local --command "SELECT email FROM users"`
+  permet de relire la base.
+
+Servir `public/` seul (`npx serve public`) n'affiche que l'interface : sans le
+Worker, l'inscription et la synchronisation restent bloquées sur l'écran de
+connexion, puisque le compte est obligatoire.
 
 ## Données
 
@@ -46,6 +71,36 @@ Chaque compte possède un état JSON dans la table `state`. À chaque sauvegarde
 le serveur incrémente une révision ; une sauvegarde basée sur une révision
 ancienne est refusée puis fusionnée enregistrement par enregistrement côté
 application (ventes, paiements, stock, documents).
+
+Les dix états précédents sont conservés dans `state_history`. Réglages →
+« Versions enregistrées » permet de restaurer une version ; l'état remplacé
+passe lui-même dans l'historique, donc une restauration reste réversible.
+
+## Icônes de l'application
+
+`npm run icons` régénère les quatre icônes d'installation depuis
+`docs/logo-source.webp`, l'image fournie par la boutique. Elle contient la
+tuile carrée du logo **et** le mot « ASSISTANT COMMERCIAL » : seule la tuile
+est reprise, le nom est affiché par le système.
+
+- Géométrie : tuile de 365 px de côté, coin supérieur gauche en (519, 186) dans
+  l'image 1408 × 768 ; ce sont les trois valeurs à ajuster si le logo change.
+- Sorties : `icon-192.png`, `icon-512.png`, `icon-512-maskable.png` (logo à
+  86 % du carré, contenu dans la zone sûre de 80 % d'Android) et
+  `apple-touch-icon.png` (180 px, fond opaque).
+- Encodage : PNG **truecolor**, sans palette, pour ne pas aplatir le dégradé.
+  Attention : sur `sharp`, `png({ effort: 10 })` quantifie en palette ; le
+  script s'en tient à `compressionLevel: 9` (vérifiable avec l'octet
+  `colorType` de l'en-tête PNG : 2 ou 6, jamais 3).
+- Après génération, `npm run cache` : les icônes font partie du préchargement
+  et changent donc la version du service worker.
+
+## Préparer une publication
+
+Avant de publier, `npm run deploy:prepare` régénère `sw.js` et `version.json`,
+vérifie qu'ils sont à jour et contrôle que `sites-manifest.json` publie bien
+`public/` avec le service worker. Un `sw.js` périmé ferait servir une ancienne
+version de l'application.
 
 ## Ancienne adresse Render
 

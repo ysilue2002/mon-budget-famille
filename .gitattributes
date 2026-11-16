@@ -1,0 +1,9 @@
+# Fins de ligne stables entre Windows et les autres systèmes.
+* text=auto eol=lf
+
+# Fichiers binaires : jamais de conversion de fin de ligne.
+*.png binary
+*.webp binary
+*.jpg binary
+*.ico binary
+*.pdf binary
