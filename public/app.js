@@ -330,7 +330,8 @@ function filterDocs(q) {
   return list.filter((d) => [d.number, d.party, d.clientPhone, d.clientAddress, d.date, dayFR(d.date), d.kind === 'DEV' ? T('quote') : T('invoice'), String(d.total), money(d.total), money(amountOf(d))].join(' ').toLowerCase().includes(term));
 }
 function docsList(list) {
-  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}</div></div><div class="right">
+  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)} ${d.kind === 'FAC' ? (d.paidDate ? `<span class="tag ok">${T('invoicePaid')}</span>` : `<span class="tag warn">${T('invoiceUnpaid')}</span>`) : ''}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}${d.paidDate ? ' · ' + T('invoicePaidOn') + ' ' + dayFR(d.paidDate) : ''}</div></div><div class="right">
+        ${d.kind === 'FAC' ? `<button class="btn small out" data-act="toggleInvoicePaid" data-id="${d.id}">${d.paidDate ? T('markUnpaid') : T('markPaid')}</button>` : ''}
         <button class="btn small" data-act="print" data-id="${d.id}">${T('print')}</button>
         <button class="btn small whats" data-act="waPdf" data-id="${d.id}">${T('sendWhatsApp')}</button>
         <button class="btn small out" data-act="dlPdf" data-id="${d.id}">${T('download')}</button>
@@ -428,18 +429,26 @@ function docForm() {
 /* ---------------- Bilans ---------------- */
 /* Tous les chiffres d'une période au même endroit : c'est cette fonction que
    les tests vérifient, plutôt que le HTML qui l'affiche. */
-function figures(p) {
-  const sales = db.sales.filter((s) => inPeriod(s.date, p));
-  const exp = db.expenses.filter((e) => inPeriod(e.date, p));
-  const ca = sales.reduce((a, s) => a + s.total, 0);
+function figures(p, monthKey) {
+  /* Le rapport mensuel peut demander un mois précis : on remplace alors la
+     période par une comparaison AAAA-MM, sans toucher au reste du calcul. */
+  const inP = monthKey ? (date) => String(date || '').slice(0, 7) === monthKey : (date) => inPeriod(date, p);
+  const sales = db.sales.filter((s) => inP(s.date));
+  const exp = db.expenses.filter((e) => inP(e.date));
+  /* Une facture ne devient un revenu qu'une fois payée, et compte à la date du
+     règlement : une facture de septembre réglée en octobre entre dans octobre. */
+  const invoices = (db.docs || []).filter((d) => d.kind === 'FAC' && d.paidDate && inP(d.paidDate));
+  const inv = invoices.reduce((a, d) => a + amountOf(d), 0);
+  const sold = sales.reduce((a, s) => a + s.total, 0);
+  const ca = sold + inv;
   /* Trésorerie : acompte des ventes de la période + versements reçus pendant
      la période, y compris sur une vente plus ancienne. Un client qui règle en
      novembre une vente d'octobre fait bien entrer de l'argent en novembre. */
   const cash = db.sales.reduce((a, s) => {
-    let got = inPeriod(s.date, p) ? Number(s.paid) || 0 : 0;
-    (s.pays || []).forEach((x) => { if (x.u && inPeriod(isoOf(x.u), p)) got += Number(x.amount) || 0; });
+    let got = inP(s.date) ? Number(s.paid) || 0 : 0;
+    (s.pays || []).forEach((x) => { if (x.u && inP(isoOf(x.u))) got += Number(x.amount) || 0; });
     return a + Math.min(got, paidOf(s));
-  }, 0);
+  }, 0) + inv;
   const dep = exp.reduce((a, e) => a + e.amount, 0);
   /* L'achat de marchandise est déjà dans le coût des articles vendus : le
      retirer du bénéfice évite de compter deux fois le même achat. Il reste
@@ -453,15 +462,15 @@ function figures(p) {
      bilan, sinon « Argent non encore encaissé » et « Argent dehors » répètent
      le même montant quand on regarde toute l'histoire. */
   const due = sales.reduce((a, s) => a + creditOf(s), 0);
-  const wd = db.withdrawals.filter((w) => inPeriod(w.date, p)).reduce((a, w) => a + w.amount, 0);
-  return { sales, exp, ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd };
+  const wd = db.withdrawals.filter((w) => inP(w.date)).reduce((a, w) => a + w.amount, 0);
+  return { sales, exp, invoices, inv, sold, ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd };
 }
 function bilans() {
-  const { ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd } = figures(period);
+  const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, due, wd } = figures(period);
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
-    </div><button class="btn out" data-act="hist">${T('history')}</button></div>
+    </div><button class="btn out" data-act="hist">${T('history')}</button><button class="btn out" data-act="report">${T('monthlyReport')}</button></div>
     <div class="kpis">
       <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
@@ -472,12 +481,112 @@ function bilans() {
     <div class="card">
       <div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>
       <div class="row"><div class="t">${T('goodsPurchases')}</div><div class="t">${money(purchases)}</div></div>
+      <div class="row"><div class="t">${T('invoicesInRevenue')}</div><div class="t">${money(inv)}</div></div>
       <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(due)}</div></div>
       <div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>
       <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
       <div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>
     </div>
-    <p class="hint">${T('profitHint')}</p>`;
+    <p class="hint">${T('profitHint')}</p>
+    ${invoices.length ? `<p class="hint">${T('invoiceNoCostHint')}</p>` : ''}`;
+}
+
+/* ---------------- rapport mensuel ---------------- */
+/* Les mois qui ont quelque chose à raconter : ventes, dépenses, prélèvements,
+   factures. Les douze derniers au plus, du plus récent au plus ancien. */
+function monthsWithData() {
+  const set = new Set([todayISO().slice(0, 7)]);
+  [...db.sales, ...db.expenses, ...db.withdrawals].forEach((x) => { if (x.date) set.add(String(x.date).slice(0, 7)); });
+  (db.docs || []).forEach((d) => { const dt = d.paidDate || d.date; if (dt) set.add(String(dt).slice(0, 7)); });
+  return [...set].filter((k) => /^\d{4}-\d{2}$/.test(k)).sort().reverse().slice(0, 24);
+}
+const monthLabel = (key) => {
+  const d = new Date(key + '-01T00:00:00');
+  if (isNaN(d.getTime())) return key;
+  const txt = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+};
+function reportModal() {
+  const months = monthsWithData();
+  const m = modal(`<h2>${T('monthlyReport')}</h2><p class="hint">${T('monthlyReportHint')}</p>
+    <label>${T('month')}</label><select id="rpMonth">${months.map((k) => `<option value="${k}" ${k === todayISO().slice(0, 7) ? 'selected' : ''}>${esc(monthLabel(k))}</option>`).join('')}</select>
+    <button class="btn" id="rpOk">${T('downloadPdf')}</button>
+    <button class="btn out" id="rpNo">${T('cancel')}</button>`);
+  m.querySelector('#rpNo').onclick = () => m.remove();
+  m.querySelector('#rpOk').onclick = () => { const k = m.querySelector('#rpMonth').value; m.remove(); downloadReport(k); };
+}
+async function reportPdf(monthKey) {
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const f = figures('mois', monthKey);
+  const st = db.settings || {};
+  const pm = (n) => money(n).replace(/[\u202f\u00a0]/g, ' ');
+  const place = [st.address, st.district, st.city, countryName(st.country || 'CI')].filter(Boolean).join(' · ');
+  pdf.setFillColor(20, 83, 45);
+  pdf.rect(10, 10, 190, 7, 'F');
+  pdf.setTextColor(17, 17, 17);
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(24);
+  pdf.text(T('monthlyReport'), 14, 34);
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(12);
+  pdf.text(monthLabel(monthKey), 14, 42);
+  pdf.setFontSize(10);
+  pdf.text(db.shop || T('app'), 14, 48);
+  if (place) { pdf.setFontSize(8.5); pdf.setTextColor(90, 90, 90); pdf.text(place, 14, 53); pdf.setTextColor(17, 17, 17); }
+  let y = 66;
+  const row = (label, value, bold) => {
+    if (y > 268) { pdf.addPage(); y = 24; }
+    pdf.setFont('helvetica', bold ? 'bold' : 'normal');
+    pdf.setFontSize(bold ? 12 : 10.5);
+    pdf.text(String(label), 14, y);
+    pdf.text(String(value), 196, y, { align: 'right' });
+    pdf.setDrawColor(228, 228, 228); pdf.setLineWidth(0.2);
+    pdf.line(14, y + 2.5, 196, y + 2.5);
+    y += bold ? 9 : 7.5;
+  };
+  const section = (title) => {
+    if (y > 250) { pdf.addPage(); y = 24; }
+    y += 5;
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(20, 83, 45);
+    pdf.text(String(title).toUpperCase(), 14, y);
+    pdf.setTextColor(17, 17, 17);
+    y += 7;
+  };
+  section(T('reportActivity'));
+  row(T('revenue'), pm(f.ca), true);
+  row(T('saleCount'), String(f.sales.length));
+  row(T('invoicesPaid'), `${f.invoices.length} · ${pm(f.inv)}`);
+  row(T('collected'), pm(f.cash));
+  row(T('expenses'), pm(f.dep));
+  row(T('goodsPurchases'), pm(f.purchases));
+  row(f.unknownCost.length ? T('profitEstimated') : T('profit'), pm(f.profit), true);
+  section(T('reportSituation'));
+  row(T('uncollected'), pm(f.due));
+  row(T('debts'), pm(totalDebt()));
+  row(T('stockValue'), pm(stockValue()));
+  row(T('withdrawals'), pm(f.wd));
+  const byLabel = {};
+  f.exp.forEach((e) => { byLabel[e.label] = (byLabel[e.label] || 0) + (Number(e.amount) || 0); });
+  const labels = Object.entries(byLabel).sort((a, b) => b[1] - a[1]);
+  if (labels.length) { section(T('reportExpenses')); labels.forEach(([k, v]) => row(k, pm(v))); }
+  const byClient = {};
+  f.sales.forEach((s) => { const c = creditOf(s); if (c > 0) { const k = s.party || '—'; byClient[k] = (byClient[k] || 0) + c; } });
+  const tops = Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (tops.length) { section(T('reportLate')); tops.forEach(([k, v]) => row(k, pm(v))); }
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(120, 120, 120);
+  pdf.text(`${T('generatedOn')} ${dayFR(todayISO())} · ${db.shop || T('app')}`, 14, 287);
+  return pdf.output('blob');
+}
+async function downloadReport(monthKey) {
+  try {
+    const blob = await reportPdf(monthKey);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Rapport-${monthKey}.pdf`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 6000);
+    alert(T('pdfSaved'));
+  } catch { alert(T('pdfFail')); }
 }
 
 /* ---------------- modales ---------------- */
@@ -1523,8 +1632,19 @@ document.addEventListener('click', async (e) => {
   }
   if (act === 'toFacture') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
-    if (d && d.kind === 'DEV') { d.kind = 'FAC'; d.number = num('FAC'); d.u = Date.now(); saveDB(); render(); }
+    if (d && d.kind === 'DEV') { d.kind = 'FAC'; d.number = num('FAC'); d.paidDate = ''; d.u = Date.now(); saveDB(); render(); }
   }
+  /* Une facture ne compte dans le chiffre d'affaires qu'une fois marquée payée,
+     et à la date du règlement. Le bouton permet de revenir en arrière. */
+  if (act === 'toggleInvoicePaid') {
+    const d = db.docs.find((x) => x.id === b.dataset.id);
+    if (d && d.kind === 'FAC') {
+      d.paidDate = d.paidDate ? '' : todayISO();
+      d.u = Date.now();
+      saveDB(); tab = 'docs'; render();
+    }
+  }
+  if (act === 'report') reportModal();
   if (act === 'print') previewDoc(b.dataset.id);
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
   if (act === 'waSale') waSale(b.dataset.id);

@@ -247,3 +247,31 @@ test('la trésorerie ne compte jamais plus que le total d’une vente', () => {
   const f = dansVm('figures("jour")');
   assert.equal(f.cash, 10000, 'acompte + versement plafonnés au total');
 });
+
+/* --- factures payées : elles n'entrent dans le CA qu'une fois réglées --- */
+
+test('une facture payée entre dans le CA du mois du règlement', () => {
+  viderPeriode(`db.sales = []; db.docs = [
+    { id: 'f1', kind: 'FAC', date: '2026-01-05', paidDate: todayISO(), total: 50000, vat: 0, lines: [] },
+    { id: 'f2', kind: 'FAC', date: todayISO(), total: 30000, vat: 0, lines: [] },
+    { id: 'f3', kind: 'DEV', date: todayISO(), paidDate: todayISO(), total: 9999, vat: 0, lines: [] }];`);
+  const f = dansVm('figures("jour")');
+  assert.equal(f.inv, 50000, 'seule la facture payée compte');
+  assert.equal(f.ca, 50000, 'elle entre dans le chiffre d’affaires');
+  assert.equal(f.cash, 50000, 'et dans l’encaissé');
+  assert.ok(dansVm('bilans()').includes('dont factures payées'), 'la ligne est visible au bilan');
+});
+
+test('une facture compte dans le mois où elle est réglée, pas celui de son émission', () => {
+  viderPeriode(`db.sales = []; db.docs = [{ id: 'f4', kind: 'FAC', date: '2026-01-05', paidDate: '2026-02-10', total: 20000, vat: 0, lines: [] }];`);
+  assert.equal(dansVm('figures("mois", "2026-01")').ca, 0, 'émise en janvier, pas encore payée');
+  assert.equal(dansVm('figures("mois", "2026-02")').ca, 20000, 'le règlement de février compte');
+});
+
+test('le rapport mensuel reste disponible sur un mois sans données', () => {
+  viderPeriode(`db.sales = []; db.expenses = []; db.docs = []; db.withdrawals = [];`);
+  const f = dansVm('figures("mois", "2020-03")');
+  assert.equal(f.ca, 0);
+  assert.equal(f.profit, 0);
+  assert.ok(dansVm('monthsWithData()').includes(dansVm('todayISO().slice(0, 7)')));
+});
