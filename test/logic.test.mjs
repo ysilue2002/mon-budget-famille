@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -293,4 +293,28 @@ test('une facture impayée est un dû mais pas encore un revenu', () => {
   assert.equal(f.invDue, 20000, 'mais un montant à réclamer');
   assert.equal(dansVm('invoiceDue()'), 20000);
   assert.ok(dansVm('bilans()').includes(dansVm('money(20000)')), 'le bilan affiche la facture impayée');
+});
+
+/* --- facture → vente : coût et moyen de paiement --- */
+
+test('une facture payée avec coût produit une vente soldée au bon prix', () => {
+  viderPeriode(`db.sales = []; db.docs = [{ id: 'f5', kind: 'FAC', number: 'FAC-5', date: isoOf(new Date(Date.now() - 5 * 86400000)),
+    paidDate: todayISO(), total: 30000, vat: 0, cost: 12000, party: 'Awa', lines: [] }];`);
+  const d = dansVm('db.docs[0]');
+  const s = { ...dansVm('saleFromInvoice(db.docs[0], "Wave")') };
+  assert.equal(s.total, 30000);
+  assert.equal(s.paid, 30000, 'facture payée : vente soldée');
+  assert.equal(s.date, d.paidDate, 'à la date du règlement');
+  assert.equal(s.method, 'Wave', 'le moyen de paiement est celui choisi');
+  assert.equal(dansVm('costKnownOf')(s.cost), true, 'coût saisi : bénéfice réel');
+  assert.equal(s.docId, 'f5', 'la vente pointe vers sa facture');
+});
+
+test('une facture impayée devient une vente à crédit sans coût connu', () => {
+  viderPeriode(`db.sales = []; db.docs = [{ id: 'f6', kind: 'FAC', number: 'FAC-6', date: todayISO(), total: 8000, vat: 0, party: 'Koffi', lines: [] }];`);
+  const s = { ...dansVm('saleFromInvoice(db.docs[0], "")') };
+  assert.equal(s.paid, 0, 'rien d’encaissé');
+  assert.equal(dansVm('costKnownOf')(s.cost), false, 'coût 0 = inconnu, pas gratuit');
+  dansVm('db.docs[0].saleId = "s-test"');
+  assert.equal(dansVm('invoiceDue()'), 0, 'plus rien à réclamer après conversion');
 });

@@ -428,6 +428,8 @@ function docForm() {
     <div id="lines">${rows}</div>
     <button class="btn out" data-act="addLine">＋ ${T('addLine')}</button>
     <label>${T('vat')}</label><input id="dVat" inputmode="numeric" value="${esc(rate)}">
+    <label>${T('docCost')}</label><input id="dCost" inputmode="numeric" value="${esc(Number(draft.cost) || 0)}">
+    <p class="hint">${T('docCostHint')}</p>
     <div class="row" style="margin-top:10px"><div class="t">${T('ht')}</div><div class="t">${money(total)}</div></div>
     ${rate ? `<div class="row"><div class="t">${T('vatShort')} ${rate} %</div><div class="t">${money(vat)}</div></div>` : ''}
     <div class="row"><div class="t">${T('ttc')}</div><div class="t">${money(total + vat)}</div></div>
@@ -582,6 +584,19 @@ async function reportPdf(monthKey) {
   f.exp.forEach((e) => { byLabel[e.label] = (byLabel[e.label] || 0) + (Number(e.amount) || 0); });
   const labels = Object.entries(byLabel).sort((a, b) => b[1] - a[1]);
   if (labels.length) { section(T('reportExpenses')); labels.forEach(([k, v]) => row(k, pm(v))); }
+  /* Les factures du mois, une par ligne : c'est la pièce que le commerce
+     retrouve dans son classeur, avec son état de règlement. */
+  const monthDocs = (db.docs || []).filter((d) => d.kind === 'FAC' && String(d.date || '').slice(0, 7) === monthKey)
+    .sort((a, b) => (String(a.date) < String(b.date) ? -1 : 1));
+  if (monthDocs.length) {
+    section(T('reportInvoices'));
+    monthDocs.forEach((d) => {
+      const who = `${d.number || '—'} · ${d.party || '—'}`;
+      row(who.slice(0, 62), `${pm(amountOf(d))} · ${d.paidDate ? T('invoicePaid') : T('invoiceUnpaid')}`);
+    });
+    row(T('invoicesPaid'), pm(monthDocs.filter((d) => d.paidDate).reduce((a, d) => a + amountOf(d), 0)), true);
+    row(T('unpaidInvoices'), pm(monthDocs.filter((d) => !d.paidDate).reduce((a, d) => a + amountOf(d), 0)), true);
+  }
   const byClient = {};
   f.sales.forEach((s) => { const c = creditOf(s); if (c > 0) { const k = s.party || '—'; byClient[k] = (byClient[k] || 0) + c; } });
   const tops = Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -964,6 +979,10 @@ function saleModal(saleId) {
   const del = d.querySelector('#sDel');
   if (del) del.onclick = () => {
     if (!confirm(T('confirmDeleteSale'))) return;
+    /* Une vente née d'une facture : la supprimer libère la facture, sinon elle
+       resterait liée à une vente inexistante et sortirait du CA sans raison. */
+    const linked = src.docId && db.docs.find((x) => x.id === src.docId && x.saleId === src.id);
+    if (linked) { linked.saleId = ''; linked.u = Date.now(); }
     delRecord('sales', src.id);
     delRecord('moves', 'mv-' + src.id);
     saveDB(); d.remove(); render();
@@ -1137,6 +1156,41 @@ function payModal(name) {
     if (amount > sum) { d.querySelector('#payErr').textContent = T('errorOverpay'); return; }
     for (const s of list) { if (!amount) break; const take = Math.min(amount, creditOf(s)); s.pays = s.pays || []; s.pays.push({ id: uid(), amount: take, u: Date.now() }); amount -= take; }
     saveDB(); d.remove(); render();
+  };
+}
+/* Objet vente dérivé d'une facture. Une facture déjà payée produit une vente
+   soldée à la date du règlement ; sinon la vente part en crédit client le jour
+   même. Le coût vient de la facture : 0 signifie « inconnu », pas « gratuit »,
+   d'où le bénéfice affiché comme estimé. */
+function saleFromInvoice(d, method) {
+  const total = amountOf(d);
+  const cost = Math.max(0, Number(d.cost) || 0);
+  return {
+    id: uid(), date: d.paidDate || todayISO(), total, paid: d.paidDate ? total : 0,
+    method: method || '', party: d.party || '', pid: '', product: '', qty: 0,
+    cost, costKnown: cost > 0, delivered: true, docId: d.id, u: Date.now(),
+  };
+}
+/* Le moyen de paiement n'est jamais deviné : le commerce le choisit, comme dans
+   le formulaire de vente ordinaire. */
+function factureSaleModal(id) {
+  const d = db.docs.find((x) => x.id === id);
+  if (!d || d.kind !== 'FAC' || d.saleId) return;
+  const total = amountOf(d);
+  if (!total) return;
+  const m = modal(`<h2>${T('createSale')}</h2>
+    <p>${esc(d.number || '')} · ${money(total)}</p>
+    <label>${T('method')}</label><select id="fsMethod">${methodOptions('Espèces')}</select>
+    <p class="hint">${d.paidDate ? T('fsPaidHint') : T('fsUnpaidHint')}</p>
+    <button class="btn" id="fsOk">${T('createSale')}</button>
+    <button class="btn out" id="fsNo">${T('cancel')}</button>`);
+  m.querySelector('#fsNo').onclick = () => m.remove();
+  m.querySelector('#fsOk').onclick = () => {
+    const sale = saleFromInvoice(d, m.querySelector('#fsMethod').value);
+    db.sales.push(sale);
+    d.saleId = sale.id;
+    d.u = Date.now();
+    m.remove(); saveDB(); tab = 'docs'; render();
   };
 }
 function reminderText(name) {
@@ -1615,7 +1669,7 @@ document.addEventListener('click', async (e) => {
     const name = b.dataset.name;
     waOpen((db.parties.find((p) => p.name === name) || {}).phone, reminderText(name));
   }
-  if (act === 'newDoc') { draft = { party: '', phone: '', email: '', address: '', vat: db.settings.vat || 0, lines: [{ label: '', qty: 1, price: 0 }] }; render(); }
+  if (act === 'newDoc') { draft = { party: '', phone: '', email: '', address: '', vat: db.settings.vat || 0, cost: 0, lines: [{ label: '', qty: 1, price: 0 }] }; render(); }
   if (act === 'addLine') { syncDraft(); draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
   if (act === 'delLine') { syncDraft(); draft.lines.splice(+b.dataset.i, 1); if (!draft.lines.length) draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
   if (act === 'closeDoc') { draft = null; render(); }
@@ -1626,7 +1680,7 @@ document.addEventListener('click', async (e) => {
     if (!lines.length) return;
     const total = Math.round(lines.reduce((a, l) => a + l.qty * l.price, 0));
     const rate = Math.max(0, Number(draft.vat) || 0);
-    const fields = { party: draft.party.trim(), clientPhone: (draft.phone || '').trim(), clientEmail: (draft.email || '').trim().toLowerCase(), clientAddress: (draft.address || '').trim(), vat: rate, lines, total, u: Date.now() };
+    const fields = { party: draft.party.trim(), clientPhone: (draft.phone || '').trim(), clientEmail: (draft.email || '').trim().toLowerCase(), clientAddress: (draft.address || '').trim(), vat: rate, cost: Math.max(0, Math.round(+draft.cost || 0)), lines, total, u: Date.now() };
     const edited = draft.id ? db.docs.find((x) => x.id === draft.id) : null;
     if (edited) Object.assign(edited, fields);
     else db.docs.push({ id: uid(), kind: 'DEV', number: num('DEV'), date: todayISO(), status: 'devis', ...fields });
@@ -1635,12 +1689,18 @@ document.addEventListener('click', async (e) => {
   if (act === 'editDoc') {
     const doc = db.docs.find((x) => x.id === b.dataset.id);
     if (!doc) return;
-    draft = { id: doc.id, kind: doc.kind, party: doc.party || '', phone: doc.clientPhone || '', email: doc.clientEmail || '', address: doc.clientAddress || '', vat: doc.vat || 0, lines: (doc.lines || [{ label: '', qty: 1, price: 0 }]).map((l) => ({ ...l })) };
+    draft = { id: doc.id, kind: doc.kind, party: doc.party || '', phone: doc.clientPhone || '', email: doc.clientEmail || '', address: doc.clientAddress || '', vat: doc.vat || 0, cost: doc.cost || 0, lines: (doc.lines || [{ label: '', qty: 1, price: 0 }]).map((l) => ({ ...l })) };
     tab = 'docs'; render();
   }
   if (act === 'delDoc') {
     const doc = db.docs.find((x) => x.id === b.dataset.id);
     if (!doc || !confirm(T('confirmDeleteDoc'))) return;
+    /* La facture emportait sa vente : la laisser seule fausserait le CA et le
+       bénéfice, avec une vente sans justificatif ni transfert de stock. */
+    if (doc.saleId) {
+      delRecord('sales', doc.saleId);
+      delRecord('moves', 'mv-' + doc.saleId);
+    }
     delRecord('docs', doc.id);
     draft = null; saveDB(); tab = 'docs'; render();
   }
@@ -1662,23 +1722,7 @@ document.addEventListener('click', async (e) => {
      ce qui supprime le risque de compter la facture deux fois. Une facture déjà
      payée produit une vente soldée à sa date de règlement ; sinon la vente part
      en crédit client à la date du jour. */
-  if (act === 'factureToSale') {
-    const d = db.docs.find((x) => x.id === b.dataset.id);
-    if (!d || d.kind !== 'FAC' || d.saleId) return;
-    const total = amountOf(d);
-    if (!total) return;
-    if (!confirm(`${T('confirmFactureSale')} ${money(total)}`)) return;
-    const now = Date.now();
-    const sale = {
-      id: uid(), date: d.paidDate || todayISO(), total, paid: d.paidDate ? total : 0,
-      method: '', party: d.party || '', pid: '', product: '', qty: 0,
-      cost: 0, costKnown: false, delivered: true, docId: d.id, u: now,
-    };
-    db.sales.push(sale);
-    d.saleId = sale.id;
-    d.u = now;
-    saveDB(); tab = 'docs'; render();
-  }
+  if (act === 'factureToSale') factureSaleModal(b.dataset.id);
   if (act === 'report') reportModal();
   if (act === 'print') previewDoc(b.dataset.id);
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
@@ -1747,6 +1791,8 @@ function syncDraft() {
   if (em) draft.email = em.value;
   const vt = document.getElementById('dVat');
   if (vt) draft.vat = Math.max(0, +vt.value || 0);
+  const dc = document.getElementById('dCost');
+  if (dc) draft.cost = Math.max(0, +dc.value || 0);
 }
 
 /* ---------------- réglages ---------------- */
