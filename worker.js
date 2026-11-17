@@ -120,6 +120,21 @@ async function sendDocMail(env, to, subject, text, filename, content) {
   } catch { return false; }
 }
 
+/* Rappel de facture envoyé par le serveur, en texte seul (pas de pièce jointe
+   à générer : la facture est décrite dans le message). */
+async function sendTextMail(env, to, subject, text) {
+  if (!env.RESEND_API_KEY) return false;
+  const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ from, to: [to], subject: String(subject || 'Rappel').slice(0, 180), text: String(text || '').slice(0, 4000) }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
 async function blocked(env, key, limit) {
   const row = await env.DB.prepare('SELECT hits, reset FROM throttle WHERE key = ?').bind(key).first();
   return !!row && row.reset > Date.now() && row.hits >= limit;
@@ -285,6 +300,32 @@ async function api(request, env, url) {
     await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = CASE WHEN mail_log.day = excluded.day THEN mail_log.count + 1 ELSE 1 END').bind(user.id, day).run();
     const sent = await sendDocMail(env, to, String(body.subject || 'Document'), String(body.text || ''), filename, pdf);
     return json({ ok: true, mail: sent });
+  }
+
+  /* Relances par e-mail : le client envoie la liste, le serveur seul peut
+     écrire. Les limites protègent contre un envoi en boucle. */
+  if (path === '/api/remind' && request.method === 'POST') {
+    if (await blocked(env, 'remind:' + user.id, 6)) return json({ error: 'slow' }, 429);
+    const body = await readBody(request);
+    const list = Array.isArray(body.list) ? body.list.slice(0, 10) : [];
+    if (!list.length) return json({ error: 'empty' }, 400);
+    const day = new Date().toISOString().slice(0, 10);
+    const row = await env.DB.prepare('SELECT day, count FROM mail_log WHERE user_id = ?').bind(user.id).first();
+    const sameDay = !!row && row.day === day;
+    let count = sameDay ? row.count : 0;
+    const sent = [];
+    for (const item of list) {
+      if (count >= 20) break;
+      const to = String(item && item.to || '').trim().toLowerCase();
+      if (!validEmail(to)) continue;
+      count += 1;
+      const ok = await sendTextMail(env, to, item.subject, item.text);
+      if (ok && item.id) sent.push(String(item.id));
+    }
+    if (sameDay) await env.DB.prepare('UPDATE mail_log SET count = ? WHERE user_id = ?').bind(count, user.id).run();
+    else await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = excluded.count').bind(user.id, day, count).run();
+    await tooMany(env, 'remind:' + user.id, 6, 60 * 60000);
+    return json({ ok: true, sent, limit: count >= 20 });
   }
 
   if (path === '/api/password' && request.method === 'POST') {

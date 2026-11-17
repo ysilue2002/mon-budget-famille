@@ -25,7 +25,7 @@ const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f 
 const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], tomb: [],
   seq: { DEV: 0, FAC: 0 },
-  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
+  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, invRemindDays: 7, autoRemind: false, autoRemindDay: '', autoRemindInfo: null, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
 /* Garde-fou de taille : le serveur refuse au-delà de 2 Mo (worker.js). Prévenir
@@ -217,6 +217,7 @@ function vendre() {
       ${forgotten.length > 5 ? `<p class="hint">+ ${forgotten.length - 5}</p>` : ''}
       <button class="btn" data-act="bulkRemind">${T('bulkRemind')} (${forgotten.length})</button>
     </div>` : ''}
+    ${autoMailNote()}
     <div class="big">
       <button class="btn" data-act="sale">＋ ${T('sell')}</button>
       <button class="btn out" data-act="expense">− ${T('expense')}</button>
@@ -491,6 +492,16 @@ function figures(p, monthKey) {
   const wd = db.withdrawals.filter((w) => inP(w.date)).reduce((a, w) => a + w.amount, 0);
   return { sales, exp, invoices, inv, invDue, sold, ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd };
 }
+/* Ce que l'envoi automatique a fait aujourd'hui, sans mentir sur un échec. */
+function autoMailNote() {
+  const s = db.settings || {};
+  const info = s.autoRemindInfo;
+  if (!s.autoRemind || !info || info.date !== todayISO()) return '';
+  const txt = info.sent
+    ? T('autoRemindDone').replace('[n]', info.sent)
+    : T('autoRemindFail');
+  return `<p class="hint">${txt}</p>`;
+}
 function bilans() {
   const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, invDue, due, wd } = figures(period);
   const rm = remindStats(period);
@@ -593,6 +604,13 @@ async function reportPdf(monthKey) {
   row(T('expenses'), pm(f.dep));
   row(T('goodsPurchases'), pm(f.purchases));
   row(f.unknownCost.length ? T('profitEstimated') : T('profit'), pm(f.profit), true);
+  const rm = remindStats('mois', monthKey);
+  if (rm.count) {
+    section(T('remindStats'));
+    row(T('remindedCount'), `${rm.count} · ${pm(rm.amount)}`);
+    row(T('paidAfterRemind'), `${rm.paid} · ${pm(rm.paidAmount)}${rm.amount ? ` (${rm.rate} %)` : ''}`, true);
+    row(T('stillUnpaid'), `${rm.unpaid} · ${pm(rm.unpaidAmount)}`);
+  }
   section(T('reportSituation'));
   row(T('uncollected'), pm(f.due));
   row(T('debts'), pm(totalDebt()));
@@ -1195,7 +1213,7 @@ function saleFromInvoice(d, method) {
 function bulkRemindModal() {
   const list = remindQueue();
   const m = modal(`<h2>${T('bulkRemind')}</h2>
-    <p class="hint">${T('bulkRemindHint')}</p>
+    <p class="hint">${T('bulkRemindHint').replace('[n]', remindDelay())}</p>
     ${list.length ? `<div id="brList">${list.map((d) => `<div class="row" data-br="${d.id}"><div>
       <div class="t">${esc(d.number)} · ${money(amountOf(d))}</div>
       <div class="s">${esc(d.party || '—')} · ${dayFR(d.date)} · ${remindLabel(d)}</div></div>
@@ -1273,24 +1291,63 @@ function remindLabel(d) {
 }
 /* Factures à relancer : jamais relancées, ou dont la dernière relance a plus
    d'une semaine. C'est la file de la relance groupée. */
+/* Délai de relance des factures, réglable : entre deux rappels d'une même
+   facture, et avant le premier rappel d'une facture fraîche. */
+const remindDelay = () => Math.max(1, Math.round(Number(db.settings.invRemindDays) || 7));
 function remindQueue() {
   return unpaidInvoices()
-    .filter((d) => !d.remindedAt || daysSince(d.remindedAt) >= 7)
+    .filter((d) => daysSince(d.date) >= remindDelay()
+      && (!d.remindedAt || daysSince(d.remindedAt) >= remindDelay()))
     .sort((a, b) => (String(a.date) < String(b.date) ? -1 : 1));
 }
 /* Factures oubliées : impayées depuis plus d'une semaine et sans relance
    récente. L'alerte tombe dès qu'elles sont relancées, payées ou converties. */
-const forgottenInvoices = () => remindQueue().filter((d) => daysSince(d.date) >= 7);
+const forgottenInvoices = () => remindQueue();
+/* Factures qui partent par e-mail à l'ouverture : en retard selon le délai
+   choisi, pas relancées récemment, et dont le client a une adresse e-mail. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+function autoRemindList() {
+  const delay = remindDelay();
+  return unpaidInvoices().filter((d) => EMAIL_RE.test(String(d.clientEmail || '').trim())
+    && daysSince(d.date) >= delay && (!d.remindedAt || daysSince(d.remindedAt) >= delay));
+}
+/* Relance automatique : une fois par jour, à l'ouverture, et seulement si le
+   commerce l'a activée. Le serveur seul peut envoyer un e-mail ; son refus
+   (clé absente) laisse les factures intactes plutôt que de marquer à tort. */
+async function autoRemind() {
+  const s = db.settings || {};
+  if (!s.autoRemind || !me || !navigator.onLine) return;
+  if (s.autoRemindDay === todayISO()) return;
+  s.autoRemindDay = todayISO();
+  const list = autoRemindList();
+  if (!list.length) { saveDB(false); return; }
+  const r = await api('/api/remind', 'POST', {
+    list: list.slice(0, 10).map((d) => ({
+      id: d.id, to: String(d.clientEmail).trim(),
+      subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d),
+    })),
+  });
+  const sent = r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent : [];
+  sent.forEach((id) => {
+    const d = db.docs.find((x) => x.id === id);
+    if (d) { d.remindedAt = todayISO(); d.remindChannel = 'email'; d.u = Date.now(); }
+  });
+  s.autoRemindInfo = { date: todayISO(), sent: sent.length, tried: list.length };
+  saveDB();
+  render();
+}
 /* Bilan des relances d'une période. Une facture relancée peut être réglée
    ensuite (paidDate) ou par sa vente quand elle a été convertie. */
-function remindStats(p) {
+function remindStats(p, monthKey) {
+  /* Le rapport mensuel passe un mois AAAA-MM, comme figures(). */
+  const inP = monthKey ? (date) => String(date || '').slice(0, 7) === monthKey : (date) => inPeriod(date, p);
   const paidDateOf = (d) => {
     if (d.paidDate) return d.paidDate;
     if (!d.saleId) return '';
     const s = db.sales.find((x) => x.id === d.saleId);
     return s && creditOf(s) <= 0 ? s.date : '';
   };
-  const list = (db.docs || []).filter((d) => d.kind === 'FAC' && d.remindedAt && inPeriod(d.remindedAt, p));
+  const list = (db.docs || []).filter((d) => d.kind === 'FAC' && d.remindedAt && inP(d.remindedAt));
   const paid = list.filter((d) => { const on = paidDateOf(d); return on && on >= d.remindedAt; });
   const sum = (arr) => arr.reduce((a, d) => a + amountOf(d), 0);
   const amount = sum(list);
@@ -1868,7 +1925,7 @@ document.addEventListener('click', async (e) => {
     if (!d) return;
     /* Relancer deux fois la même semaine agace un client qui a peut-être déjà
        payé : on prévient, sans interdire. */
-    if (d.remindedAt && daysSince(d.remindedAt) < 7 && !confirm(T('confirmRemindAgain'))) return;
+    if (d.remindedAt && daysSince(d.remindedAt) < remindDelay() && !confirm(T('confirmRemindAgain').replace('[n]', remindDelay()))) return;
     waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d));
     d.remindedAt = todayISO();
     d.u = Date.now();
@@ -1999,6 +2056,10 @@ function settingsModal() {
     <label>${T('invReminderText')}</label><textarea id="setInvRem" rows="6">${esc(invReminderTpl())}</textarea>
     <p class="hint">${T('invReminderHint')}</p>
     <button class="btn out" id="setInvRemReset">${T('invReminderReset')}</button>
+    <label>${T('remindDelay')}</label><input id="setRemDays" inputmode="numeric" value="${remindDelay()}">
+    <p class="hint">${T('remindDelayHint')}</p>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoRemind" ${db.settings.autoRemind ? 'checked' : ''} style="width:auto"><span>${T('autoRemind')}</span></label>
+    <p class="hint">${T('autoRemindHint')}</p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
     </details>
     <details><summary>${T('secAccount')}</summary>
@@ -2073,6 +2134,8 @@ function settingsModal() {
     db.settings.reminder[db.settings.lang] = d.querySelector('#setRem').value;
     db.settings.invReminder = db.settings.invReminder || {};
     db.settings.invReminder[db.settings.lang] = d.querySelector('#setInvRem').value.trim();
+    db.settings.invRemindDays = Math.max(1, Math.round(+d.querySelector('#setRemDays').value || 7));
+    db.settings.autoRemind = d.querySelector('#setAutoRemind').checked;
     db.settings.lang = l;
     db.settings.ads = d.querySelector('#setAds').checked;
     db.settings.companyForm = d.querySelector('#setForm').value;
@@ -2822,6 +2885,7 @@ if (!globalThis.__AC_TEST__) {
     if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
     if (!me) { gateMode = db.shop ? 'login' : 'signup'; showAuthGate(); return; }
     askShop();
+    autoRemind();
   })();
   fetch('version.json', { cache: 'no-store' })
     .then((r) => r.json())
