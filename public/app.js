@@ -100,6 +100,13 @@ const todayISO = () => {
   const d = new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
+/* Même conversion que todayISO, mais pour un horodatage : la date d'un
+   versement doit suivre le calendrier local, sinon un paiement du soir tombe
+   la veille en UTC. */
+const isoOf = (ts) => {
+  const d = new Date(Number(ts) || 0);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
 /* Le séparateur de milliers reste insécable : avec une espace normale, l'affichage
    en arabe (RTL) coupe « 5 » et « 000 » en deux blocs et inverse leur ordre. */
 const fr = (n) => Math.round(n || 0).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g, '\u00a0');
@@ -416,17 +423,34 @@ function docForm() {
 }
 
 /* ---------------- Bilans ---------------- */
-function bilans() {
-  const sales = db.sales.filter((s) => inPeriod(s.date, period));
-  const exp = db.expenses.filter((e) => inPeriod(e.date, period));
+/* Tous les chiffres d'une période au même endroit : c'est cette fonction que
+   les tests vérifient, plutôt que le HTML qui l'affiche. */
+function figures(p) {
+  const sales = db.sales.filter((s) => inPeriod(s.date, p));
+  const exp = db.expenses.filter((e) => inPeriod(e.date, p));
   const ca = sales.reduce((a, s) => a + s.total, 0);
-  const cash = sales.reduce((a, s) => a + paidOf(s), 0);
+  /* Trésorerie : acompte des ventes de la période + versements reçus pendant
+     la période, y compris sur une vente plus ancienne. Un client qui règle en
+     novembre une vente d'octobre fait bien entrer de l'argent en novembre. */
+  const cash = db.sales.reduce((a, s) => {
+    let got = inPeriod(s.date, p) ? Number(s.paid) || 0 : 0;
+    (s.pays || []).forEach((x) => { if (x.u && inPeriod(isoOf(x.u), p)) got += Number(x.amount) || 0; });
+    return a + Math.min(got, paidOf(s));
+  }, 0);
   const dep = exp.reduce((a, e) => a + e.amount, 0);
+  /* L'achat de marchandise est déjà dans le coût des articles vendus : le
+     retirer du bénéfice évite de compter deux fois le même achat. Il reste
+     affiché à part, et dans les dépenses, pour que la sortie d'argent soit vue. */
+  const purchases = exp.filter((e) => e.label === 'Marchandise').reduce((a, e) => a + (Number(e.amount) || 0), 0);
   const cogs = sales.reduce((a, s) => a + (s.cost || 0), 0);
-  const profit = ca - cogs - dep;
+  const profit = ca - cogs - (dep - purchases);
   /* Sans prix d'achat connu, le bénéfice est surestimé : on le dit clairement. */
   const unknownCost = sales.filter((s) => (Number(s.total) || 0) > 0 && !s.costKnown);
-  const wd = db.withdrawals.filter((w) => inPeriod(w.date, period)).reduce((a, w) => a + w.amount, 0);
+  const wd = db.withdrawals.filter((w) => inPeriod(w.date, p)).reduce((a, w) => a + w.amount, 0);
+  return { sales, exp, ca, cash, dep, purchases, cogs, profit, unknownCost, wd };
+}
+function bilans() {
+  const { ca, cash, dep, purchases, cogs, profit, unknownCost, wd } = figures(period);
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
@@ -440,6 +464,7 @@ function bilans() {
     ${unknownCost.length ? `<div class="card" style="border-color:#f3d08a;background:#fffaeb"><p class="hint" style="margin:0">${T('profitUnknownHint')} <b>${unknownCost.length}</b> ${T('salesNoCost')}</p><button class="btn out" data-act="hist">${T('fixSalesCost')}</button></div>` : ''}
     <div class="card">
       <div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>
+      <div class="row"><div class="t">${T('goodsPurchases')}</div><div class="t">${money(purchases)}</div></div>
       <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(Math.max(0, ca - cash))}</div></div>
       <div class="row"><div class="t">${T('cashOut')}</div><div class="t">${money(totalDue())}</div></div>
       <div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>
@@ -827,9 +852,11 @@ function saleModal(saleId) {
     sale.costKnown = costKnown;
     sale.delivered = d.querySelector('#sDeliv').checked;
     sale.u = now;
-    /* Le montant déjà encaissé suit le mode de paiement choisi. */
+    /* Le montant déjà encaissé suit le mode de paiement choisi. Repasser en
+       « à crédit » une vente réglée doit la rouvrir, sinon la case ne fait rien. */
+    const wasCredit = src ? creditOf(src) > 0 : false;
     const paidBefore = src ? Math.min(Number(src.paid) || 0, total) : 0;
-    sale.paid = credit ? paidBefore : total;
+    sale.paid = credit ? (wasCredit ? paidBefore : 0) : total;
     if (!src) db.sales.push(sale);
     if (pid) {
       const move = (db.moves || []).find((m) => m.id === 'mv-' + sid);
@@ -901,13 +928,22 @@ function expenseModal(id) {
     const method = d.querySelector('#eMethod').value;
     const delivered = label === 'Marchandise' ? d.querySelector('#eDeliv').checked : undefined;
     if (src) {
+      /* Une dette déjà payée ne peut pas disparaître sous prétexte qu'on change
+         la catégorie : on refuse, sinon l'argent versé au fournisseur se perd. */
+      if (linked && label !== 'Marchandise' && (Number(linked.paid) || 0) > 0) {
+        d.querySelector('#eErr').textContent = T('errorLinkedPaid');
+        return;
+      }
       src.amount = amount; src.label = label; src.note = note; src.method = method;
       if (label === 'Marchandise') src.delivered = delivered; else delete src.delivered;
       src.u = Date.now();
-      if (linked) {
+      if (linked && label !== 'Marchandise') {
+        /* Sans cette suppression, la dette fournisseur survivrait à l'achat. */
+        delRecord('debts', linked.id);
+      } else if (linked) {
         linked.amount = amount;
         linked.paid = Math.min(Number(linked.paid) || 0, amount);
-        if (label === 'Marchandise') linked.delivered = delivered;
+        linked.delivered = delivered;
         linked.u = Date.now();
       }
       saveDB(); d.remove(); render(); return;
@@ -943,6 +979,8 @@ function payModal(name) {
   d.querySelector('#payOk').onclick = () => {
     let amount = Math.round(+d.querySelector('#payAmt').value || 0);
     if (amount <= 0) { d.querySelector('#payErr').textContent = T('errorAmount'); return; }
+    /* Le surplus n'a nulle part où aller : le refuser vaut mieux que le perdre. */
+    if (amount > sum) { d.querySelector('#payErr').textContent = T('errorOverpay'); return; }
     for (const s of list) { if (!amount) break; const take = Math.min(amount, creditOf(s)); s.pays = s.pays || []; s.pays.push({ id: uid(), amount: take, u: Date.now() }); amount -= take; }
     saveDB(); d.remove(); render();
   };

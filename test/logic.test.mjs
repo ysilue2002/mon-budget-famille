@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -191,4 +191,43 @@ test('la sauvegarde locale signale un état trop volumineux', () => {
   dansVm('db.sales = [];');
   ac.saveDB(false);
   assert.equal(ac.db.meta.tooBig, false, 'le drapeau doit retomber après nettoyage');
+});
+
+/* --- bénéfice et trésorerie : les deux erreurs trouvées à l'audit --- */
+const viderPeriode = (code) => {
+  dansVm(`db.expenses = []; db.debts = []; db.withdrawals = []; db.products = []; db.moves = []; ${code}`);
+};
+
+test('un achat de marchandise n’est pas compté deux fois dans le bénéfice', () => {
+  viderPeriode(`db.sales = [{ id: 's1', date: todayISO(), total: 80000, cost: 50000, costKnown: true, paid: 80000 }];
+    db.expenses = [{ id: 'e1', date: todayISO(), amount: 50000, label: 'Marchandise' }];`);
+  const f = dansVm('figures("jour")');
+  assert.equal(f.ca, 80000, 'chiffre d’affaires');
+  assert.equal(f.cogs, 50000, 'coût des articles vendus');
+  assert.equal(f.dep, 50000, 'la dépense reste visible');
+  assert.equal(f.purchases, 50000, 'achats de marchandises isolés');
+  assert.equal(f.profit, 30000, 'marge réelle : 80 000 − 50 000');
+});
+
+test('le bénéfice retranche quand même les autres dépenses', () => {
+  viderPeriode(`db.sales = [{ id: 's2', date: todayISO(), total: 80000, cost: 50000, costKnown: true, paid: 80000 }];
+    db.expenses = [{ id: 'e2', date: todayISO(), amount: 50000, label: 'Marchandise' },
+                   { id: 'e3', date: todayISO(), amount: 7000, label: 'Loyer' }];`);
+  const f = dansVm('figures("jour")');
+  assert.equal(f.profit, 23000, '30 000 de marge − 7 000 de loyer');
+});
+
+test('une vente d’un mois précédent encaissée ce mois-ci entre dans la trésorerie', () => {
+  const vieux = dansVm('(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); })()');
+  viderPeriode(`db.sales = [{ id: 's3', date: ${JSON.stringify(vieux)}, total: 10000, cost: 0, costKnown: true, paid: 0, pays: [{ id: 'p1', amount: 10000, u: Date.now() }] }];`);
+  const f = dansVm('figures("mois")');
+  assert.equal(f.ca, 0, 'la vente ne gonfle pas le CA du mois');
+  assert.equal(f.cash, 10000, 'mais l’argent reçu ce mois est compté');
+});
+
+test('la trésorerie ne compte jamais plus que le total d’une vente', () => {
+  viderPeriode(`db.sales = [{ id: 's4', date: todayISO(), total: 10000, cost: 0, costKnown: true, paid: 10000,
+    pays: [{ id: 'p2', amount: 5000, u: Date.now() }] }];`);
+  const f = dansVm('figures("jour")');
+  assert.equal(f.cash, 10000, 'acompte + versement plafonnés au total');
 });
