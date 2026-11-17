@@ -12,7 +12,7 @@ header .brandText{min-width:0;flex:1}
 /* Le nom de la boutique passe devant, le nom de l'app devient une étiquette. */
 header .brandText h1{font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#a9dcb8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header .brandText .shop{display:block;font-size:19px;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-header .brandLogo{flex:0 0 auto;width:46px;height:46px;border-radius:14px;overflow:hidden;background:linear-gradient(140deg,#2f8f52,#0f3d22);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;letter-spacing:.5px;color:#eaffef;box-shadow:inset 0 0 0 2px rgba(255,255,255,.18),0 2px 6px rgba(0,0,0,.22)}
+header .brandLogo{flex:0 0 auto;width:48px;height:48px;border-radius:13px;overflow:hidden;background:linear-gradient(140deg,#2f8f52,#0f3d22);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;letter-spacing:.5px;color:#eaffef;box-shadow:inset 0 0 0 2px rgba(255,255,255,.32),0 2px 6px rgba(0,0,0,.22)}
 header .brandLogo img{width:100%;height:100%;object-fit:cover;display:block}
 /* Sur un écran étroit, le voyant de synchronisation ne doit pas écraser le nom. */
 header .brand .pill{flex:0 0 auto;margin-inline-start:auto;align-self:flex-start}

@@ -73,7 +73,17 @@ const cropTile = (margin = 0) => {
     .composite([{ input: inner, gravity: 'center' }])
     .png(PNG)
     .toFile(path.join(OUT, 'icon-512-maskable.png'));
-  for (const f of ['icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'apple-touch-icon.png']) {
+  /* Vignette d'en-tête : on recadre sur le dessin (les 300 px centraux de la
+     tuile) au lieu de la tuile entière. À 48 px de large, le dessin remplit
+     le carré et reste lisible ; la tuile pleine y ressemblait à une pastille
+     sombre. 96 px servent d'image « 2x » pour les écrans à forte densité. */
+  await sharp(SRC)
+    .extract({ left: 570, top: 250, width: 300, height: 300 })
+    .resize(96, 96)
+    .png(PNG)
+    .toFile(path.join(OUT, 'logo-header.png'));
+
+  for (const f of ['icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'apple-touch-icon.png', 'logo-header.png']) {
     const meta = await sharp(path.join(OUT, f)).metadata();
     const ko = Math.round(fs.statSync(path.join(OUT, f)).size / 1024);
     console.log(`${f} ${meta.width}x${meta.height} ${ko} Ko${meta.paletteBitDepth ? ' PALETTE' : ''}`);

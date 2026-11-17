@@ -1,6 +1,6 @@
 /* GÉNÉRÉ par scripts/cache.js — ne pas modifier à la main.
    Modèle : scripts/sw.template.js. */
-const CACHE = 'assistant-commercial-f12eb49a15';
+const CACHE = 'assistant-commercial-fbfb8efe50';
 const PRECACHE = [
   "./",
   "./app.js",
@@ -9,6 +9,7 @@ const PRECACHE = [
   "./icons/icon-192.png",
   "./icons/icon-512-maskable.png",
   "./icons/icon-512.png",
+  "./icons/logo-header.png",
   "./index.html",
   "./jspdf.umd.min.js",
   "./manifest.webmanifest",
@@ -20,6 +21,7 @@ const CACHE_FIRST = [
   "./icons/icon-192.png",
   "./icons/icon-512-maskable.png",
   "./icons/icon-512.png",
+  "./icons/logo-header.png",
   "./jspdf.umd.min.js",
   "./qrcode.js"
 ];

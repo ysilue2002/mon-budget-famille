@@ -178,9 +178,9 @@ function render() {
   const brand = document.getElementById('shopLogo');
   if (brand) {
     const logo = db.settings && db.settings.logo;
-    /* Le logo de l'application est déjà préchargé par le service worker :
-       aucune image supplémentaire à télécharger pour l'en-tête. */
-    brand.innerHTML = logo ? `<img src="${esc(logo)}" alt="">` : '<img src="icons/icon-192.png" alt="">';
+    /* logo-header.png est un recadrage sur le dessin du logo, préchargé par le
+       service worker : lisible à 48 px et disponible hors ligne. */
+    brand.innerHTML = logo ? `<img src="${esc(logo)}" alt="">` : '<img src="icons/logo-header.png" alt="">';
   }
   updatePill();
   document.querySelectorAll('#nav button').forEach((b) => {
