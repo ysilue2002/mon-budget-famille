@@ -275,3 +275,22 @@ test('le rapport mensuel reste disponible sur un mois sans données', () => {
   assert.equal(f.profit, 0);
   assert.ok(dansVm('monthsWithData()').includes(dansVm('todayISO().slice(0, 7)')));
 });
+
+/* --- facture convertie en vente : une seule source de revenu --- */
+
+test('une facture transformée en vente n’est pas comptée deux fois', () => {
+  viderPeriode(`db.sales = [{ id: 's9', date: todayISO(), total: 50000, cost: 0, costKnown: false, paid: 50000 }];
+    db.docs = [{ id: 'f9', kind: 'FAC', date: todayISO(), paidDate: todayISO(), saleId: 's9', total: 50000, vat: 0, lines: [] }];`);
+  const f = dansVm('figures("jour")');
+  assert.equal(f.inv, 0, 'la facture liée est ignorée');
+  assert.equal(f.ca, 50000, 'seule la vente compte');
+});
+
+test('une facture impayée est un dû mais pas encore un revenu', () => {
+  viderPeriode(`db.sales = []; db.docs = [{ id: 'f7', kind: 'FAC', date: todayISO(), total: 20000, vat: 0, lines: [] }];`);
+  const f = dansVm('figures("jour")');
+  assert.equal(f.ca, 0, 'pas encore un revenu');
+  assert.equal(f.invDue, 20000, 'mais un montant à réclamer');
+  assert.equal(dansVm('invoiceDue()'), 20000);
+  assert.ok(dansVm('bilans()').includes(dansVm('money(20000)')), 'le bilan affiche la facture impayée');
+});

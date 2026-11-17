@@ -157,6 +157,11 @@ const lang = () => db.settings.lang || 'fr';
 const vatOf = (d) => Math.round(((Number(d.total) || 0) * (Number(d.vat) || 0)) / 100);
 const ttcOf = (d) => (Number(d.total) || 0) + vatOf(d);
 const amountOf = (d) => (Number(d.vat) ? ttcOf(d) : Number(d.total) || 0);
+/* Factures émises mais pas encore réglées, hors celles déjà transformées en
+   vente : sinon le même argent serait réclamé deux fois au client. */
+const unpaidInvoices = (list) => (list || db.docs || [])
+  .filter((d) => d.kind === 'FAC' && !d.paidDate && !d.saleId);
+const invoiceDue = (list) => unpaidInvoices(list).reduce((a, d) => a + amountOf(d), 0);
 
 /* ---------------- rendu ---------------- */
 function applyLang() {
@@ -202,7 +207,7 @@ function vendre() {
   ].join('');
   return `<div class="kpis">
       <div class="kpi"><span>${T('salesToday')}</span><b>${money(ca)}</b></div>
-      <div class="kpi"><span>${T('cashOut')}</span><b>${money(totalDue())}</b></div>
+      <div class="kpi"><span>${T('cashOut')}</span><b>${money(totalDue() + invoiceDue())}</b></div>
     </div>
     <div class="big">
       <button class="btn" data-act="sale">＋ ${T('sell')}</button>
@@ -257,7 +262,7 @@ function clients() {
   const supRest = sums.reduce((a, x) => a + x.rest, 0);
   const exps = pendingExpenses();
   return `<div class="kpis">
-      <div class="kpi"><span>${T('cashOut')}</span><b>${money(totalDue())}</b></div>
+      <div class="kpi"><span>${T('cashOut')}</span><b>${money(totalDue() + invoiceDue())}</b></div>
       <div class="kpi"><span>${T('debts')}</span><b>${money(totalDebt())}</b></div>
     </div>
     <div class="seg">
@@ -266,6 +271,11 @@ function clients() {
     </div>
     <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
     ${side === 'clients' ? `
+      ${unpaidInvoices().length ? `<div class="card"><h3>${T('unpaidInvoices')}</h3>
+        ${unpaidInvoices().map((d) => `<div class="row"><div><div class="t">${esc(d.number)} · ${money(amountOf(d))}</div><div class="s">${esc(d.party || '—')} · ${dayFR(d.date)}</div></div><div class="right">
+          <button class="btn small" data-act="toggleInvoicePaid" data-id="${d.id}">${T('paidIt')}</button>
+          <button class="btn small whats" data-act="waDoc" data-id="${d.id}">${T('remind')}</button></div></div>`).join('')}
+      </div>` : ''}
       <div class="card"><h3>${T('owed')}</h3>
         ${names.map((n) => {
           const list = due.filter((s) => (s.party || '—') === n);
@@ -330,8 +340,9 @@ function filterDocs(q) {
   return list.filter((d) => [d.number, d.party, d.clientPhone, d.clientAddress, d.date, dayFR(d.date), d.kind === 'DEV' ? T('quote') : T('invoice'), String(d.total), money(d.total), money(amountOf(d))].join(' ').toLowerCase().includes(term));
 }
 function docsList(list) {
-  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)} ${d.kind === 'FAC' ? (d.paidDate ? `<span class="tag ok">${T('invoicePaid')}</span>` : `<span class="tag warn">${T('invoiceUnpaid')}</span>`) : ''}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}${d.paidDate ? ' · ' + T('invoicePaidOn') + ' ' + dayFR(d.paidDate) : ''}</div></div><div class="right">
+  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)} ${d.kind === 'FAC' ? (d.paidDate ? `<span class="tag ok">${T('invoicePaid')}</span>` : `<span class="tag warn">${T('invoiceUnpaid')}</span>`) : ''}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}${d.paidDate ? ' · ' + T('invoicePaidOn') + ' ' + dayFR(d.paidDate) : ''}${d.saleId ? ' · ' + T('invoiceLinked') : ''}</div></div><div class="right">
         ${d.kind === 'FAC' ? `<button class="btn small out" data-act="toggleInvoicePaid" data-id="${d.id}">${d.paidDate ? T('markUnpaid') : T('markPaid')}</button>` : ''}
+        ${d.kind === 'FAC' && !d.saleId ? `<button class="btn small" data-act="factureToSale" data-id="${d.id}">${T('createSale')}</button>` : ''}
         <button class="btn small" data-act="print" data-id="${d.id}">${T('print')}</button>
         <button class="btn small whats" data-act="waPdf" data-id="${d.id}">${T('sendWhatsApp')}</button>
         <button class="btn small out" data-act="dlPdf" data-id="${d.id}">${T('download')}</button>
@@ -437,8 +448,11 @@ function figures(p, monthKey) {
   const exp = db.expenses.filter((e) => inP(e.date));
   /* Une facture ne devient un revenu qu'une fois payée, et compte à la date du
      règlement : une facture de septembre réglée en octobre entre dans octobre. */
-  const invoices = (db.docs || []).filter((d) => d.kind === 'FAC' && d.paidDate && inP(d.paidDate));
+  /* Une facture transformée en vente compte déjà par la vente : on l'écarte
+     pour ne pas compter deux fois le même chiffre d'affaires. */
+  const invoices = (db.docs || []).filter((d) => d.kind === 'FAC' && d.paidDate && !d.saleId && inP(d.paidDate));
   const inv = invoices.reduce((a, d) => a + amountOf(d), 0);
+  const invDue = unpaidInvoices().filter((d) => inP(d.date)).reduce((a, d) => a + amountOf(d), 0);
   const sold = sales.reduce((a, s) => a + s.total, 0);
   const ca = sold + inv;
   /* Trésorerie : acompte des ventes de la période + versements reçus pendant
@@ -463,10 +477,10 @@ function figures(p, monthKey) {
      le même montant quand on regarde toute l'histoire. */
   const due = sales.reduce((a, s) => a + creditOf(s), 0);
   const wd = db.withdrawals.filter((w) => inP(w.date)).reduce((a, w) => a + w.amount, 0);
-  return { sales, exp, invoices, inv, sold, ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd };
+  return { sales, exp, invoices, inv, invDue, sold, ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd };
 }
 function bilans() {
-  const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, due, wd } = figures(period);
+  const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, invDue, due, wd } = figures(period);
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
@@ -482,7 +496,7 @@ function bilans() {
       <div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>
       <div class="row"><div class="t">${T('goodsPurchases')}</div><div class="t">${money(purchases)}</div></div>
       <div class="row"><div class="t">${T('invoicesInRevenue')}</div><div class="t">${money(inv)}</div></div>
-      <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(due)}</div></div>
+      <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(due + invDue)}</div></div>
       <div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>
       <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
       <div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>
@@ -1643,6 +1657,27 @@ document.addEventListener('click', async (e) => {
       d.u = Date.now();
       saveDB(); tab = 'docs'; render();
     }
+  }
+  /* Facture → vente : la vente devient la seule source du chiffre d'affaires,
+     ce qui supprime le risque de compter la facture deux fois. Une facture déjà
+     payée produit une vente soldée à sa date de règlement ; sinon la vente part
+     en crédit client à la date du jour. */
+  if (act === 'factureToSale') {
+    const d = db.docs.find((x) => x.id === b.dataset.id);
+    if (!d || d.kind !== 'FAC' || d.saleId) return;
+    const total = amountOf(d);
+    if (!total) return;
+    if (!confirm(`${T('confirmFactureSale')} ${money(total)}`)) return;
+    const now = Date.now();
+    const sale = {
+      id: uid(), date: d.paidDate || todayISO(), total, paid: d.paidDate ? total : 0,
+      method: '', party: d.party || '', pid: '', product: '', qty: 0,
+      cost: 0, costKnown: false, delivered: true, docId: d.id, u: now,
+    };
+    db.sales.push(sale);
+    d.saleId = sale.id;
+    d.u = now;
+    saveDB(); tab = 'docs'; render();
   }
   if (act === 'report') reportModal();
   if (act === 'print') previewDoc(b.dataset.id);
