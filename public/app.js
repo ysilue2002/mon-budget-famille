@@ -126,6 +126,9 @@ const paysOf = (s) => (s.pays || []).reduce((a, p) => a + (Number(p.amount) || 0
 const creditOf = (s) => Math.max(0, s.total - (Number(s.paid) || 0) - paysOf(s));
 const paidOf = (s) => Math.min(Number(s.total) || 0, (Number(s.paid) || 0) + paysOf(s));
 const totalDue = () => db.sales.reduce((a, s) => a + creditOf(s), 0);
+/* Un coût à 0 n'est pas une information : on le traite comme un coût inconnu
+   pour que le bénéfice affiché ne soit pas pris pour exact. */
+const costKnownOf = (cost) => Number(cost) > 0;
 const debtOf = (d) => Math.max(0, d.amount - d.paid);
 const payMode = (d) => ((Number(d.paid) || 0) <= 0 ? T('onCredit') : debtOf(d) <= 0 ? T('cashPaid') : T('partial'));
 const totalDebt = () => db.debts.reduce((a, d) => a + debtOf(d), 0);
@@ -217,7 +220,7 @@ function stock() {
       <div class="kpi"><span>${T('toRenew')}</span><b>${p.filter((x) => qtyOf(x) <= x.alert).length}</b></div>
     </div>
     <div class="card"><h3>${T('articles')}</h3>
-      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)}</div><div class="s">${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button><button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button></div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
+      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)} ${costKnownOf(x.buy) ? '' : `<span class="tag warn">${T('buyZero')}</span>`}</div><div class="s">${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button><button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button></div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
     </div>
     <div class="card"><h3>${T('addArticle')}</h3>
       <label>${T('name')}</label><input id="pName" placeholder="Savon">
@@ -446,11 +449,15 @@ function figures(p) {
   const profit = ca - cogs - (dep - purchases);
   /* Sans prix d'achat connu, le bénéfice est surestimé : on le dit clairement. */
   const unknownCost = sales.filter((s) => (Number(s.total) || 0) > 0 && !s.costKnown);
+  /* Reste dû par les clients sur les ventes de la période : une seule ligne au
+     bilan, sinon « Argent non encore encaissé » et « Argent dehors » répètent
+     le même montant quand on regarde toute l'histoire. */
+  const due = sales.reduce((a, s) => a + creditOf(s), 0);
   const wd = db.withdrawals.filter((w) => inPeriod(w.date, p)).reduce((a, w) => a + w.amount, 0);
-  return { sales, exp, ca, cash, dep, purchases, cogs, profit, unknownCost, wd };
+  return { sales, exp, ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd };
 }
 function bilans() {
-  const { ca, cash, dep, purchases, cogs, profit, unknownCost, wd } = figures(period);
+  const { ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd } = figures(period);
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
@@ -465,8 +472,7 @@ function bilans() {
     <div class="card">
       <div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>
       <div class="row"><div class="t">${T('goodsPurchases')}</div><div class="t">${money(purchases)}</div></div>
-      <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(Math.max(0, ca - cash))}</div></div>
-      <div class="row"><div class="t">${T('cashOut')}</div><div class="t">${money(totalDue())}</div></div>
+      <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(due)}</div></div>
       <div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>
       <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
       <div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>
@@ -783,6 +789,7 @@ function saleModal(saleId) {
     <label>${T('amount')}</label><input id="sAmount" inputmode="numeric" placeholder="0" value="${src ? esc(src.total) : ''}">
     <label>${T('method')}</label><select id="sMethod">${methodOptions(src ? src.method : 'Espèces')}</select>
     <label>${T('product')}</label><select id="sProduct"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}" ${src && src.pid === p.id ? 'selected' : ''}>${esc(p.name)} (${qtyOf(p) + (src && src.pid === p.id ? src.qty : 0)})</option>`).join('')}</select>
+    <p class="hint" id="sCostWarn" style="display:none;color:#b45309;font-weight:600">${T('costZeroWarn')}</p>
     <label>${T('qtySold')}</label><input id="sQty" inputmode="numeric" value="${src && src.product ? esc(src.qty) : 1}">
     <div id="sCostBox" style="display:${src && src.product ? 'none' : 'block'}">
       <label>${T('costOptional')}</label><input id="sCost" inputmode="numeric" placeholder="0" value="${src && !src.product && src.cost ? esc(src.cost) : ''}">
@@ -792,6 +799,10 @@ function saleModal(saleId) {
     <label>${T('clientPhone')}</label><input id="sPhone" inputmode="tel" placeholder="+225 07 00 00 00 00" value="${esc(known.phone || '')}">
     <label>${T('clientAddress')}</label><input id="sAddress" placeholder="Cocody, près de la pharmacie" value="${esc(known.address || '')}">
     <label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="sCredit" style="width:auto" ${src && creditOf(src) > 0 ? 'checked' : ''}><span>${T('creditLater')}</span></label>
+    <div id="sDepBox" style="display:${src && creditOf(src) > 0 ? 'block' : 'none'}">
+      <label>${T('deposit')}</label><input id="sDeposit" inputmode="numeric" placeholder="0" value="${src ? esc(Math.min(Number(src.paid) || 0, Number(src.total) || 0)) : ''}">
+      <p class="hint">${T('depositHint')}</p>
+    </div>
     <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="sDeliv" ${src ? (src.delivered === false ? '' : 'checked') : 'checked'} style="width:auto"><span>${T('deliveredGoods')}</span></label>
     ${pays.length ? `<h3 style="margin-top:16px">${T('payments')}</h3>
       ${pays.map((p) => `<div class="row"><div class="t">${money(p.amount)}</div><div class="right"><button class="btn small out" data-delpay="${p.id}">${T('delete')}</button></div></div>`).join('')}` : ''}
@@ -802,7 +813,24 @@ function saleModal(saleId) {
   d.querySelector('#sClose').onclick = () => d.remove();
   const prodSel = d.querySelector('#sProduct');
   const costBox = d.querySelector('#sCostBox');
-  prodSel.onchange = () => { costBox.style.display = prodSel.value ? 'none' : 'block'; };
+  const costWarn = d.querySelector('#sCostWarn');
+  /* Un article acheté à 0 rend le bénéfice faux : on le dit avant d'enregistrer. */
+  const warnZeroCost = () => {
+    const p = db.products.find((x) => x.id === prodSel.value);
+    costWarn.style.display = p && !costKnownOf(p.buy) ? 'block' : 'none';
+  };
+  prodSel.onchange = () => { costBox.style.display = prodSel.value ? 'none' : 'block'; warnZeroCost(); };
+  warnZeroCost();
+  const creditBox = d.querySelector('#sCredit');
+  const depBox = d.querySelector('#sDepBox');
+  const depInput = d.querySelector('#sDeposit');
+  /* Passer une vente déjà réglée en « à crédit » doit la rouvrir : l'acompte
+     repart de 0 au lieu de valoir le total encaissé. */
+  creditBox.onchange = () => {
+    const totalNow = Math.round(+d.querySelector('#sAmount').value || 0);
+    if (creditBox.checked && totalNow > 0 && Number(depInput.value) >= totalNow) depInput.value = '0';
+    depBox.style.display = creditBox.checked ? 'block' : 'none';
+  };
   d.querySelectorAll('[data-delpay]').forEach((b) => {
     b.onclick = () => {
       if (!confirm(T('confirmDeletePayment'))) return;
@@ -838,7 +866,14 @@ function saleModal(saleId) {
     } else {
       cost = Math.max(0, Math.round(+d.querySelector('#sCost').value || 0));
     }
-    const costKnown = pid ? true : d.querySelector('#sCost').value.trim() !== '';
+    const costKnown = costKnownOf(cost);
+    /* L'acompte saisi à la vente est ce que le client paie tout de suite ; le
+       reste devient une dette, et les versements suivants s'ajoutent à part. */
+    const depRaw = d.querySelector('#sDeposit').value.trim();
+    const deposit = credit ? Math.max(0, Math.round(+depRaw || 0)) : total;
+    if (credit && deposit > Math.max(0, total - (src ? paysOf(src) : 0))) {
+      d.querySelector('#sErr').textContent = T('errorOverpay'); return;
+    }
     const now = Date.now();
     const sid = src ? src.id : uid();
     const sale = src || { id: sid, date: todayISO(), paid: 0 };
@@ -852,11 +887,7 @@ function saleModal(saleId) {
     sale.costKnown = costKnown;
     sale.delivered = d.querySelector('#sDeliv').checked;
     sale.u = now;
-    /* Le montant déjà encaissé suit le mode de paiement choisi. Repasser en
-       « à crédit » une vente réglée doit la rouvrir, sinon la case ne fait rien. */
-    const wasCredit = src ? creditOf(src) > 0 : false;
-    const paidBefore = src ? Math.min(Number(src.paid) || 0, total) : 0;
-    sale.paid = credit ? (wasCredit ? paidBefore : 0) : total;
+    sale.paid = deposit;
     if (!src) db.sales.push(sale);
     if (pid) {
       const move = (db.moves || []).find((m) => m.id === 'mv-' + sid);

@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -223,6 +223,22 @@ test('une vente d’un mois précédent encaissée ce mois-ci entre dans la tré
   const f = dansVm('figures("mois")');
   assert.equal(f.ca, 0, 'la vente ne gonfle pas le CA du mois');
   assert.equal(f.cash, 10000, 'mais l’argent reçu ce mois est compté');
+});
+
+test('le bilan n’affiche qu’une seule ligne d’argent dehors', () => {
+  viderPeriode(`db.sales = [{ id: 's5', date: todayISO(), total: 5000, cost: 1000, costKnown: true, paid: 3500 }];`);
+  const f = dansVm('figures("tout")');
+  assert.equal(f.due, 1500, 'reste dû sur les ventes de la période');
+  const html = dansVm('bilans()');
+  assert.equal((html.match(/Argent non encore encaissé/g) || []).length, 1, 'une seule ligne');
+  assert.ok(!html.includes('Argent dehors'), 'le doublon est supprimé');
+});
+
+test('un coût à zéro est traité comme un coût inconnu', () => {
+  assert.equal(ac.costKnownOf(0), false, '0 ne renseigne rien sur le bénéfice');
+  assert.equal(ac.costKnownOf(1200), true);
+  viderPeriode(`db.sales = [{ id: 's6', date: todayISO(), total: 5000, cost: 0, costKnown: false, paid: 5000 }];`);
+  assert.equal(dansVm('figures("jour")').unknownCost.length, 1, 'la vente doit être signalée');
 });
 
 test('la trésorerie ne compte jamais plus que le total d’une vente', () => {
