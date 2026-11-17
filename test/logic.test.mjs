@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -317,4 +317,20 @@ test('une facture impayée devient une vente à crédit sans coût connu', () =>
   assert.equal(dansVm('costKnownOf')(s.cost), false, 'coût 0 = inconnu, pas gratuit');
   dansVm('db.docs[0].saleId = "s-test"');
   assert.equal(dansVm('invoiceDue()'), 0, 'plus rien à réclamer après conversion');
+});
+
+/* --- relance d'une facture impayée --- */
+
+test('la relance d’une facture est courtoise et reprend la facture', () => {
+  viderPeriode(`db.sales = []; db.shop = 'Chez Awa'; db.settings.phone = '07 00 00 00 00';
+    db.docs = [{ id: 'f3', kind: 'FAC', number: 'FAC-2026-003', date: todayISO(), total: 25000, vat: 0, party: 'Koffi', lines: [] }];`);
+  const text = dansVm('invoiceReminderText(db.docs[0])');
+  assert.match(text, /^Bonjour Koffi,/);
+  assert.ok(text.includes('FAC-2026-003'), 'le numéro de la facture');
+  assert.ok(text.includes(dansVm('money(25000)')), 'le montant');
+  assert.ok(text.includes(dansVm('dayFR(db.docs[0].date)')), 'la date de la facture');
+  assert.ok(text.includes('Chez Awa'), 'la boutique signe le message');
+  assert.ok(text.includes('07 00 00 00 00'), 'le téléphone de la boutique');
+  assert.ok(text.includes('ne pas tenir compte'), 'une porte de sortie si déjà payée');
+  assert.ok(!text.includes('['), 'aucun champ non remplacé');
 });

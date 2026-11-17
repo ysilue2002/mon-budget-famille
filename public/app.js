@@ -274,7 +274,7 @@ function clients() {
       ${unpaidInvoices().length ? `<div class="card"><h3>${T('unpaidInvoices')}</h3>
         ${unpaidInvoices().map((d) => `<div class="row"><div><div class="t">${esc(d.number)} · ${money(amountOf(d))}</div><div class="s">${esc(d.party || '—')} · ${dayFR(d.date)}</div></div><div class="right">
           <button class="btn small" data-act="toggleInvoicePaid" data-id="${d.id}">${T('paidIt')}</button>
-          <button class="btn small whats" data-act="waDoc" data-id="${d.id}">${T('remind')}</button></div></div>`).join('')}
+          <button class="btn small whats" data-act="waDocRemind" data-id="${d.id}">${T('remind')}</button></div></div>`).join('')}
       </div>` : ''}
       <div class="card"><h3>${T('owed')}</h3>
         ${names.map((n) => {
@@ -342,6 +342,7 @@ function filterDocs(q) {
 function docsList(list) {
   return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)} ${d.kind === 'FAC' ? (d.paidDate ? `<span class="tag ok">${T('invoicePaid')}</span>` : `<span class="tag warn">${T('invoiceUnpaid')}</span>`) : ''}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}${d.paidDate ? ' · ' + T('invoicePaidOn') + ' ' + dayFR(d.paidDate) : ''}${d.saleId ? ' · ' + T('invoiceLinked') : ''}</div></div><div class="right">
         ${d.kind === 'FAC' ? `<button class="btn small out" data-act="toggleInvoicePaid" data-id="${d.id}">${d.paidDate ? T('markUnpaid') : T('markPaid')}</button>` : ''}
+        ${d.kind === 'FAC' && !d.paidDate ? `<button class="btn small whats" data-act="waDocRemind" data-id="${d.id}">${T('remind')}</button>` : ''}
         ${d.kind === 'FAC' && !d.saleId ? `<button class="btn small" data-act="factureToSale" data-id="${d.id}">${T('createSale')}</button>` : ''}
         <button class="btn small" data-act="print" data-id="${d.id}">${T('print')}</button>
         <button class="btn small whats" data-act="waPdf" data-id="${d.id}">${T('sendWhatsApp')}</button>
@@ -1193,6 +1194,24 @@ function factureSaleModal(id) {
     m.remove(); saveDB(); tab = 'docs'; render();
   };
 }
+/* Relance d'une facture impayée. Texte fixe et courtois : on rappelle la
+   facture sans reproche et on laisse une porte de sortie (paiement déjà fait,
+   question à poser). Le commerce le relit dans WhatsApp avant l'envoi. */
+const INV_REMIND = {
+  fr: `Bonjour [Nom du Client],\n\nJ'espère que vous allez bien.\nSauf erreur de notre part, la facture [Numéro Facture] du [Date Facture], d'un montant de [Montant], reste à régler.\n\nMerci de bien vouloir procéder au règlement. Si le paiement a déjà été effectué, merci de ne pas tenir compte de ce message.\n\nNous restons à votre disposition pour toute question.\n\nBien cordialement,\n[Nom de la Boutique]`,
+  en: `Hello [Nom du Client],\n\nI hope you are well.\nUnless we are mistaken, invoice [Numéro Facture] dated [Date Facture], for [Montant], is still unpaid.\n\nPlease let us know once the payment is made. If you have already paid, please disregard this message.\n\nWe remain available for any question.\n\nKind regards,\n[Nom de la Boutique]`,
+  ar: `مرحباً [Nom du Client]،\n\nنأمل أن تكون بخير.\nإن لم نكن مخطئين، فإن الفاتورة [Numéro Facture] بتاريخ [Date Facture] بمبلغ [Montant] لا تزال غير مسددة.\n\nنرجو التكرم بتسديدها. إذا كان الدفع قد تم، يرجى تجاهل هذه الرسالة.\n\nنبقى رهن إشارتكم لأي استفسار.\n\nمع خالص التحية،\n[Nom de la Boutique]`,
+};
+function invoiceReminderText(d) {
+  const shop = db.shop || T('shop');
+  const phone = String((db.settings && db.settings.phone) || (me && me.phone) || '').trim();
+  const tpl = INV_REMIND[lang()] || INV_REMIND.fr;
+  return tpl.replaceAll('[Nom du Client]', d.party || T('client'))
+    .replaceAll('[Nom de la Boutique]', phone ? `${shop}\n${phone}` : shop)
+    .replaceAll('[Numéro Facture]', d.number || '—')
+    .replaceAll('[Date Facture]', dayFR(d.date))
+    .replaceAll('[Montant]', money(amountOf(d)));
+}
 function reminderText(name) {
   const list = db.sales.filter((s) => (s.party || '—') === name && creditOf(s) > 0);
   const sum = list.reduce((a, s) => a + creditOf(s), 0);
@@ -1751,6 +1770,11 @@ document.addEventListener('click', async (e) => {
   if (act === 'waDoc') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (d) waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(d.total)} — ${db.shop || ''}`);
+  }
+  /* Relance d'une facture impayée : message courtois qui rappelle la facture. */
+  if (act === 'waDocRemind') {
+    const d = db.docs.find((x) => x.id === b.dataset.id);
+    if (d) waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d));
   }
   if (act === 'mailDoc') emailDocPDF(b.dataset.id);
   if (act === 'dlPdf') downloadDocPDF(b.dataset.id);
