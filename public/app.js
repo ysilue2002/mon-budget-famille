@@ -512,26 +512,93 @@ function autoMailNote() {
     : T('autoRemindFail');
   return `<p class="hint">${txt}</p>`;
 }
+/* Filtres du journal : canal, résultat, période. Ils s'appliquent aussi à
+   l'export et au renvoi groupé, pour rester cohérents avec ce qu'on voit. */
+let logChannel = 'all';
+let logResult = 'all';
+let logPeriod = 'tout';
+function filteredLog() {
+  return (db.mailLog || []).filter((e) => {
+    if (logChannel !== 'all' && e.channel !== logChannel) return false;
+    if (logResult === 'ok' && !e.ok) return false;
+    if (logResult === 'fail' && e.ok) return false;
+    if (logPeriod !== 'tout' && !inPeriod(isoOf(new Date(e.at || Date.now())), logPeriod)) return false;
+    return true;
+  });
+}
+/* Une facture ne compte qu'une fois, même si elle a échoué plusieurs fois, et
+   une facture réglée entre-temps n'a plus rien à réclamer. */
+function failedLogList() {
+  const seen = new Set();
+  return filteredLog().filter((e) => !e.ok && e.docId && !seen.has(e.docId) && seen.add(e.docId)
+    && db.docs.some((x) => x.id === e.docId && !x.paidDate));
+}
+function logFilterBar() {
+  const seg = (arr, cur, k) => `<div class="seg">${arr.map(([v, label]) => `<button class="${cur === v ? 'on' : ''}" data-act="logFilter" data-k="${k}" data-v="${v}">${label}</button>`).join('')}</div>`;
+  return seg([['all', T('all')], ['email', T('channelEmail')], ['wa', T('channelWhatsapp')]], logChannel, 'channel')
+    + seg([['all', T('all')], ['ok', T('statusOk')], ['fail', T('statusFail')]], logResult, 'result')
+    + seg([['mois', T('thisMonth')], ['tout', T('all')]], logPeriod, 'period');
+}
 /* Journal des relances, la plus récente en haut. Une relance échouée peut être
    renvoyée d'un clic : la nouvelle tentative s'ajoute au journal. */
 function remindJournal() {
-  const log = (db.mailLog || []).slice(-15).reverse();
-  if (!log.length) return '';
+  const log = filteredLog().slice(-15).reverse();
+  if (!(db.mailLog || []).length) return '';
+  const fails = failedLogList().length;
   return `<div class="card"><h3>${T('remindLog')}</h3>
+    ${logFilterBar()}
+    ${fails ? `<button class="btn" data-act="retryFailed">${T('retryFailed')} (${fails})</button>` : ''}
+    ${log.length ? '' : `<p class="empty">${T('logEmpty')}</p>`}
     ${log.map((e) => {
       const when = e.at ? `${dayFR(isoOf(new Date(e.at)))} ${clock(e.at)}` : '';
       return `<div class="row"><div><div class="t">${esc(e.number || '—')} · ${esc(e.party || '—')}</div>
         <div class="s">${when} · ${e.channel === 'email' ? T('channelEmail') : T('channelWhatsapp')}${e.to ? ' · ' + esc(e.to) : ''}</div></div>
         <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span><br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button>`}</div></div>`;
     }).join('')}
-    <button class="btn out" data-act="exportLog">${T('exportLog')}</button>
+    ${log.length ? `<button class="btn out" data-act="exportLog">${T('exportLog')}</button>` : ''}
   </div>`;
+}
+/* Renvoi groupé des échecs affichés, une fois par facture. Seuls les e-mails
+   peuvent échouer : une relance WhatsApp n'est journalisée que si elle part. */
+async function retryFailedReminders() {
+  const items = failedLogList().map((e) => ({ e, d: db.docs.find((x) => x.id === e.docId) })).filter((x) => x.d);
+  if (!items.length) { alert(T('retryNone')); return; }
+  let ok = 0, fail = 0;
+  const mails = items.filter((x) => x.e.channel === 'email');
+  const payload = [];
+  for (const { d } of mails) {
+    const to = String(d.clientEmail || '').trim();
+    if (!isEmail(to)) {
+      fail += 1;
+      logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to, ok: false });
+      continue;
+    }
+    const item = { id: d.id, to, subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d) };
+    try {
+      const file = await docFile(d);
+      item.pdf = await fileToBase64(file);
+      item.filename = file.name;
+    } catch {}
+    payload.push(item);
+  }
+  if (payload.length) {
+    const r = await api('/api/remind', 'POST', { list: payload });
+    const sent = new Set((r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent : []).map(String));
+    payload.forEach((item) => {
+      const d = db.docs.find((x) => x.id === item.id);
+      const done = sent.has(String(item.id));
+      if (done) { d.remindedAt = todayISO(); d.u = Date.now(); ok += 1; } else fail += 1;
+      logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to: item.to, ok: done });
+    });
+  }
+  saveDB(); render();
+  alert(T('retrySummary').replace('[ok]', ok).replace('[fail]', fail));
 }
 /* Export du journal en CSV : séparateur point-virgule et BOM, pour qu'Excel en
    français ouvre le fichier sans déformer les accents. */
 function mailLogCSV() {
   const head = [T('logDate'), T('logTime'), T('invoice'), T('client'), T('amount'), T('method'), T('recipient'), T('result')];
-  const rows = (db.mailLog || []).map((e) => {
+  const rows = filteredLog().map((e) => {
     const dt = new Date(e.at || Date.now());
     return [
       isoOf(dt), dt.toLocaleTimeString(lang() === 'ar' ? 'ar' : lang() === 'en' ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit' }),
@@ -2052,6 +2119,14 @@ document.addEventListener('click', async (e) => {
   if (act === 'bulkRemind') bulkRemindModal();
   if (act === 'exportLog') downloadMailLog();
   if (act === 'resendRemind') resendReminder(b.dataset.log);
+  if (act === 'retryFailed') retryFailedReminders();
+  if (act === 'logFilter') {
+    const v = b.dataset.v;
+    if (b.dataset.k === 'channel') logChannel = v;
+    else if (b.dataset.k === 'result') logResult = v;
+    else logPeriod = v;
+    render();
+  }
   if (act === 'waDocRemind') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (!d) return;

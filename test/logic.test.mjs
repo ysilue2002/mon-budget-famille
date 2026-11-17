@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, mailLogCSV, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -463,4 +463,35 @@ test('le journal des relances s’exporte en CSV lisible', () => {
   assert.ok(lines[1].includes('"Awa ""A"""'), 'guillemets échappés pour Excel');
   assert.ok(lines[2].includes('"Échec"') && lines[2].includes('"k@x.ci"'));
   dansVm('db.mailLog = []');
+});
+
+/* --- filtres du journal --- */
+
+test('le journal se filtre par canal, résultat et période', () => {
+  dansVm(`db.docs = (db.docs || []).filter((d) => d.id !== 'z1').concat([{ id: 'z1', kind: 'FAC', number: 'Z1', date: todayISO(), total: 1000, vat: 0, party: 'A', lines: [] }]);
+    db.mailLog = [
+      { id: 'f1', at: Date.now() - 1000, docId: 'z1', number: 'Z1', party: 'A', amount: 1000, channel: 'email', to: 'a@x.ci', ok: false },
+      { id: 'f2', at: Date.now() - 2000, docId: 'z1', number: 'Z1', party: 'A', amount: 1000, channel: 'email', to: 'a@x.ci', ok: true },
+      { id: 'f3', at: Date.now() - 3000, docId: 'z1', number: 'Z1', party: 'A', amount: 1000, channel: 'wa', to: '0700', ok: true }];
+    logChannel = 'all'; logResult = 'all'; logPeriod = 'tout';`);
+  assert.equal(dansVm('filteredLog().length'), 3, 'sans filtre');
+  dansVm('logChannel = "email"');
+  assert.equal(dansVm('filteredLog().length'), 2, 'canal e-mail');
+  dansVm('logResult = "fail"');
+  assert.equal(dansVm('filteredLog().length'), 1, 'e-mail en échec');
+  assert.equal(dansVm('failedLogList().length'), 1, 'une facture comptée une seule fois');
+  dansVm('logChannel = "all"; logResult = "all"; logPeriod = "jour"');
+  assert.equal(dansVm('filteredLog().length'), 3, 'tout est du jour');
+  dansVm('logPeriod = "tout"; logChannel = "wa"; logResult = "fail"');
+  assert.equal(dansVm('filteredLog().length'), 0, 'combinaison vide');
+  dansVm('db.mailLog = []; db.docs = db.docs.filter((d) => d.id !== "z1"); logChannel = "all"; logResult = "all"; logPeriod = "tout"');
+});
+
+test('une facture réglée n’est plus proposée au renvoi groupé', () => {
+  dansVm(`db.docs = [{ id: 'pd', kind: 'FAC', number: 'PD', date: todayISO(), total: 1000, vat: 0, party: 'A', paidDate: todayISO(), lines: [] }];
+    db.mailLog = [{ id: 'pm', at: Date.now(), docId: 'pd', number: 'PD', party: 'A', amount: 1000, channel: 'email', to: 'a@x.ci', ok: false }];
+    logChannel = 'all'; logResult = 'all'; logPeriod = 'tout';`);
+  assert.equal(dansVm('filteredLog().length'), 1, 'la trace reste dans le journal');
+  assert.equal(dansVm('failedLogList().length'), 0, 'mais plus rien à réclamer');
+  dansVm('db.mailLog = []; db.docs = db.docs.filter((d) => d.id !== "pd")');
 });
