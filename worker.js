@@ -318,14 +318,16 @@ async function api(request, env, url) {
       if (count >= 20) break;
       const to = String(item && item.to || '').trim().toLowerCase();
       if (!validEmail(to)) continue;
+      /* Seul un envoi réussi est compté : une clé absente ne doit pas
+         consommer le quota de la journée. */
+      if (!await sendTextMail(env, to, item.subject, item.text)) continue;
       count += 1;
-      const ok = await sendTextMail(env, to, item.subject, item.text);
-      if (ok && item.id) sent.push(String(item.id));
+      if (item.id) sent.push(String(item.id));
     }
-    if (sameDay) await env.DB.prepare('UPDATE mail_log SET count = ? WHERE user_id = ?').bind(count, user.id).run();
-    else await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = excluded.count').bind(user.id, day, count).run();
+    if (sent.length && sameDay) await env.DB.prepare('UPDATE mail_log SET count = ? WHERE user_id = ?').bind(count, user.id).run();
+    else if (sent.length) await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = excluded.count').bind(user.id, day, count).run();
     await tooMany(env, 'remind:' + user.id, 6, 60 * 60000);
-    return json({ ok: true, sent, limit: count >= 20 });
+    return json({ ok: true, sent });
   }
 
   if (path === '/api/password' && request.method === 'POST') {

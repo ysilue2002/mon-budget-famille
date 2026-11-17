@@ -1225,7 +1225,7 @@ function bulkRemindModal() {
     btn.onclick = () => {
       const d = db.docs.find((x) => x.id === btn.dataset.brgo);
       if (!d) return;
-      waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d));
+      if (!waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d))) return;
       d.remindedAt = todayISO();
       d.u = Date.now();
       const row = m.querySelector(`[data-br="${d.id}"]`);
@@ -1306,33 +1306,40 @@ const forgottenInvoices = () => remindQueue();
 /* Factures qui partent par e-mail à l'ouverture : en retard selon le délai
    choisi, pas relancées récemment, et dont le client a une adresse e-mail. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+/* Même règle que le serveur : une adresse qu'il refuserait ne doit pas être
+   comptée dans la file automatique. */
+const isEmail = (v) => { const t = String(v || '').trim(); return t.length <= 190 && EMAIL_RE.test(t); };
 function autoRemindList() {
   const delay = remindDelay();
-  return unpaidInvoices().filter((d) => EMAIL_RE.test(String(d.clientEmail || '').trim())
+  return unpaidInvoices().filter((d) => isEmail(d.clientEmail)
     && daysSince(d.date) >= delay && (!d.remindedAt || daysSince(d.remindedAt) >= delay));
 }
 /* Relance automatique : une fois par jour, à l'ouverture, et seulement si le
-   commerce l'a activée. Le serveur seul peut envoyer un e-mail ; son refus
-   (clé absente) laisse les factures intactes plutôt que de marquer à tort. */
+   commerce l'a activée. Le serveur seul peut envoyer un e-mail ; son refus ou
+   une coupure laissent les factures intactes plutôt que de les marquer à tort. */
+let autoRemindBusy = false;
 async function autoRemind() {
   const s = db.settings || {};
-  if (!s.autoRemind || !me || !navigator.onLine) return;
+  if (!s.autoRemind || !me || !navigator.onLine || autoRemindBusy) return;
   if (s.autoRemindDay === todayISO()) return;
-  s.autoRemindDay = todayISO();
   const list = autoRemindList();
-  if (!list.length) { saveDB(false); return; }
+  if (!list.length) { s.autoRemindDay = todayISO(); saveDB(false); return; }
+  autoRemindBusy = true;
   const r = await api('/api/remind', 'POST', {
-    list: list.slice(0, 10).map((d) => ({
+    list: list.map((d) => ({
       id: d.id, to: String(d.clientEmail).trim(),
       subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d),
     })),
   });
-  const sent = r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent : [];
+  autoRemindBusy = false;
+  if (!r.ok) return;
+  const sent = r.data && Array.isArray(r.data.sent) ? r.data.sent : [];
   sent.forEach((id) => {
     const d = db.docs.find((x) => x.id === id);
-    if (d) { d.remindedAt = todayISO(); d.remindChannel = 'email'; d.u = Date.now(); }
+    if (d) { d.remindedAt = todayISO(); d.u = Date.now(); }
   });
-  s.autoRemindInfo = { date: todayISO(), sent: sent.length, tried: list.length };
+  s.autoRemindDay = todayISO();
+  s.autoRemindInfo = { date: todayISO(), sent: sent.length };
   saveDB();
   render();
 }
@@ -1349,13 +1356,16 @@ function remindStats(p, monthKey) {
   };
   const list = (db.docs || []).filter((d) => d.kind === 'FAC' && d.remindedAt && inP(d.remindedAt));
   const paid = list.filter((d) => { const on = paidDateOf(d); return on && on >= d.remindedAt; });
+  /* Un règlement antérieur à la relance n'est ni « payé après relance » ni
+     « encore impayé » : les deux lignes ne s'additionnent pas forcément. */
+  const still = list.filter((d) => !paidDateOf(d));
   const sum = (arr) => arr.reduce((a, d) => a + amountOf(d), 0);
   const amount = sum(list);
   const paidAmount = sum(paid);
   return {
     count: list.length, amount,
     paid: paid.length, paidAmount,
-    unpaid: list.length - paid.length, unpaidAmount: amount - paidAmount,
+    unpaid: still.length, unpaidAmount: sum(still),
     rate: amount ? Math.round((paidAmount / amount) * 100) : 0,
   };
 }
@@ -1449,9 +1459,11 @@ function saleDone(sale) {
   m.querySelector('#rdPdf').onclick = () => { m.remove(); shareReceiptPDF(sale.id); };
   m.querySelector('#rdNo').onclick = () => m.remove();
 }
+/* Renvoie faux quand le navigateur bloque la fenêtre : rien n'est parti, donc
+   la facture ne doit pas être marquée relancée. */
 function waOpen(phone, text) {
   const clean = (phone || '').replace(/[^\d+]/g, '').replace('+', '');
-  window.open(clean ? `https://wa.me/${clean}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  return !!window.open(clean ? `https://wa.me/${clean}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
 }
 
 /* ---------------- impression ---------------- */
@@ -1655,7 +1667,7 @@ async function emailDocPDF(id) {
   try {
     const file = await docFile(d);
     const to = (d.clientEmail || '').trim();
-    if (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(to)) {
+    if (isEmail(to)) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       let bin = '';
       for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
@@ -1926,7 +1938,7 @@ document.addEventListener('click', async (e) => {
     /* Relancer deux fois la même semaine agace un client qui a peut-être déjà
        payé : on prévient, sans interdire. */
     if (d.remindedAt && daysSince(d.remindedAt) < remindDelay() && !confirm(T('confirmRemindAgain').replace('[n]', remindDelay()))) return;
-    waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d));
+    if (!waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d))) return;
     d.remindedAt = todayISO();
     d.u = Date.now();
     saveDB(); tab = 'docs'; render();
@@ -2676,7 +2688,7 @@ function askShop() {
   };
 }
 function closeGate() { const g = document.getElementById('gate'); if (g) g.remove(); setBackgroundInert(false); }
-function afterGate() { closeGate(); askShop(); render(); }
+function afterGate() { closeGate(); askShop(); render(); autoRemind(); }
 function showLangGate() {
   closeGate();
   const g = document.createElement('div');

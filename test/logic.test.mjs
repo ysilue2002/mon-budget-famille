@@ -422,3 +422,13 @@ test('le délai de relance se règle et décide de la file', () => {
     'un délai plus court fait entrer la facture de 5 jours');
   dansVm('db.settings.invRemindDays = 7');
 });
+
+test('une facture réglée avant sa relance n’est pas comptée impayée', () => {
+  viderPeriode(`db.sales = []; db.docs = [{ id: 'x1', kind: 'FAC', number: 'X1', date: isoOf(new Date(Date.now() - 20 * 86400000)),
+    total: 3000, vat: 0, lines: [], party: 'A',
+    paidDate: isoOf(new Date(Date.now() - 8 * 86400000)), remindedAt: todayISO() }];`);
+  const s = dansVm('remindStats("tout")');
+  assert.equal(s.count, 1, 'une facture relancée');
+  assert.equal(s.paid, 0, 'payée avant le rappel : pas « payée après »');
+  assert.equal(s.unpaid, 0, 'et pas « encore impayée » non plus');
+});
