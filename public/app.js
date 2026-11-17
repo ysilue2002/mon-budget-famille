@@ -23,7 +23,7 @@ const currencyFor = (code) => countryOf(code)[2];
 const countryOptions = (sel) => COUNTRIES.map((c) => `<option value="${c[0]}" ${c[0] === sel ? 'selected' : ''}>${c[1]} — ${c[2]}</option>`).join('');
 const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f === sel ? 'selected' : ''}>${f}</option>`).join('');
 const fresh = () => ({
-  shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], tomb: [],
+  shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], mailLog: [], tomb: [],
   seq: { DEV: 0, FAC: 0 },
   settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, invRemindDays: 7, autoRemind: false, autoRemindDay: '', autoRemindInfo: null, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
@@ -492,6 +492,14 @@ function figures(p, monthKey) {
   const wd = db.withdrawals.filter((w) => inP(w.date)).reduce((a, w) => a + w.amount, 0);
   return { sales, exp, invoices, inv, invDue, sold, ca, cash, dep, purchases, cogs, profit, unknownCost, due, wd };
 }
+/* Journal des relances : une ligne par envoi tenté, réussi ou non. Borné pour
+   que l'état ne grossisse pas indéfiniment. */
+const MAIL_LOG_MAX = 300;
+function logRemind(entry) {
+  db.mailLog = Array.isArray(db.mailLog) ? db.mailLog : [];
+  db.mailLog.push({ id: uid(), at: Date.now(), ok: false, ...entry });
+  if (db.mailLog.length > MAIL_LOG_MAX) db.mailLog = db.mailLog.slice(-MAIL_LOG_MAX);
+}
 /* Ce que l'envoi automatique a fait aujourd'hui, sans mentir sur un échec. */
 function autoMailNote() {
   const s = db.settings || {};
@@ -503,6 +511,19 @@ function autoMailNote() {
     ? T('autoRemindDone').replace('[n]', info.sent)
     : T('autoRemindFail');
   return `<p class="hint">${txt}</p>`;
+}
+/* Journal des relances, la plus récente en haut. */
+function remindJournal() {
+  const log = (db.mailLog || []).slice(-15).reverse();
+  if (!log.length) return '';
+  return `<div class="card"><h3>${T('remindLog')}</h3>
+    ${log.map((e) => {
+      const when = e.at ? `${dayFR(isoOf(new Date(e.at)))} ${clock(e.at)}` : '';
+      return `<div class="row"><div><div class="t">${esc(e.number || '—')} · ${esc(e.party || '—')}</div>
+        <div class="s">${when} · ${e.channel === 'email' ? T('channelEmail') : T('channelWhatsapp')}${e.to ? ' · ' + esc(e.to) : ''}</div></div>
+        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span>`}</div></div>`;
+    }).join('')}
+  </div>`;
 }
 function bilans() {
   const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, invDue, due, wd } = figures(period);
@@ -534,6 +555,7 @@ function bilans() {
       <div class="row"><div class="t">${T('stillUnpaid')}</div><div class="t">${rm.unpaid} · ${money(rm.unpaidAmount)}</div></div>
       <p class="hint">${T('remindStatsHint')}</p>
     </div>` : ''}
+    ${remindJournal()}
     <p class="hint">${T('profitHint')}</p>
     ${invoices.length ? `<p class="hint">${T('invoiceNoCostHint')}</p>` : ''}`;
 }
@@ -1227,9 +1249,11 @@ function bulkRemindModal() {
     btn.onclick = () => {
       const d = db.docs.find((x) => x.id === btn.dataset.brgo);
       if (!d) return;
-      if (!waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d))) return;
+      const phone = d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone || '';
+      if (!waOpen(phone, invoiceReminderText(d))) return;
       d.remindedAt = todayISO();
       d.u = Date.now();
+      logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
       const row = m.querySelector(`[data-br="${d.id}"]`);
       if (row) row.innerHTML = `<div><div class="t">${esc(d.number)} · ${money(amountOf(d))}</div>
         <div class="s">${esc(d.party || '—')} · ${remindLabel(d)}</div></div>
@@ -1341,15 +1365,30 @@ async function autoRemind() {
   const list = autoRemindList();
   if (!list.length) { s.autoRemindDay = todayISO(); saveDB(false); return; }
   autoRemindBusy = true;
-  const r = await api('/api/remind', 'POST', {
-    list: list.map((d) => ({
+  /* La facture part en pièce jointe : le client n'a pas à la redemander. Si le
+     PDF ne se génère pas, le rappel part quand même, en texte seul. */
+  const payload = [];
+  for (const d of list) {
+    const item = {
       id: d.id, to: String(d.clientEmail).trim(),
       subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d),
-    })),
-  });
+    };
+    try {
+      const file = await docFile(d);
+      item.pdf = await fileToBase64(file);
+      item.filename = file.name;
+    } catch {}
+    payload.push(item);
+  }
+  const r = await api('/api/remind', 'POST', { list: payload });
   autoRemindBusy = false;
   if (!r.ok) return;
   const sent = r.data && Array.isArray(r.data.sent) ? r.data.sent : [];
+  const okIds = new Set(sent.map(String));
+  list.forEach((d) => logRemind({
+    docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d),
+    channel: 'email', to: String(d.clientEmail).trim(), ok: okIds.has(d.id),
+  }));
   sent.forEach((id) => {
     const d = db.docs.find((x) => x.id === id);
     if (d) { d.remindedAt = todayISO(); d.u = Date.now(); }
@@ -1643,6 +1682,12 @@ async function docPdf(d) {
   bar(288);
   return pdf.output('blob');
 }
+async function fileToBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin);
+}
 async function docFile(d) {
   const blob = await docPdf(d);
   return new File([blob], d.number + '.pdf', { type: 'application/pdf' });
@@ -1684,10 +1729,7 @@ async function emailDocPDF(id) {
     const file = await docFile(d);
     const to = (d.clientEmail || '').trim();
     if (isEmail(to)) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      let bin = '';
-      for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-      const r = await api('/api/send-doc', 'POST', { to, subject, text: body, filename: file.name, pdf: btoa(bin) });
+      const r = await api('/api/send-doc', 'POST', { to, subject, text: body, filename: file.name, pdf: await fileToBase64(file) });
       if (r.ok && r.data && r.data.mail) { alert(T('mailSent')); return; }
       if (r.ok && r.data && r.data.error === 'limit') { alert(T('mailLimit')); return; }
     }
@@ -1954,9 +1996,11 @@ document.addEventListener('click', async (e) => {
     /* Relancer deux fois la même semaine agace un client qui a peut-être déjà
        payé : on prévient, sans interdire. */
     if (d.remindedAt && daysSince(d.remindedAt) < remindDelay() && !confirm(T('confirmRemindAgain').replace('[n]', remindDelay()))) return;
-    if (!waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d))) return;
+    const phone = d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone || '';
+    if (!waOpen(phone, invoiceReminderText(d))) return;
     d.remindedAt = todayISO();
     d.u = Date.now();
+    logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
     saveDB(); tab = 'docs'; render();
   }
   if (act === 'mailDoc') emailDocPDF(b.dataset.id);
@@ -2090,6 +2134,8 @@ function settingsModal() {
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoRemind" ${db.settings.autoRemind ? 'checked' : ''} style="width:auto"><span>${T('autoRemind')}</span></label>
     <p class="hint">${T('autoRemindHint')}</p>
     <div id="acMailFlag">${mailFlagHTML()}</div>
+    <button class="btn out" id="setMailTest">${T('testMail')}</button>
+    <p class="hint" id="mailTestMsg"></p>
     <p class="hint">${T('smsUnavailable')}</p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
     </details>
@@ -2159,6 +2205,21 @@ function settingsModal() {
   };
   d.querySelector('#logoDel').onclick = () => { logoDraft = ''; logoPrev.innerHTML = ''; };
   d.querySelector('#setInvRemReset').onclick = () => { d.querySelector('#setInvRem').value = INV_REMIND[lang()] || INV_REMIND.fr; };
+  /* Preuve immédiate que la clé fonctionne, sans attendre une facture en retard. */
+  d.querySelector('#setMailTest').onclick = async () => {
+    const btn = d.querySelector('#setMailTest');
+    const msg = d.querySelector('#mailTestMsg');
+    btn.disabled = true; msg.textContent = T('mailTestWait');
+    const r = await api('/api/test-mail', 'POST', {});
+    btn.disabled = false;
+    const ok = r.ok && r.data && r.data.mail;
+    msg.textContent = ok ? T('mailTestOk') : T('mailTestFail');
+    if (ok) {
+      mailReady = true;
+      const box = d.querySelector('#acMailFlag');
+      if (box) box.innerHTML = mailFlagHTML();
+    }
+  };
   d.querySelector('#setOk').onclick = () => {
     db.shop = d.querySelector('#setShop').value.trim();
     const l = d.querySelector('#setLang').value;
@@ -2352,7 +2413,7 @@ async function shareApp() {
 }
 
 /* ---------------- fusion des deux téléphones ---------------- */
-const ARRAYS = ['products', 'parties', 'suppliers', 'sales', 'expenses', 'withdrawals', 'docs', 'debts', 'moves'];
+const ARRAYS = ['products', 'parties', 'suppliers', 'sales', 'expenses', 'withdrawals', 'docs', 'debts', 'moves', 'mailLog'];
 const countRecords = (d) => ARRAYS.reduce((a, k) => a + (d[k] || []).length, 0);
 function unionPays(a, b) {
   const m = new Map();

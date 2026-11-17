@@ -122,14 +122,16 @@ async function sendDocMail(env, to, subject, text, filename, content) {
 
 /* Rappel de facture envoyé par le serveur, en texte seul (pas de pièce jointe
    à générer : la facture est décrite dans le message). */
-async function sendTextMail(env, to, subject, text) {
+async function sendTextMail(env, to, subject, text, filename, content) {
   if (!env.RESEND_API_KEY) return false;
   const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
+  const body = { from, to: [to], subject: String(subject || 'Rappel').slice(0, 180), text: String(text || '').slice(0, 4000) };
+  if (filename && content) body.attachments = [{ filename, content }];
   try {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from, to: [to], subject: String(subject || 'Rappel').slice(0, 180), text: String(text || '').slice(0, 4000) }),
+      body: JSON.stringify(body),
     });
     return r.ok;
   } catch { return false; }
@@ -308,6 +310,18 @@ async function api(request, env, url) {
     return json({ mail: !!env.RESEND_API_KEY });
   }
 
+  /* Preuve que la clé fonctionne, sans attendre qu'une facture soit en retard. */
+  if (path === '/api/test-mail' && request.method === 'POST') {
+    if (await blocked(env, 'testmail:' + user.id, 3)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'testmail:' + user.id, 3, 60 * 60000);
+    if (!user.email) return json({ error: 'email' }, 400);
+    const mail = await sendTextMail(
+      env, user.email, 'Assistant Commercial : e-mail de test',
+      'Bonjour,\n\nCeci est un e-mail de test envoyé depuis votre application Assistant Commercial. Si vous le recevez, les relances par e-mail fonctionnent.\n\nBonne journée.',
+    );
+    return json({ ok: true, mail });
+  }
+
   /* Relances par e-mail : le client envoie la liste, le serveur seul peut
      écrire. Les limites protègent contre un envoi en boucle. */
   if (path === '/api/remind' && request.method === 'POST') {
@@ -324,9 +338,13 @@ async function api(request, env, url) {
       if (count >= 20) break;
       const to = String(item && item.to || '').trim().toLowerCase();
       if (!validEmail(to)) continue;
+      /* La facture voyage avec le rappel quand elle est fournie et lisible. */
+      const pdf = String(item && item.pdf || '').replace(/\s/g, '');
+      const hasPdf = pdf.length >= 100 && pdf.length <= 1600000 && /^[A-Za-z0-9+/=]+$/.test(pdf);
+      const filename = String(item && item.filename || 'facture.pdf').replace(/[^\w.-]+/g, '-').slice(0, 80) || 'facture.pdf';
       /* Seul un envoi réussi est compté : une clé absente ne doit pas
          consommer le quota de la journée. */
-      if (!await sendTextMail(env, to, item.subject, item.text)) continue;
+      if (!await sendTextMail(env, to, item.subject, item.text, hasPdf && filename, hasPdf ? pdf : '')) continue;
       count += 1;
       if (item.id) sent.push(String(item.id));
     }

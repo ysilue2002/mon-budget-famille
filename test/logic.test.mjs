@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -431,4 +431,21 @@ test('une facture réglée avant sa relance n’est pas comptée impayée', () =
   assert.equal(s.count, 1, 'une facture relancée');
   assert.equal(s.paid, 0, 'payée avant le rappel : pas « payée après »');
   assert.equal(s.unpaid, 0, 'et pas « encore impayée » non plus');
+});
+
+/* --- journal des relances --- */
+
+test('chaque relance est journalisée et le journal reste borné', () => {
+  dansVm('db.mailLog = []');
+  dansVm('logRemind({ number: "FAC-1", party: "A", amount: 1000, channel: "wa", to: "0700", ok: true })');
+  const log = dansVm('db.mailLog').map((e) => ({ ...e }));
+  assert.equal(log.length, 1);
+  assert.equal(log[0].channel, 'wa');
+  assert.equal(log[0].ok, true);
+  assert.equal(log[0].amount, 1000);
+  assert.ok(log[0].at > 0, 'horodaté');
+  dansVm('for (let i = 0; i < 400; i++) logRemind({ number: "X" + i, amount: 1, channel: "email", ok: false })');
+  assert.equal(dansVm('db.mailLog.length'), dansVm('MAIL_LOG_MAX'), 'journal borné');
+  assert.equal(dansVm('db.mailLog[db.mailLog.length - 1].number'), 'X399', 'les plus récentes sont gardées');
+  dansVm('db.mailLog = []');
 });
