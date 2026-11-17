@@ -514,9 +514,24 @@ function autoMailNote() {
 }
 /* Filtres du journal : canal, résultat, période. Ils s'appliquent aussi à
    l'export et au renvoi groupé, pour rester cohérents avec ce qu'on voit. */
-let logChannel = 'all';
-let logResult = 'all';
-let logPeriod = 'tout';
+/* Les filtres survivent au rechargement : on revient sur le journal tel qu'on
+   l'avait laissé. Valeurs inconnues ignorées. */
+const LOG_FILTERS_KEY = KEY + '.logFilters';
+const LOG_FILTERS = { channel: ['all', 'email', 'wa'], result: ['all', 'ok', 'fail'], period: ['mois', 'tout'] };
+function readLogFilters() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOG_FILTERS_KEY) || '{}');
+    const pick = (k) => (LOG_FILTERS[k].includes(raw[k]) ? raw[k] : LOG_FILTERS[k][0]);
+    return { channel: pick('channel'), result: pick('result'), period: pick('period') };
+  } catch { return { channel: 'all', result: 'all', period: 'tout' }; }
+}
+const savedLogFilters = readLogFilters();
+let logChannel = savedLogFilters.channel;
+let logResult = savedLogFilters.result;
+let logPeriod = savedLogFilters.period;
+function saveLogFilters() {
+  try { localStorage.setItem(LOG_FILTERS_KEY, JSON.stringify({ channel: logChannel, result: logResult, period: logPeriod })); } catch {}
+}
 function filteredLog() {
   return (db.mailLog || []).filter((e) => {
     if (logChannel !== 'all' && e.channel !== logChannel) return false;
@@ -542,8 +557,8 @@ function logFilterBar() {
 /* Journal des relances, la plus récente en haut. Une relance échouée peut être
    renvoyée d'un clic : la nouvelle tentative s'ajoute au journal. */
 function remindJournal() {
-  const log = filteredLog().slice(-15).reverse();
   if (!(db.mailLog || []).length) return '';
+  const log = filteredLog().slice(-15).reverse();
   const fails = failedLogList().length;
   return `<div class="card"><h3>${T('remindLog')}</h3>
     ${logFilterBar()}
@@ -586,6 +601,7 @@ async function retryFailedReminders() {
     const sent = new Set((r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent : []).map(String));
     payload.forEach((item) => {
       const d = db.docs.find((x) => x.id === item.id);
+      if (!d) return;
       const done = sent.has(String(item.id));
       if (done) { d.remindedAt = todayISO(); d.u = Date.now(); ok += 1; } else fail += 1;
       logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to: item.to, ok: done });
@@ -597,7 +613,7 @@ async function retryFailedReminders() {
 /* Export du journal en CSV : séparateur point-virgule et BOM, pour qu'Excel en
    français ouvre le fichier sans déformer les accents. */
 function mailLogCSV() {
-  const head = [T('logDate'), T('logTime'), T('invoice'), T('client'), T('amount'), T('method'), T('recipient'), T('result')];
+  const head = [T('logDate'), T('logTime'), T('invoice'), T('client'), T('amount'), T('channel'), T('recipient'), T('result')];
   const rows = filteredLog().map((e) => {
     const dt = new Date(e.at || Date.now());
     return [
@@ -621,36 +637,31 @@ function downloadMailLog() {
   } catch { alert(T('exportFail')); }
 }
 /* Renvoyer une relance échouée : la facture est retrouvée par son identifiant,
-   le message et la pièce jointe sont reconstruits, puis une trace est ajoutée. */
+   le message et la pièce jointe sont reconstruits, puis une trace est ajoutée.
+   Seuls les e-mails peuvent échouer dans le journal : une relance WhatsApp n'y
+   entre que si la fenêtre s'est ouverte. */
 async function resendReminder(logId) {
   const e = (db.mailLog || []).find((x) => x.id === logId);
-  if (!e) return;
+  if (!e || e.channel !== 'email') return;
   const d = db.docs.find((x) => x.id === e.docId);
   if (!d) { alert(T('resendDocGone')); return; }
-  if (e.channel === 'email') {
-    const to = String(d.clientEmail || '').trim();
-    if (!isEmail(to)) { alert(T('resendNoEmail')); return; }
-    const item = { id: d.id, to, subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d) };
-    try {
-      const file = await docFile(d);
-      item.pdf = await fileToBase64(file);
-      item.filename = file.name;
-    } catch {}
-    const r = await api('/api/remind', 'POST', { list: [item] });
-    const sent = r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent.map(String) : [];
-    const ok = sent.includes(String(d.id));
-    logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to, ok });
-    if (ok) { d.remindedAt = todayISO(); d.u = Date.now(); }
-    saveDB(); render();
-    alert(ok ? T('resendDone') : T('resendFail'));
-    return;
-  }
-  const phone = d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone || '';
-  if (!waOpen(phone, invoiceReminderText(d))) return;
-  d.remindedAt = todayISO();
-  d.u = Date.now();
-  logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
+  /* Une facture réglée entre-temps ne doit plus être réclamée. */
+  if (d.paidDate) { alert(T('resendPaid')); return; }
+  const to = String(d.clientEmail || '').trim();
+  if (!isEmail(to)) { alert(T('resendNoEmail')); return; }
+  const item = { id: d.id, to, subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d) };
+  try {
+    const file = await docFile(d);
+    item.pdf = await fileToBase64(file);
+    item.filename = file.name;
+  } catch {}
+  const r = await api('/api/remind', 'POST', { list: [item] });
+  const sent = r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent.map(String) : [];
+  const ok = sent.includes(String(d.id));
+  logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to, ok });
+  if (ok) { d.remindedAt = todayISO(); d.u = Date.now(); }
   saveDB(); render();
+  alert(ok ? T('resendDone') : T('resendFail'));
 }
 function bilans() {
   const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, invDue, due, wd } = figures(period);
@@ -2125,6 +2136,7 @@ document.addEventListener('click', async (e) => {
     if (b.dataset.k === 'channel') logChannel = v;
     else if (b.dataset.k === 'result') logResult = v;
     else logPeriod = v;
+    saveLogFilters();
     render();
   }
   if (act === 'waDocRemind') {
