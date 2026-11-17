@@ -25,7 +25,7 @@ const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f 
 const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], tomb: [],
   seq: { DEV: 0, FAC: 0 },
-  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
+  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
 /* Garde-fou de taille : le serveur refuse au-delà de 2 Mo (worker.js). Prévenir
@@ -272,6 +272,7 @@ function clients() {
     <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
     ${side === 'clients' ? `
       ${unpaidInvoices().length ? `<div class="card"><h3>${T('unpaidInvoices')}</h3>
+        ${remindQueue().length ? `<button class="btn out" data-act="bulkRemind">${T('bulkRemind')} (${remindQueue().length})</button>` : ''}
         ${unpaidInvoices().map((d) => `<div class="row"><div><div class="t">${esc(d.number)} · ${money(amountOf(d))}</div><div class="s">${esc(d.party || '—')} · ${dayFR(d.date)} · ${d.remindedAt && daysSince(d.remindedAt) < 7 ? `<span class="tag warn">${remindLabel(d)}</span>` : remindLabel(d)}</div></div><div class="right">
           <button class="btn small" data-act="toggleInvoicePaid" data-id="${d.id}">${T('paidIt')}</button>
           <button class="btn small whats" data-act="waDocRemind" data-id="${d.id}">${T('remind')}</button></div></div>`).join('')}
@@ -1172,6 +1173,35 @@ function saleFromInvoice(d, method) {
     cost, costKnown: cost > 0, delivered: true, docId: d.id, u: Date.now(),
   };
 }
+/* Relance groupée : une facture à la fois, dans l'ordre des plus anciennes.
+   Un seul onglet WhatsApp s'ouvre par clic, et chaque ligne se coche au fur et
+   à mesure, ce qui évite de relancer deux fois le même client par erreur. */
+function bulkRemindModal() {
+  const list = remindQueue();
+  const m = modal(`<h2>${T('bulkRemind')}</h2>
+    <p class="hint">${T('bulkRemindHint')}</p>
+    ${list.length ? `<div id="brList">${list.map((d) => `<div class="row" data-br="${d.id}"><div>
+      <div class="t">${esc(d.number)} · ${money(amountOf(d))}</div>
+      <div class="s">${esc(d.party || '—')} · ${dayFR(d.date)} · ${remindLabel(d)}</div></div>
+      <div class="right"><button class="btn small whats" data-brgo="${d.id}">${T('remind')}</button></div></div>`).join('')}</div>`
+      : `<p class="empty">${T('bulkRemindNone')}</p>`}
+    <button class="btn out" id="brClose">${T('close')}</button>`);
+  m.querySelector('#brClose').onclick = () => m.remove();
+  m.querySelectorAll('[data-brgo]').forEach((btn) => {
+    btn.onclick = () => {
+      const d = db.docs.find((x) => x.id === btn.dataset.brgo);
+      if (!d) return;
+      waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d));
+      d.remindedAt = todayISO();
+      d.u = Date.now();
+      const row = m.querySelector(`[data-br="${d.id}"]`);
+      if (row) row.innerHTML = `<div><div class="t">${esc(d.number)} · ${money(amountOf(d))}</div>
+        <div class="s">${esc(d.party || '—')} · ${remindLabel(d)}</div></div>
+        <div class="right"><span class="tag ok">✓</span></div>`;
+      saveDB(); render();
+    };
+  });
+}
 /* Le moyen de paiement n'est jamais deviné : le commerce le choisit, comme dans
    le formulaire de vente ordinaire. */
 function factureSaleModal(id) {
@@ -1202,10 +1232,13 @@ const INV_REMIND = {
   en: `Hello [Nom du Client],\n\nI hope you are well.\nUnless we are mistaken, invoice [Numéro Facture] dated [Date Facture], for [Montant], is still unpaid.\n\nPlease let us know once the payment is made. If you have already paid, please disregard this message.\n\nWe remain available for any question.\n\nKind regards,\n[Nom de la Boutique]`,
   ar: `مرحباً [Nom du Client]،\n\nنأمل أن تكون بخير.\nإن لم نكن مخطئين، فإن الفاتورة [Numéro Facture] بتاريخ [Date Facture] بمبلغ [Montant] لا تزال غير مسددة.\n\nنرجو التكرم بتسديدها. إذا كان الدفع قد تم، يرجى تجاهل هذه الرسالة.\n\nنبقى رهن إشارتكم لأي استفسار.\n\nمع خالص التحية،\n[Nom de la Boutique]`,
 };
+/* Le commerce peut réécrire ce texte dans Réglages : la version enregistrée
+   pour la langue courante l'emporte, un texte vide revient au modèle par défaut. */
+const invReminderTpl = () => ((db.settings.invReminder || {})[lang()] || '').trim() || INV_REMIND[lang()] || INV_REMIND.fr;
 function invoiceReminderText(d) {
   const shop = db.shop || T('shop');
   const phone = String((db.settings && db.settings.phone) || (me && me.phone) || '').trim();
-  const tpl = INV_REMIND[lang()] || INV_REMIND.fr;
+  const tpl = invReminderTpl();
   return tpl.replaceAll('[Nom du Client]', d.party || T('client'))
     .replaceAll('[Nom de la Boutique]', phone ? `${shop}\n${phone}` : shop)
     .replaceAll('[Numéro Facture]', d.number || '—')
@@ -1221,6 +1254,13 @@ function remindLabel(d) {
   if (!(n > 0)) return T('remindedToday');
   if (n === 1) return T('remindedYesterday');
   return T('remindedTpl').replace('[n]', n);
+}
+/* Factures à relancer : jamais relancées, ou dont la dernière relance a plus
+   d'une semaine. C'est la file de la relance groupée. */
+function remindQueue() {
+  return unpaidInvoices()
+    .filter((d) => !d.remindedAt || daysSince(d.remindedAt) >= 7)
+    .sort((a, b) => (String(a.date) < String(b.date) ? -1 : 1));
 }
 function reminderText(name) {
   const list = db.sales.filter((s) => (s.party || '—') === name && creditOf(s) > 0);
@@ -1782,6 +1822,7 @@ document.addEventListener('click', async (e) => {
     if (d) waOpen((db.parties.find((p) => p.name === d.party) || {}).phone, `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number} · ${dayFR(d.date)} · ${money(d.total)} — ${db.shop || ''}`);
   }
   /* Relance d'une facture impayée : message courtois qui rappelle la facture. */
+  if (act === 'bulkRemind') bulkRemindModal();
   if (act === 'waDocRemind') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (!d) return;
@@ -1915,6 +1956,9 @@ function settingsModal() {
     <label>${T('language')}</label>
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
+    <label>${T('invReminderText')}</label><textarea id="setInvRem" rows="6">${esc(invReminderTpl())}</textarea>
+    <p class="hint">${T('invReminderHint')}</p>
+    <button class="btn out" id="setInvRemReset">${T('invReminderReset')}</button>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
     </details>
     <details><summary>${T('secAccount')}</summary>
@@ -1982,10 +2026,13 @@ function settingsModal() {
     readLogo(f, (url) => { if (url) { logoDraft = url; logoPrev.innerHTML = `<img src="${esc(url)}" class="logoPrev" alt="">`; } });
   };
   d.querySelector('#logoDel').onclick = () => { logoDraft = ''; logoPrev.innerHTML = ''; };
+  d.querySelector('#setInvRemReset').onclick = () => { d.querySelector('#setInvRem').value = INV_REMIND[lang()] || INV_REMIND.fr; };
   d.querySelector('#setOk').onclick = () => {
     db.shop = d.querySelector('#setShop').value.trim();
     const l = d.querySelector('#setLang').value;
     db.settings.reminder[db.settings.lang] = d.querySelector('#setRem').value;
+    db.settings.invReminder = db.settings.invReminder || {};
+    db.settings.invReminder[db.settings.lang] = d.querySelector('#setInvRem').value.trim();
     db.settings.lang = l;
     db.settings.ads = d.querySelector('#setAds').checked;
     db.settings.companyForm = d.querySelector('#setForm').value;

@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -348,4 +348,29 @@ test('la date de la dernière relance se lit en clair', () => {
   assert.equal(dansVm('remindLabel(db.docs[2])'), 'relancée hier');
   assert.equal(dansVm('remindLabel(db.docs[3])'), 'relancée il y a 3 jours');
   assert.equal(dansVm('remindLabel(null)'), 'jamais relancée');
+});
+
+/* --- relance groupée et texte modifiable --- */
+
+test('la relance groupée ne reprend que les factures à relancer', () => {
+  viderPeriode(`db.sales = []; db.docs = [
+    { id: 'q1', kind: 'FAC', number: 'A', date: isoOf(new Date(Date.now() - 10 * 86400000)), total: 1000, vat: 0, lines: [], party: 'A' },
+    { id: 'q2', kind: 'FAC', number: 'B', date: todayISO(), total: 1000, vat: 0, lines: [], party: 'B', remindedAt: todayISO() },
+    { id: 'q3', kind: 'FAC', number: 'C', date: isoOf(new Date(Date.now() - 20 * 86400000)), total: 1000, vat: 0, lines: [], party: 'C', remindedAt: isoOf(new Date(Date.now() - 8 * 86400000)) },
+    { id: 'q4', kind: 'FAC', number: 'D', date: todayISO(), total: 1000, vat: 0, lines: [], party: 'D', paidDate: todayISO() },
+    { id: 'q5', kind: 'FAC', number: 'E', date: todayISO(), total: 1000, vat: 0, lines: [], party: 'E', remindedAt: isoOf(new Date(Date.now() - 3 * 86400000)) }];`);
+  assert.equal(dansVm('remindQueue().map((d) => d.id).join(",")'), 'q3,q1',
+    'la plus ancienne d’abord ; ni les payées, ni celles relancées cette semaine');
+});
+
+test('le texte de relance des factures est modifiable et se réinitialise', () => {
+  viderPeriode(`db.sales = []; db.docs = [{ id: 'f8', kind: 'FAC', number: 'FAC-8', date: todayISO(), total: 5000, vat: 0, party: 'Awa', lines: [] }];
+    db.settings.invReminder = { fr: 'Rappel : [Montant] pour [Numéro Facture], merci [Nom du Client].' };`);
+  assert.equal(dansVm('invoiceReminderText(db.docs[0])'),
+    `Rappel : ${dansVm('money(5000)')} pour FAC-8, merci Awa.`, 'le texte saisi est utilisé');
+  dansVm('db.settings.invReminder = { fr: "   " }');
+  assert.ok(dansVm('invoiceReminderText(db.docs[0])').includes('Bonjour Awa'),
+    'un texte vide revient au modèle par défaut');
+  dansVm('db.settings.invReminder = {}');
+  assert.ok(dansVm('invReminderTpl()').includes('[Numéro Facture]'), 'le modèle par défaut garde ses variables');
 });
