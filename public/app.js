@@ -272,7 +272,7 @@ function clients() {
     <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
     ${side === 'clients' ? `
       ${unpaidInvoices().length ? `<div class="card"><h3>${T('unpaidInvoices')}</h3>
-        ${unpaidInvoices().map((d) => `<div class="row"><div><div class="t">${esc(d.number)} · ${money(amountOf(d))}</div><div class="s">${esc(d.party || '—')} · ${dayFR(d.date)}</div></div><div class="right">
+        ${unpaidInvoices().map((d) => `<div class="row"><div><div class="t">${esc(d.number)} · ${money(amountOf(d))}</div><div class="s">${esc(d.party || '—')} · ${dayFR(d.date)} · ${d.remindedAt && daysSince(d.remindedAt) < 7 ? `<span class="tag warn">${remindLabel(d)}</span>` : remindLabel(d)}</div></div><div class="right">
           <button class="btn small" data-act="toggleInvoicePaid" data-id="${d.id}">${T('paidIt')}</button>
           <button class="btn small whats" data-act="waDocRemind" data-id="${d.id}">${T('remind')}</button></div></div>`).join('')}
       </div>` : ''}
@@ -340,7 +340,7 @@ function filterDocs(q) {
   return list.filter((d) => [d.number, d.party, d.clientPhone, d.clientAddress, d.date, dayFR(d.date), d.kind === 'DEV' ? T('quote') : T('invoice'), String(d.total), money(d.total), money(amountOf(d))].join(' ').toLowerCase().includes(term));
 }
 function docsList(list) {
-  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)} ${d.kind === 'FAC' ? (d.paidDate ? `<span class="tag ok">${T('invoicePaid')}</span>` : `<span class="tag warn">${T('invoiceUnpaid')}</span>`) : ''}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}${d.paidDate ? ' · ' + T('invoicePaidOn') + ' ' + dayFR(d.paidDate) : ''}${d.saleId ? ' · ' + T('invoiceLinked') : ''}</div></div><div class="right">
+  return list.map((d) => `<div class="row"><div><div class="t">${esc(d.number)} ${d.kind === 'FAC' ? (d.paidDate ? `<span class="tag ok">${T('invoicePaid')}</span>` : `<span class="tag warn">${T('invoiceUnpaid')}</span>`) : ''}</div>        <div class="s">${d.kind === 'DEV' ? T('quote') : T('invoice')} · ${dayFR(d.date)} · ${esc(d.party || '—')} · ${money(amountOf(d))}${d.paidDate ? ' · ' + T('invoicePaidOn') + ' ' + dayFR(d.paidDate) : ''}${d.saleId ? ' · ' + T('invoiceLinked') : ''}${d.kind === 'FAC' && !d.paidDate ? ' · ' + remindLabel(d) : ''}</div></div><div class="right">
         ${d.kind === 'FAC' ? `<button class="btn small out" data-act="toggleInvoicePaid" data-id="${d.id}">${d.paidDate ? T('markUnpaid') : T('markPaid')}</button>` : ''}
         ${d.kind === 'FAC' && !d.paidDate ? `<button class="btn small whats" data-act="waDocRemind" data-id="${d.id}">${T('remind')}</button>` : ''}
         ${d.kind === 'FAC' && !d.saleId ? `<button class="btn small" data-act="factureToSale" data-id="${d.id}">${T('createSale')}</button>` : ''}
@@ -1212,6 +1212,16 @@ function invoiceReminderText(d) {
     .replaceAll('[Date Facture]', dayFR(d.date))
     .replaceAll('[Montant]', money(amountOf(d)));
 }
+/* Âge de la dernière relance, en clair : « relancé il y a 3 jours ». Sert à
+   éviter deux rappels dans la même semaine et à repérer les factures qu'on a
+   oublié de relancer. */
+function remindLabel(d) {
+  if (!d || !d.remindedAt) return T('neverReminded');
+  const n = daysSince(d.remindedAt);
+  if (!(n > 0)) return T('remindedToday');
+  if (n === 1) return T('remindedYesterday');
+  return T('remindedTpl').replace('[n]', n);
+}
 function reminderText(name) {
   const list = db.sales.filter((s) => (s.party || '—') === name && creditOf(s) > 0);
   const sum = list.reduce((a, s) => a + creditOf(s), 0);
@@ -1774,7 +1784,14 @@ document.addEventListener('click', async (e) => {
   /* Relance d'une facture impayée : message courtois qui rappelle la facture. */
   if (act === 'waDocRemind') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
-    if (d) waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d));
+    if (!d) return;
+    /* Relancer deux fois la même semaine agace un client qui a peut-être déjà
+       payé : on prévient, sans interdire. */
+    if (d.remindedAt && daysSince(d.remindedAt) < 7 && !confirm(T('confirmRemindAgain'))) return;
+    waOpen(d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone, invoiceReminderText(d));
+    d.remindedAt = todayISO();
+    d.u = Date.now();
+    saveDB(); tab = 'docs'; render();
   }
   if (act === 'mailDoc') emailDocPDF(b.dataset.id);
   if (act === 'dlPdf') downloadDocPDF(b.dataset.id);

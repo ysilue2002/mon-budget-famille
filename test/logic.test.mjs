@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -333,4 +333,19 @@ test('la relance d’une facture est courtoise et reprend la facture', () => {
   assert.ok(text.includes('07 00 00 00 00'), 'le téléphone de la boutique');
   assert.ok(text.includes('ne pas tenir compte'), 'une porte de sortie si déjà payée');
   assert.ok(!text.includes('['), 'aucun champ non remplacé');
+});
+
+/* --- date de la dernière relance --- */
+
+test('la date de la dernière relance se lit en clair', () => {
+  viderPeriode(`db.sales = []; db.docs = [
+    { id: 'a', kind: 'FAC', number: 'FAC-1', date: todayISO(), total: 1000, vat: 0, lines: [], party: 'A' },
+    { id: 'b', kind: 'FAC', number: 'FAC-2', date: todayISO(), total: 1000, vat: 0, lines: [], party: 'B', remindedAt: todayISO() },
+    { id: 'c', kind: 'FAC', number: 'FAC-3', date: todayISO(), total: 1000, vat: 0, lines: [], party: 'C', remindedAt: isoOf(new Date(Date.now() - 86400000)) },
+    { id: 'd', kind: 'FAC', number: 'FAC-4', date: todayISO(), total: 1000, vat: 0, lines: [], party: 'D', remindedAt: isoOf(new Date(Date.now() - 3 * 86400000)) }];`);
+  assert.equal(dansVm('remindLabel(db.docs[0])'), 'jamais relancée');
+  assert.equal(dansVm('remindLabel(db.docs[1])'), 'relancée aujourd’hui');
+  assert.equal(dansVm('remindLabel(db.docs[2])'), 'relancée hier');
+  assert.equal(dansVm('remindLabel(db.docs[3])'), 'relancée il y a 3 jours');
+  assert.equal(dansVm('remindLabel(null)'), 'jamais relancée');
 });
