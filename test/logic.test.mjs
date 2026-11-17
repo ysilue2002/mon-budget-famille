@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, initialsOf, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -509,8 +509,3 @@ test('le nom de l’export dit ce que le fichier contient', () => {
   assert.equal(dansVm('logExportName()'), 'relances-tout.csv');
 });
 
-test('les initiales remplacent un logo absent', () => {
-  assert.equal(dansVm('initialsOf("Chez Awa Local")'), 'CA');
-  assert.equal(dansVm('initialsOf("Boutique")'), 'B');
-  assert.equal(dansVm('initialsOf("   ")'), '·');
-});

@@ -73,7 +73,6 @@ const cropTile = (margin = 0) => {
     .composite([{ input: inner, gravity: 'center' }])
     .png(PNG)
     .toFile(path.join(OUT, 'icon-512-maskable.png'));
-
   for (const f of ['icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'apple-touch-icon.png']) {
     const meta = await sharp(path.join(OUT, f)).metadata();
     const ko = Math.round(fs.statSync(path.join(OUT, f)).size / 1024);

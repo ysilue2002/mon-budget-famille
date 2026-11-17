@@ -173,12 +173,14 @@ function render() {
   applyLang();
   document.getElementById('appName').textContent = T('app');
   document.getElementById('shopName').textContent = db.shop || T('shop');
-  /* Logo de la boutique (Réglages) ou, à défaut, ses initiales : l'en-tête a
-     toujours quelque chose à montrer, même sans image. */
+  /* Logo de la boutique s'il a été chargé dans Réglages ; sinon le logo de
+     l'application. L'en-tête a toujours une image, jamais un cadre vide. */
   const brand = document.getElementById('shopLogo');
   if (brand) {
     const logo = db.settings && db.settings.logo;
-    brand.innerHTML = logo ? `<img src="${esc(logo)}" alt="">` : esc(initialsOf(db.shop || T('app')));
+    /* Le logo de l'application est déjà préchargé par le service worker :
+       aucune image supplémentaire à télécharger pour l'en-tête. */
+    brand.innerHTML = logo ? `<img src="${esc(logo)}" alt="">` : '<img src="icons/icon-192.png" alt="">';
   }
   updatePill();
   document.querySelectorAll('#nav button').forEach((b) => {
@@ -1478,12 +1480,6 @@ function remindLabel(d) {
 }
 /* Factures à relancer : jamais relancées, ou dont la dernière relance a plus
    d'une semaine. C'est la file de la relance groupée. */
-/* Deux initiales au plus, tirées du nom de la boutique. */
-function initialsOf(name) {
-  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return '·';
-  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('');
-}
 /* Délai de relance des factures, réglable : entre deux rappels d'une même
    facture, et avant le premier rappel d'une facture fraîche. */
 const remindDelay = () => Math.max(1, Math.round(Number(db.settings.invRemindDays) || 7));
