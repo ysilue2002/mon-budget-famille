@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -373,4 +373,34 @@ test('le texte de relance des factures est modifiable et se réinitialise', () =
     'un texte vide revient au modèle par défaut');
   dansVm('db.settings.invReminder = {}');
   assert.ok(dansVm('invReminderTpl()').includes('[Numéro Facture]'), 'le modèle par défaut garde ses variables');
+});
+
+/* --- alerte des factures oubliées et bilan des relances --- */
+
+test('l’alerte signale les factures oubliées, pas les récentes', () => {
+  viderPeriode(`db.sales = []; db.docs = [
+    { id: 'g1', kind: 'FAC', number: 'G1', date: isoOf(new Date(Date.now() - 10 * 86400000)), total: 1000, vat: 0, lines: [], party: 'A' },
+    { id: 'g2', kind: 'FAC', number: 'G2', date: isoOf(new Date(Date.now() - 3 * 86400000)), total: 1000, vat: 0, lines: [], party: 'B' },
+    { id: 'g3', kind: 'FAC', number: 'G3', date: isoOf(new Date(Date.now() - 20 * 86400000)), total: 1000, vat: 0, lines: [], party: 'C', remindedAt: isoOf(new Date(Date.now() - 2 * 86400000)) }];`);
+  assert.equal(dansVm('forgottenInvoices().map((d) => d.id).join(",")'), 'g1',
+    'une facture de 3 jours attend son échéance, une relancée cette semaine est écartée');
+});
+
+test('le bilan des relances dit ce qui a été payé après un rappel', () => {
+  viderPeriode(`const D = (n) => isoOf(new Date(Date.now() - n * 86400000));
+    db.sales = [{ id: 's4', date: D(3), total: 4000, paid: 4000, cost: 0, costKnown: false }];
+    db.docs = [
+      { id: 'r1', kind: 'FAC', number: 'R1', date: D(20), total: 10000, vat: 0, lines: [], party: 'A', remindedAt: D(10), paidDate: D(4) },
+      { id: 'r2', kind: 'FAC', number: 'R2', date: D(9), total: 5000, vat: 0, lines: [], party: 'B', remindedAt: D(5) },
+      { id: 'r3', kind: 'FAC', number: 'R3', date: D(30), total: 20000, vat: 0, lines: [], party: 'C', remindedAt: D(2), paidDate: D(1) },
+      { id: 'r4', kind: 'FAC', number: 'R4', date: D(12), total: 4000, vat: 0, lines: [], party: 'D', remindedAt: D(6), saleId: 's4' }];`);
+  const s = dansVm('remindStats("tout")');
+  assert.equal(s.count, 4, 'quatre factures relancées');
+  assert.equal(s.amount, 39000);
+  assert.equal(s.paid, 3, 'deux réglées sur facture, une par sa vente');
+  assert.equal(s.paidAmount, 34000);
+  assert.equal(s.unpaid, 1);
+  assert.equal(s.unpaidAmount, 5000);
+  assert.equal(s.rate, 87);
+  assert.equal(dansVm('remindStats("jour").count'), 0, 'rien de relancé aujourd’hui');
 });

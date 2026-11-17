@@ -205,10 +205,18 @@ function vendre() {
     ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(methodLabel(e.method))}</div></div><div class="right">${e.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button>` : ''}<button class="btn small out" data-act="editExpense" data-id="${e.id}">${T('edit')}</button></div></div>`),
     ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
+  const forgotten = forgottenInvoices();
   return `<div class="kpis">
       <div class="kpi"><span>${T('salesToday')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('cashOut')}</span><b>${money(totalDue() + invoiceDue())}</b></div>
     </div>
+    ${forgotten.length ? `<div class="card" style="border-color:#f3d08a;background:#fffaeb">
+      <h3>${T('forgottenTitle')}</h3>
+      <p class="hint" style="margin:0 0 8px">${T('forgottenHint')}</p>
+      ${forgotten.slice(0, 5).map((d) => `<div class="row"><div class="t">${esc(d.number)} · ${esc(d.party || '—')}</div><div class="t">${money(amountOf(d))}</div></div>`).join('')}
+      ${forgotten.length > 5 ? `<p class="hint">+ ${forgotten.length - 5}</p>` : ''}
+      <button class="btn" data-act="bulkRemind">${T('bulkRemind')} (${forgotten.length})</button>
+    </div>` : ''}
     <div class="big">
       <button class="btn" data-act="sale">＋ ${T('sell')}</button>
       <button class="btn out" data-act="expense">− ${T('expense')}</button>
@@ -485,6 +493,7 @@ function figures(p, monthKey) {
 }
 function bilans() {
   const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, invDue, due, wd } = figures(period);
+  const rm = remindStats(period);
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
@@ -505,6 +514,13 @@ function bilans() {
       <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
       <div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>
     </div>
+    ${rm.count ? `<div class="card">
+      <h3>${T('remindStats')}</h3>
+      <div class="row"><div class="t">${T('remindedCount')}</div><div class="t">${rm.count} · ${money(rm.amount)}</div></div>
+      <div class="row"><div class="t">${T('paidAfterRemind')}</div><div class="t">${rm.paid} · ${money(rm.paidAmount)}${rm.amount ? ` (${rm.rate} %)` : ''}</div></div>
+      <div class="row"><div class="t">${T('stillUnpaid')}</div><div class="t">${rm.unpaid} · ${money(rm.unpaidAmount)}</div></div>
+      <p class="hint">${T('remindStatsHint')}</p>
+    </div>` : ''}
     <p class="hint">${T('profitHint')}</p>
     ${invoices.length ? `<p class="hint">${T('invoiceNoCostHint')}</p>` : ''}`;
 }
@@ -1261,6 +1277,30 @@ function remindQueue() {
   return unpaidInvoices()
     .filter((d) => !d.remindedAt || daysSince(d.remindedAt) >= 7)
     .sort((a, b) => (String(a.date) < String(b.date) ? -1 : 1));
+}
+/* Factures oubliées : impayées depuis plus d'une semaine et sans relance
+   récente. L'alerte tombe dès qu'elles sont relancées, payées ou converties. */
+const forgottenInvoices = () => remindQueue().filter((d) => daysSince(d.date) >= 7);
+/* Bilan des relances d'une période. Une facture relancée peut être réglée
+   ensuite (paidDate) ou par sa vente quand elle a été convertie. */
+function remindStats(p) {
+  const paidDateOf = (d) => {
+    if (d.paidDate) return d.paidDate;
+    if (!d.saleId) return '';
+    const s = db.sales.find((x) => x.id === d.saleId);
+    return s && creditOf(s) <= 0 ? s.date : '';
+  };
+  const list = (db.docs || []).filter((d) => d.kind === 'FAC' && d.remindedAt && inPeriod(d.remindedAt, p));
+  const paid = list.filter((d) => { const on = paidDateOf(d); return on && on >= d.remindedAt; });
+  const sum = (arr) => arr.reduce((a, d) => a + amountOf(d), 0);
+  const amount = sum(list);
+  const paidAmount = sum(paid);
+  return {
+    count: list.length, amount,
+    paid: paid.length, paidAmount,
+    unpaid: list.length - paid.length, unpaidAmount: amount - paidAmount,
+    rate: amount ? Math.round((paidAmount / amount) * 100) : 0,
+  };
 }
 function reminderText(name) {
   const list = db.sales.filter((s) => (s.party || '—') === name && creditOf(s) > 0);
