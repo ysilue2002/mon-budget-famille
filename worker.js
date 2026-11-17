@@ -302,6 +302,12 @@ async function api(request, env, url) {
     return json({ ok: true, mail: sent });
   }
 
+  /* L'application ne peut pas savoir seule si le serveur sait envoyer un e-mail
+     (la clé est un secret) : elle le demande, et l'affiche clairement. */
+  if (path === '/api/mail' && request.method === 'GET') {
+    return json({ mail: !!env.RESEND_API_KEY });
+  }
+
   /* Relances par e-mail : le client envoie la liste, le serveur seul peut
      écrire. Les limites protègent contre un envoi en boucle. */
   if (path === '/api/remind' && request.method === 'POST') {

@@ -495,8 +495,10 @@ function figures(p, monthKey) {
 /* Ce que l'envoi automatique a fait aujourd'hui, sans mentir sur un échec. */
 function autoMailNote() {
   const s = db.settings || {};
+  if (!s.autoRemind) return '';
+  if (mailReady === false) return `<p class="hint"><b>${T('mailMissing')}</b> — ${T('autoRemindNoKey')}</p>`;
   const info = s.autoRemindInfo;
-  if (!s.autoRemind || !info || info.date !== todayISO()) return '';
+  if (!info || info.date !== todayISO()) return '';
   const txt = info.sent
     ? T('autoRemindDone').replace('[n]', info.sent)
     : T('autoRemindFail');
@@ -1318,6 +1320,20 @@ function autoRemindList() {
    commerce l'a activée. Le serveur seul peut envoyer un e-mail ; son refus ou
    une coupure laissent les factures intactes plutôt que de les marquer à tort. */
 let autoRemindBusy = false;
+/* L'envoi d'e-mails dépend d'une clé secrète du serveur : le client ne peut pas
+   la voir, il demande donc au serveur s'il sait envoyer. null = pas encore su. */
+let mailReady = null;
+const mailFlagHTML = () => (mailReady === false
+  ? `<p class="hint"><span class="tag bad">${T('mailMissing')}</span> ${T('mailMissingHint')}</p>` : '');
+async function loadMailStatus() {
+  const r = await api('/api/mail');
+  mailReady = r.ok && r.data ? !!r.data.mail : null;
+  /* Les réglages ouverts se mettent à jour sur place : rouvrir la fenêtre
+     effacerait ce que le commerce est en train de saisir. */
+  const box = document.getElementById('acMailFlag');
+  if (box) box.innerHTML = mailFlagHTML();
+  render();
+}
 async function autoRemind() {
   const s = db.settings || {};
   if (!s.autoRemind || !me || !navigator.onLine || autoRemindBusy) return;
@@ -2039,6 +2055,7 @@ async function versionsModal() {
 }
 
 function settingsModal() {
+  if (mailReady === null) loadMailStatus();
   let logoDraft = db.settings.logo || '';
   const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
     <details><summary>${T('secShop')}</summary>
@@ -2072,6 +2089,8 @@ function settingsModal() {
     <p class="hint">${T('remindDelayHint')}</p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoRemind" ${db.settings.autoRemind ? 'checked' : ''} style="width:auto"><span>${T('autoRemind')}</span></label>
     <p class="hint">${T('autoRemindHint')}</p>
+    <div id="acMailFlag">${mailFlagHTML()}</div>
+    <p class="hint">${T('smsUnavailable')}</p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
     </details>
     <details><summary>${T('secAccount')}</summary>
@@ -2688,7 +2707,7 @@ function askShop() {
   };
 }
 function closeGate() { const g = document.getElementById('gate'); if (g) g.remove(); setBackgroundInert(false); }
-function afterGate() { closeGate(); askShop(); render(); autoRemind(); }
+function afterGate() { closeGate(); askShop(); render(); loadMailStatus(); autoRemind(); }
 function showLangGate() {
   closeGate();
   const g = document.createElement('div');
@@ -2897,6 +2916,7 @@ if (!globalThis.__AC_TEST__) {
     if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
     if (!me) { gateMode = db.shop ? 'login' : 'signup'; showAuthGate(); return; }
     askShop();
+    loadMailStatus();
     autoRemind();
   })();
   fetch('version.json', { cache: 'no-store' })
