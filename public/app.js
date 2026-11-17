@@ -173,6 +173,13 @@ function render() {
   applyLang();
   document.getElementById('appName').textContent = T('app');
   document.getElementById('shopName').textContent = db.shop || T('shop');
+  /* Logo de la boutique (Réglages) ou, à défaut, ses initiales : l'en-tête a
+     toujours quelque chose à montrer, même sans image. */
+  const brand = document.getElementById('shopLogo');
+  if (brand) {
+    const logo = db.settings && db.settings.logo;
+    brand.innerHTML = logo ? `<img src="${esc(logo)}" alt="">` : esc(initialsOf(db.shop || T('app')));
+  }
   updatePill();
   document.querySelectorAll('#nav button').forEach((b) => {
     b.classList.toggle('on', b.dataset.tab === tab);
@@ -568,7 +575,7 @@ function remindJournal() {
       const when = e.at ? `${dayFR(isoOf(new Date(e.at)))} ${clock(e.at)}` : '';
       return `<div class="row"><div><div class="t">${esc(e.number || '—')} · ${esc(e.party || '—')}</div>
         <div class="s">${when} · ${e.channel === 'email' ? T('channelEmail') : T('channelWhatsapp')}${e.to ? ' · ' + esc(e.to) : ''}</div></div>
-        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span><br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button>`}</div></div>`;
+        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span>`}<br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button></div></div>`;
     }).join('')}
     ${log.length ? `<button class="btn out" data-act="exportLog">${T('exportLog')}</button>` : ''}
   </div>`;
@@ -625,28 +632,44 @@ function mailLogCSV() {
   });
   return [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
 }
+/* Le nom du fichier dit ce qu'il contient : canal, résultat et période. */
+function logExportName() {
+  const parts = ['relances'];
+  if (logChannel !== 'all') parts.push(logChannel === 'email' ? 'email' : 'whatsapp');
+  if (logResult !== 'all') parts.push(logResult === 'ok' ? 'reussis' : 'echecs');
+  parts.push(logPeriod === 'mois' ? todayISO().slice(0, 7) : 'tout');
+  return `${parts.join('-')}.csv`;
+}
 function downloadMailLog() {
   try {
     const blob = new Blob(['\ufeff' + mailLogCSV()], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `relances-${todayISO()}.csv`;
+    a.download = logExportName();
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 6000);
   } catch { alert(T('exportFail')); }
 }
-/* Renvoyer une relance échouée : la facture est retrouvée par son identifiant,
-   le message et la pièce jointe sont reconstruits, puis une trace est ajoutée.
-   Seuls les e-mails peuvent échouer dans le journal : une relance WhatsApp n'y
-   entre que si la fenêtre s'est ouverte. */
+/* Renvoyer une relance du journal, réussie ou non : la facture est retrouvée
+   par son identifiant, le message et la pièce jointe sont reconstruits, puis
+   une trace est ajoutée. */
 async function resendReminder(logId) {
   const e = (db.mailLog || []).find((x) => x.id === logId);
-  if (!e || e.channel !== 'email') return;
+  if (!e) return;
   const d = db.docs.find((x) => x.id === e.docId);
   if (!d) { alert(T('resendDocGone')); return; }
   /* Une facture réglée entre-temps ne doit plus être réclamée. */
   if (d.paidDate) { alert(T('resendPaid')); return; }
+  if (e.channel !== 'email') {
+    const phone = d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone || '';
+    if (!waOpen(phone, invoiceReminderText(d))) return;
+    d.remindedAt = todayISO();
+    d.u = Date.now();
+    logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
+    saveDB(); render();
+    return;
+  }
   const to = String(d.clientEmail || '').trim();
   if (!isEmail(to)) { alert(T('resendNoEmail')); return; }
   const item = { id: d.id, to, subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d) };
@@ -1455,6 +1478,12 @@ function remindLabel(d) {
 }
 /* Factures à relancer : jamais relancées, ou dont la dernière relance a plus
    d'une semaine. C'est la file de la relance groupée. */
+/* Deux initiales au plus, tirées du nom de la boutique. */
+function initialsOf(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '·';
+  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+}
 /* Délai de relance des factures, réglable : entre deux rappels d'une même
    facture, et avant le premier rappel d'une facture fraîche. */
 const remindDelay = () => Math.max(1, Math.round(Number(db.settings.invRemindDays) || 7));
