@@ -45,7 +45,7 @@ function charger() {
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, mailLogCSV, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -447,5 +447,20 @@ test('chaque relance est journalisée et le journal reste borné', () => {
   dansVm('for (let i = 0; i < 400; i++) logRemind({ number: "X" + i, amount: 1, channel: "email", ok: false })');
   assert.equal(dansVm('db.mailLog.length'), dansVm('MAIL_LOG_MAX'), 'journal borné');
   assert.equal(dansVm('db.mailLog[db.mailLog.length - 1].number'), 'X399', 'les plus récentes sont gardées');
+  dansVm('db.mailLog = []');
+});
+
+/* --- export du journal --- */
+
+test('le journal des relances s’exporte en CSV lisible', () => {
+  dansVm(`db.mailLog = [
+    { id: 'l1', at: Date.parse('2026-11-17T10:30:00'), number: 'FAC-1', party: 'Awa "A"', amount: 5000, channel: 'wa', to: '0700', ok: true },
+    { id: 'l2', at: Date.parse('2026-11-17T11:00:00'), number: 'FAC-2', party: 'Koffi', amount: 2000, channel: 'email', to: 'k@x.ci', ok: false }];`);
+  const lines = dansVm('mailLogCSV()').split('\r\n');
+  assert.equal(lines.length, 3, 'en-tête + deux relances');
+  assert.ok(lines[0].includes('"Date"') && lines[0].includes('"Montant"') && lines[0].includes('"Résultat"'));
+  assert.ok(lines[1].includes('"FAC-1"') && lines[1].includes('"5000"') && lines[1].includes('"Réussi"'));
+  assert.ok(lines[1].includes('"Awa ""A"""'), 'guillemets échappés pour Excel');
+  assert.ok(lines[2].includes('"Échec"') && lines[2].includes('"k@x.ci"'));
   dansVm('db.mailLog = []');
 });

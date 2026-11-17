@@ -512,7 +512,8 @@ function autoMailNote() {
     : T('autoRemindFail');
   return `<p class="hint">${txt}</p>`;
 }
-/* Journal des relances, la plus récente en haut. */
+/* Journal des relances, la plus récente en haut. Une relance échouée peut être
+   renvoyée d'un clic : la nouvelle tentative s'ajoute au journal. */
 function remindJournal() {
   const log = (db.mailLog || []).slice(-15).reverse();
   if (!log.length) return '';
@@ -521,9 +522,68 @@ function remindJournal() {
       const when = e.at ? `${dayFR(isoOf(new Date(e.at)))} ${clock(e.at)}` : '';
       return `<div class="row"><div><div class="t">${esc(e.number || '—')} · ${esc(e.party || '—')}</div>
         <div class="s">${when} · ${e.channel === 'email' ? T('channelEmail') : T('channelWhatsapp')}${e.to ? ' · ' + esc(e.to) : ''}</div></div>
-        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span>`}</div></div>`;
+        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span><br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button>`}</div></div>`;
     }).join('')}
+    <button class="btn out" data-act="exportLog">${T('exportLog')}</button>
   </div>`;
+}
+/* Export du journal en CSV : séparateur point-virgule et BOM, pour qu'Excel en
+   français ouvre le fichier sans déformer les accents. */
+function mailLogCSV() {
+  const head = [T('logDate'), T('logTime'), T('invoice'), T('client'), T('amount'), T('method'), T('recipient'), T('result')];
+  const rows = (db.mailLog || []).map((e) => {
+    const dt = new Date(e.at || Date.now());
+    return [
+      isoOf(dt), dt.toLocaleTimeString(lang() === 'ar' ? 'ar' : lang() === 'en' ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      e.number || '', e.party || '', String(e.amount || 0),
+      e.channel === 'email' ? T('channelEmail') : T('channelWhatsapp'),
+      e.to || '', e.ok ? T('statusOk') : T('statusFail'),
+    ];
+  });
+  return [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+}
+function downloadMailLog() {
+  try {
+    const blob = new Blob(['\ufeff' + mailLogCSV()], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relances-${todayISO()}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 6000);
+  } catch { alert(T('exportFail')); }
+}
+/* Renvoyer une relance échouée : la facture est retrouvée par son identifiant,
+   le message et la pièce jointe sont reconstruits, puis une trace est ajoutée. */
+async function resendReminder(logId) {
+  const e = (db.mailLog || []).find((x) => x.id === logId);
+  if (!e) return;
+  const d = db.docs.find((x) => x.id === e.docId);
+  if (!d) { alert(T('resendDocGone')); return; }
+  if (e.channel === 'email') {
+    const to = String(d.clientEmail || '').trim();
+    if (!isEmail(to)) { alert(T('resendNoEmail')); return; }
+    const item = { id: d.id, to, subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d) };
+    try {
+      const file = await docFile(d);
+      item.pdf = await fileToBase64(file);
+      item.filename = file.name;
+    } catch {}
+    const r = await api('/api/remind', 'POST', { list: [item] });
+    const sent = r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent.map(String) : [];
+    const ok = sent.includes(String(d.id));
+    logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to, ok });
+    if (ok) { d.remindedAt = todayISO(); d.u = Date.now(); }
+    saveDB(); render();
+    alert(ok ? T('resendDone') : T('resendFail'));
+    return;
+  }
+  const phone = d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone || '';
+  if (!waOpen(phone, invoiceReminderText(d))) return;
+  d.remindedAt = todayISO();
+  d.u = Date.now();
+  logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
+  saveDB(); render();
 }
 function bilans() {
   const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, invDue, due, wd } = figures(period);
@@ -1990,6 +2050,8 @@ document.addEventListener('click', async (e) => {
   }
   /* Relance d'une facture impayée : message courtois qui rappelle la facture. */
   if (act === 'bulkRemind') bulkRemindModal();
+  if (act === 'exportLog') downloadMailLog();
+  if (act === 'resendRemind') resendReminder(b.dataset.log);
   if (act === 'waDocRemind') {
     const d = db.docs.find((x) => x.id === b.dataset.id);
     if (!d) return;
