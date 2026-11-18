@@ -1267,7 +1267,7 @@ function saleModal(saleId) {
       ${pays.map((p) => `<div class="row"><div class="t">${money(p.amount)}</div><div class="right"><button class="btn small out" data-delpay="${p.id}">${T('delete')}</button></div></div>`).join('')}` : ''}
     <div class="sheetFoot"><p class="err" id="sErr"></p>
     <button class="btn" id="sOk">${src ? T('saveChanges') : T('saveSale')}</button>
-    <button class="btn out" id="sNo">${T('cancel')}</button>${src ? `<button class="btn out" id="sDel" style="color:#b91c1c;border-color:#b91c1c">${T('deleteSale')}</button>` : ''}</div>`);
+    <button class="btn out" id="sNo">${T('cancel')}</button>${src && !isStaff() ? `<button class="btn out" id="sDel" style="color:#b91c1c;border-color:#b91c1c">${T('deleteSale')}</button>` : ''}</div>`);
   d.querySelector('#sNo').onclick = () => d.remove();
   d.querySelector('#sClose').onclick = () => d.remove();
   const prodSel = d.querySelector('#sProduct');
@@ -2391,11 +2391,68 @@ async function versionsModal() {
   });
 }
 
+/* ---------------- équipe (comptes vendeurs) ---------------- */
+/* Le patron crée un code à 6 caractères ; le vendeur crée son propre compte,
+   saisit le code, et travaille ensuite sur les données de la boutique. */
+async function loadTeam(box) {
+  if (!box) return;
+  const r = await api('/api/staff');
+  if (!r.ok) {
+    box.innerHTML = `<p class="hint">${T('syncPending')}</p>`;
+    return;
+  }
+  const data = r.data || {};
+  if (data.role === 'staff') {
+    const owner = data.owner || {};
+    box.innerHTML = `<p class="hint">${T('teamStaffOf')} <b>${esc(owner.email || owner.phone || '—')}</b></p>
+      <p class="hint">${T('teamStaffNote')}</p>
+      <button class="btn out" id="teamLeave">${T('teamLeave')}</button>`;
+    box.querySelector('#teamLeave').onclick = async () => {
+      if (!confirm(T('teamLeaveConfirm'))) return;
+      const res = await api('/api/staff/leave', 'POST', {});
+      if (!res.ok) { alert(T('syncPending')); return; }
+      location.reload();
+    };
+    return;
+  }
+  const staff = data.staff || [];
+  const invites = data.invites || [];
+  box.innerHTML = `<p class="hint">${T('teamHint')}</p>
+    <button class="btn" id="teamNew">${T('teamInvite')}</button>
+    <div id="teamCode"></div>
+    ${staff.length ? `<h3 style="margin-top:14px">${T('teamSellers')}</h3>${staff.map((s) => `<div class="row"><div><div class="t">${esc(s.email || s.phone || '—')}</div></div><div class="right"><button class="btn small out" data-rm="${esc(s.id)}">${T('teamRemove')}</button></div></div>`).join('')}` : ''}
+    ${invites.length ? `<p class="hint">${T('teamPending')} : ${invites.map((i) => esc(i.code)).join(' · ')}</p>` : ''}
+    <h3 style="margin-top:16px">${T('teamJoin')}</h3>
+    <p class="hint">${T('teamJoinHint')}</p>
+    <input id="teamCodeIn" maxlength="6" autocapitalize="characters" style="text-transform:uppercase">
+    <button class="btn out" id="teamJoinBtn">${T('teamJoinBtn')}</button>`;
+  box.querySelector('#teamNew').onclick = async () => {
+    const res = await api('/api/staff/invite', 'POST', {});
+    if (!res.ok) { alert(T('syncPending')); return; }
+    box.querySelector('#teamCode').innerHTML = `<p class="tag ok" style="font-size:18px;letter-spacing:.15em">${esc(res.data.code)}</p>
+      <p class="hint">${T('teamCodeHint')}</p>`;
+  };
+  box.querySelectorAll('[data-rm]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm(T('teamRemoveConfirm'))) return;
+      const res = await api('/api/staff/remove', 'POST', { id: b.dataset.rm });
+      if (!res.ok) { alert(T('syncPending')); return; }
+      loadTeam(box);
+    };
+  });
+  box.querySelector('#teamJoinBtn').onclick = async () => {
+    const code = box.querySelector('#teamCodeIn').value.trim().toUpperCase();
+    const res = await api('/api/staff/join', 'POST', { code });
+    if (!res.ok) { alert(T('teamJoinError')); return; }
+    location.reload();
+  };
+}
+
 function settingsModal() {
   if (mailReady === null) loadMailStatus();
   let logoDraft = db.settings.logo || '';
   const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
-    <details><summary>${T('secShop')}</summary>
+    <details data-owner><summary>${T('secShop')}</summary>
     <label>${T('shopName')}</label><input id="setShop" value="${esc(db.shop)}">
     <label>${T('companyForm')}</label><select id="setForm">${formOptions(db.settings.companyForm || '')}</select>
     <label>${T('country')}</label><select id="setCountry">${countryOptions(db.settings.country || 'CI')}</select>
@@ -2413,7 +2470,7 @@ function settingsModal() {
     <label>${T('omNumber')}</label><input id="setOm" inputmode="tel" placeholder="+225 07 00 00 00 00" value="${esc(db.settings.om || '')}">
     <p class="hint">${T('payNumbersHint')}</p>
     </details>
-    <details><summary>${T('secLook')}</summary>
+    <details data-owner><summary>${T('secLook')}</summary>
     <label>${T('logo')}</label>
     <input type="file" id="setLogo" accept="image/*">
     <div id="logoPrev" style="margin-top:8px">${logoDraft ? `<img src="${esc(logoDraft)}" class="logoPrev" alt="">` : ''}</div>
@@ -2435,6 +2492,14 @@ function settingsModal() {
     <p class="hint">${T('smsUnavailable')}</p>
     ${ADS.client ? `<label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>` : ''}
     </details>
+    <details><summary>${T('secPrivacy')}</summary>
+    <p class="hint">${T('cookieCurrent')} : <b id="ckState">—</b></p>
+    <button class="btn small" id="ckYes">${T('cookieYes')}</button>
+    <button class="btn small out" id="ckNo">${T('cookieNo')}</button>
+    </details>
+    <details><summary>${T('secTeam')}</summary>
+    <div id="teamBox"><p class="hint">…</p></div>
+    </details>
     <details><summary>${T('secAccount')}</summary>
     ${accountHTML()}
     ${me ? `<h3 style="margin-top:16px">${T('changePassword')}</h3>
@@ -2453,7 +2518,7 @@ function settingsModal() {
     <label>${T('legalContact')}</label><input id="lgContact" value="${esc((db.settings.legal || {}).contact || '')}">
     <label>${T('legalPublisher')}</label><input id="lgPublisher" value="${esc((db.settings.legal || {}).publisher || '')}">
     </details>
-    <details><summary>${T('secBackup')}</summary>
+    <details data-owner><summary>${T('secBackup')}</summary>
     <button class="btn out" id="setExport">${T('exportData')}</button>
     <button class="btn out" id="setImport">${T('importData')}</button>
     <button class="btn out" id="setHistory">${T('versions')}</button>
@@ -2470,6 +2535,28 @@ function settingsModal() {
     </div>`);
   d.querySelector('#setNo').onclick = () => d.remove();
   wireAccount(d);
+  /* Un vendeur ne peut pas toucher aux réglages de la boutique : on grise les
+     sections du patron plutôt que de les retirer, pour ne rien casser à
+     l'enregistrement des autres réglages. */
+  if (isStaff()) {
+    d.querySelectorAll('details[data-owner]').forEach((el) => {
+      el.open = false;
+      el.style.opacity = '.55';
+      el.querySelectorAll('input,select,textarea,button').forEach((f) => { f.disabled = true; });
+      const s = el.querySelector('summary');
+      if (s) s.textContent = `${s.textContent} — ${T('teamOwnerOnly')}`;
+    });
+  }
+  loadTeam(d.querySelector('#teamBox'));
+  const ckState = d.querySelector('#ckState');
+  if (ckState) {
+    const ck = consentChoice();
+    ckState.textContent = ck === 'yes' ? T('cookieSetYes') : ck === 'no' ? T('cookieSetNo') : T('cookieNotSet');
+  }
+  const ckYes = d.querySelector('#ckYes');
+  const ckNo = d.querySelector('#ckNo');
+  if (ckYes) ckYes.onclick = () => { setConsent('yes'); d.remove(); settingsModal(); };
+  if (ckNo) ckNo.onclick = () => { setConsent('no'); d.remove(); settingsModal(); };
   d.querySelector('#setHistory').onclick = () => { d.remove(); versionsModal(); };
   d.querySelector('#setShare').onclick = () => { d.remove(); shareModal(); };
   d.querySelector('#setInstall').onclick = () => { d.remove(); installModal(); };
@@ -2767,6 +2854,11 @@ function mergeStates(local, remote) {
 
 /* ---------------- compte et synchronisation ---------------- */
 let me = null;
+/* Un vendeur rattaché à une boutique travaille sur les données de son patron :
+   les réglages de la boutique et la sauvegarde complète restent au patron. */
+function isStaff() {
+  return Boolean(me && me.id && me.ownerId);
+}
 let syncState = 'idle';
 let syncTimer = null;
 let syncingNow = false;
@@ -2805,7 +2897,7 @@ function storedMe() {
 }
 function rememberMe(user) {
   try {
-    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null }));
+    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, role: user.role || 'owner', ownerId: user.ownerId || null }));
     else localStorage.removeItem(KEY + '.me');
   } catch {}
 }

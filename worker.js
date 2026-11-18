@@ -69,6 +69,14 @@ function ensureSchema(env) {
         env.DB.prepare('ALTER TABLE users_new RENAME TO users'),
       ]);
     }
+    /* Équipe : un vendeur rattaché au compte du patron travaille sur les mêmes
+       données. Placé après la migration de la table users, sinon les colonnes
+       ajoutées disparaîtraient avec l'ancienne table. */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN owner_id TEXT').run(); } catch {}
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN role TEXT').run(); } catch {}
+    await env.DB.prepare(
+      'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
+    ).run();
   });
   return schemaReady;
 }
@@ -77,13 +85,15 @@ async function currentUser(request, env) {
   const token = cookieOf(request, 'ac_session');
   if (!token) return null;
   const hash = await sha256(token);
-  const row = await env.DB.prepare('SELECT s.user_id AS id, u.email, u.phone, s.expires FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?').bind(hash).first();
+  const row = await env.DB.prepare(
+    'SELECT s.user_id AS id, u.email, u.phone, u.owner_id, u.role, s.expires FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
+  ).bind(hash).first();
   if (!row) return null;
   if (row.expires < Date.now()) {
     await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(hash).run();
     return null;
   }
-  return { id: row.id, email: row.email, phone: row.phone };
+  return { id: row.id, email: row.email, phone: row.phone, ownerId: row.owner_id || null, role: row.role || 'owner' };
 }
 
 async function createSession(env, userId) {
@@ -170,6 +180,9 @@ async function rememberState(env, userId, rev, json, updated) {
     'DELETE FROM state_history WHERE user_id = ? AND id NOT IN (SELECT id FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT ?)',
   ).bind(userId, userId, HISTORY_KEEP).run();
 }
+
+/* Les données d'un vendeur sont celles de son patron. */
+const dataOwner = (user) => user.ownerId || user.id;
 
 async function api(request, env, url) {
   const path = url.pathname.replace(/\/+$/, '');
@@ -384,30 +397,90 @@ async function api(request, env, url) {
     return json({ ok: true, user: { id: user.id, email, phone: user.phone } });
   }
 
+  /* ---------------- équipe ---------------- */
+  if (path === '/api/staff' && request.method === 'GET') {
+    const user = await currentUser(request, env);
+    if (!user) return json({ error: 'auth' }, 401);
+    if (user.ownerId) {
+      const owner = await env.DB.prepare('SELECT id, email, phone FROM users WHERE id = ?').bind(user.ownerId).first();
+      return json({ role: 'staff', owner: owner ? { id: owner.id, email: owner.email, phone: owner.phone } : null });
+    }
+    const staff = await env.DB.prepare('SELECT id, email, phone FROM users WHERE owner_id = ? ORDER BY created').bind(user.id).all();
+    const invites = await env.DB.prepare(
+      'SELECT code, expires FROM invites WHERE owner_id = ? AND used_by IS NULL AND expires > ? ORDER BY created DESC LIMIT 5',
+    ).bind(user.id, Date.now()).all();
+    return json({ role: 'owner', staff: staff.results || [], invites: invites.results || [] });
+  }
+
+  if (path === '/api/staff/invite' && request.method === 'POST') {
+    const user = await currentUser(request, env);
+    if (!user) return json({ error: 'auth' }, 401);
+    if (user.ownerId) return json({ error: 'owner' }, 403);
+    await tooMany(env, 'invite:' + user.id, 20, 60 * 60000);
+    const code = hex(crypto.getRandomValues(new Uint8Array(3))).toUpperCase();
+    const expires = Date.now() + 7 * 86400000;
+    await env.DB.prepare('INSERT INTO invites (code, owner_id, created, expires) VALUES (?, ?, ?, ?)')
+      .bind(code, user.id, Date.now(), expires)
+      .run();
+    return json({ code, expires });
+  }
+
+  if (path === '/api/staff/join' && request.method === 'POST') {
+    const user = await currentUser(request, env);
+    if (!user) return json({ error: 'auth' }, 401);
+    if (user.ownerId) return json({ error: 'already' }, 409);
+    const body = await readBody(request);
+    const code = String(body.code || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(code)) return json({ error: 'code' }, 400);
+    const invite = await env.DB.prepare('SELECT owner_id, expires, used_by FROM invites WHERE code = ?').bind(code).first();
+    if (!invite || invite.used_by || invite.expires < Date.now()) return json({ error: 'code' }, 400);
+    if (invite.owner_id === user.id) return json({ error: 'self' }, 400);
+    await env.DB.prepare('UPDATE users SET owner_id = ?, role = ? WHERE id = ?').bind(invite.owner_id, 'staff', user.id).run();
+    await env.DB.prepare('UPDATE invites SET used_by = ? WHERE code = ?').bind(user.id, code).run();
+    return json({ ok: true, ownerId: invite.owner_id });
+  }
+
+  if (path === '/api/staff/leave' && request.method === 'POST') {
+    const user = await currentUser(request, env);
+    if (!user) return json({ error: 'auth' }, 401);
+    await env.DB.prepare('UPDATE users SET owner_id = NULL, role = ? WHERE id = ?').bind('owner', user.id).run();
+    return json({ ok: true });
+  }
+
+  if (path === '/api/staff/remove' && request.method === 'POST') {
+    const user = await currentUser(request, env);
+    if (!user) return json({ error: 'auth' }, 401);
+    if (user.ownerId) return json({ error: 'owner' }, 403);
+    const body = await readBody(request);
+    const id = String(body.id || '');
+    await env.DB.prepare('UPDATE users SET owner_id = NULL, role = ? WHERE id = ? AND owner_id = ?').bind('owner', id, user.id).run();
+    return json({ ok: true });
+  }
+
   if (path === '/api/data' && request.method === 'GET') {
-    const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(user.id).first();
+    const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     return json(row ? { json: row.json, rev: row.rev, updated: row.updated } : { json: null, rev: 0, updated: 0 });
   }
 
   if (path === '/api/data/history' && request.method === 'GET') {
     const rows = await env.DB.prepare(
       'SELECT id, rev, updated, saved, length(json) AS bytes FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT 20',
-    ).bind(user.id).all();
+    ).bind(dataOwner(user)).all();
     return json({ versions: rows.results || [] });
   }
 
   if (path === '/api/data/restore' && request.method === 'POST') {
     const body = await readBody(request);
     const id = Number(body.id) || 0;
-    const version = await env.DB.prepare('SELECT json, rev, updated FROM state_history WHERE user_id = ? AND id = ?').bind(user.id, id).first();
+    const version = await env.DB.prepare('SELECT json, rev, updated FROM state_history WHERE user_id = ? AND id = ?').bind(dataOwner(user), id).first();
     if (!version) return json({ error: 'notfound' }, 404);
-    const current = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(user.id).first();
+    const current = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     /* L'état remplacé part dans l'historique : une restauration reste réversible. */
-    if (current) await rememberState(env, user.id, current.rev, current.json, current.updated);
+    if (current) await rememberState(env, dataOwner(user), current.rev, current.json, current.updated);
     const rev = (current ? current.rev : 0) + 1;
     await env.DB.prepare(
       'INSERT INTO state (user_id, json, rev, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, rev = excluded.rev, updated = excluded.updated',
-    ).bind(user.id, version.json, rev, Date.now()).run();
+    ).bind(dataOwner(user), version.json, rev, Date.now()).run();
     return json({ restored: true, rev });
   }
 
@@ -416,17 +489,17 @@ async function api(request, env, url) {
     const incoming = Number(body.updated) || 0;
     const incomingRev = Number(body.rev) || 0;
     const payload = typeof body.json === 'string' ? body.json : JSON.stringify(body.json || {});
-    const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(user.id).first();
+    const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     if (row && row.rev > incomingRev) {
       return json({ saved: false, json: row.json, rev: row.rev, updated: row.updated });
     }
     /* La version écrasée est conservée avant écriture : c'est le filet de
        sécurité si une synchronisation remplace un état par erreur. */
-    if (row && row.json !== payload) await rememberState(env, user.id, row.rev, row.json, row.updated);
+    if (row && row.json !== payload) await rememberState(env, dataOwner(user), row.rev, row.json, row.updated);
     const rev = (row ? row.rev : 0) + 1;
     await env.DB.prepare(
       'INSERT INTO state (user_id, json, rev, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, rev = excluded.rev, updated = excluded.updated',
-    ).bind(user.id, payload, rev, incoming).run();
+    ).bind(dataOwner(user), payload, rev, incoming).run();
     return json({ saved: true, rev, updated: incoming });
   }
 
