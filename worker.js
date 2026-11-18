@@ -191,6 +191,9 @@ const dataOwner = (user) => user.ownerId || user.id;
 /* Droits d'un vendeur, choisis par le patron. Par défaut tout est permis :
    retirer un droit est une décision explicite du patron. */
 const FULL_PERMS = { del: true, price: true };
+/* Le journal est borné côté client ; le serveur applique le même plafond
+   lorsqu'il remet les lignes des autres après une sauvegarde de vendeur. */
+const LOG_MAX = 300;
 function parsePerms(raw) {
   if (!raw) return { ...FULL_PERMS };
   if (typeof raw === 'object') return { del: raw.del !== false, price: raw.price !== false };
@@ -239,13 +242,11 @@ function maskState(text, viewerId = '') {
       for (const field of fields) if (field in item) item[field] = null;
     }
   }
-  /* Journal : un vendeur ne voit que les montants de ses propres actions.
-     Ceux du patron et des autres vendeurs restent masqués. */
+  /* Journal : un vendeur ne reçoit que ses propres lignes. Celles du patron et
+     des autres vendeurs ne quittent pas le serveur (libellés compris). */
   if (Array.isArray(db.log)) {
     const me = String(viewerId || '');
-    for (const e of db.log) {
-      if (e && typeof e === 'object' && String(e.byId || '') !== me) e.amount = null;
-    }
+    db.log = db.log.filter((e) => e && typeof e === 'object' && String(e.byId || '') === me);
   }
   return JSON.stringify(db);
 }
@@ -289,15 +290,24 @@ function restoreMasked(storedText, incomingText) {
     }
   }
   /* Journal : le montant d'une entrée déjà connue vient du patron ; une entrée
-     créée par le vendeur garde le montant de son action (il le connaît déjà). */
+     créée par le vendeur garde le montant de son action (il le connaît déjà).
+     Le vendeur ne reçoit que ses propres lignes : celles des autres sont
+     remises ici, sinon sa sauvegarde effacerait l'historique du patron. */
   if (Array.isArray(incoming.log)) {
-    const storedLog = new Map((Array.isArray(stored.log) ? stored.log : []).filter((x) => x && x.id).map((x) => [String(x.id), x]));
+    const storedArr = Array.isArray(stored.log) ? stored.log : [];
+    const storedLog = new Map(storedArr.filter((x) => x && x.id).map((x) => [String(x.id), x]));
     for (const e of incoming.log) {
       if (!e || typeof e !== 'object') continue;
       const source = e.id ? storedLog.get(String(e.id)) : null;
       if (source && 'amount' in source) e.amount = source.amount;
       else e.amount = Math.max(0, Math.round(Number(e.amount) || 0));
     }
+    const seen = new Set(incoming.log.filter((x) => x && x.id).map((x) => String(x.id)));
+    for (const e of storedArr) if (e && e.id && !seen.has(String(e.id))) incoming.log.push(e);
+    incoming.log = incoming.log
+      .filter((e) => e && typeof e === 'object')
+      .sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0));
+    if (incoming.log.length > LOG_MAX) incoming.log = incoming.log.slice(-LOG_MAX);
   }
   return JSON.stringify(incoming);
 }
