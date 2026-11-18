@@ -3148,6 +3148,9 @@ async function logout() {
 }
 async function bootAccount() {
   await refreshMe();
+  /* Même sans réseau, un vendeur ne garde pas d'anciennes valeurs sensibles
+     dans le stockage de son téléphone. */
+  if (purgeSecrets()) saveDB(false);
   if (me) await pullNow();
   updatePill();
 }
