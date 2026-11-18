@@ -43,6 +43,58 @@ let draft = null;
    d'éditeur (ca-pub-…) et les deux identifiants d'emplacement créés dans
    AdSense. Sans identifiant, aucune requête ne part vers Google. */
 const ADS = { client: '', top: '', bottom: '' };
+
+/* Consentement aux cookies publicitaires. « yes » seulement après un clic sur
+   Accepter : sans choix, ou après un refus, aucune annonce n'est chargée. */
+const CONSENT_KEY = 'assistant-commercial.cookies';
+const SELLER_KEY = 'assistant-commercial.seller';
+function consentChoice() {
+  try {
+    return localStorage.getItem(CONSENT_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+function setConsent(v) {
+  try {
+    localStorage.setItem(CONSENT_KEY, v);
+  } catch {
+    /* Navigation privée sans stockage : le refus vaut pour la session. */
+  }
+  const bar = document.getElementById('cookieBar');
+  if (bar) bar.hidden = true;
+  if (v === 'yes') render();
+}
+/* La bande n'apparaît que si des annonces sont réellement configurées : sans
+   service tiers, il n'y a rien à demander. */
+function showCookieBar() {
+  const bar = document.getElementById('cookieBar');
+  if (!bar) return;
+  const needed = Boolean(ADS.client) && !consentChoice();
+  bar.hidden = !needed;
+  if (!needed) return;
+  bar.querySelector('#cookieText').textContent = T('cookieText');
+  bar.querySelector('#cookieYes').textContent = T('cookieYes');
+  bar.querySelector('#cookieNo').textContent = T('cookieNo');
+  bar.querySelector('#cookieYes').onclick = () => setConsent('yes');
+  bar.querySelector('#cookieNo').onclick = () => setConsent('no');
+}
+function lastSeller() {
+  try {
+    return localStorage.getItem(SELLER_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+/* Les numéros Wave et Orange Money du commerçant, repris dans les relances et
+   la demande de paiement. Renvoie '' si aucun n'est renseigné. */
+function payNumbersLine() {
+  const s = db.settings || {};
+  const parts = [];
+  if (s.wave) parts.push(`Wave : ${s.wave}`);
+  if (s.om) parts.push(`Orange Money : ${s.om}`);
+  return parts.join(' · ');
+}
 let docQuery = '';
 let histQuery = '';
 let histMethod = 'all';
@@ -202,6 +254,7 @@ function render() {
   if (draft) document.getElementById('app').insertAdjacentHTML('beforeend', docForm());
   linkLabels(document.getElementById('app'));
   fillAds();
+  showCookieBar();
 }
 
 /* ---------------- publicité (désactivée par défaut) ---------------- */
@@ -210,6 +263,8 @@ function render() {
    vraies annonces sont configurées ET activées dans les réglages. */
 function adsHTML() {
   if (!ADS.client || !db.settings.ads || !navigator.onLine) return { top: '', bottom: '' };
+  /* Pas d'annonce sans consentement explicite. */
+  if (consentChoice() !== 'yes') return { top: '', bottom: '' };
   const unit = (slot) =>
     `<ins class="adsbygoogle" style="display:block;min-height:90px" data-ad-client="${esc(ADS.client)}" data-ad-slot="${esc(slot)}" data-ad-format="auto" data-full-width-responsive="true"></ins>`;
   return {
@@ -251,7 +306,7 @@ function vendre() {
   const t = db.sales.filter((s) => s.date === todayISO());
   const ca = t.reduce((a, s) => a + s.total, 0);
   const list = [
-    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(methodLabel(s.method))}${s.party ? ' · ' + esc(s.party) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button><button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button></div></div>`),
+    ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(methodLabel(s.method))}${s.party ? ' · ' + esc(s.party) : ''}${s.by ? ' · ' + esc(s.by) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button><button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button></div></div>`),
     ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(methodLabel(e.method))}</div></div><div class="right">${e.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button>` : ''}<button class="btn small out" data-act="editExpense" data-id="${e.id}">${T('edit')}</button></div></div>`),
     ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
@@ -1190,6 +1245,8 @@ function saleModal(saleId) {
   const d = modal(`<div class="sheetHead"><h2>${src ? T('editSale') : T('sell')}</h2><button type="button" class="sheetClose" id="sClose" aria-label="${T('close')}">✕</button></div>
     <label>${T('amount')}</label><input id="sAmount" inputmode="numeric" placeholder="0" value="${src ? esc(src.total) : ''}">
     <label>${T('method')}</label><select id="sMethod">${methodOptions(src ? src.method : 'Espèces')}</select>
+    <label>${T('seller')}</label><input id="sBy" list="sByList" maxlength="40" value="${esc(src ? src.by || '' : lastSeller())}">
+    <datalist id="sByList">${[...new Set(db.sales.map((s) => (s.by || '').trim()).filter(Boolean))].map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
     <label>${T('product')}</label><select id="sProduct"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}" ${src && src.pid === p.id ? 'selected' : ''}>${esc(p.name)} (${qtyOf(p) + (src && src.pid === p.id ? src.qty : 0)})</option>`).join('')}</select>
     <p class="hint" id="sCostWarn" style="display:none;color:#b45309;font-weight:600">${T('costZeroWarn')}</p>
     <label>${T('qtySold')}</label><input id="sQty" inputmode="numeric" value="${src && src.product ? esc(src.qty) : 1}">
@@ -1285,6 +1342,14 @@ function saleModal(saleId) {
     const sale = src || { id: sid, date: todayISO(), paid: 0 };
     sale.total = total;
     sale.method = d.querySelector('#sMethod').value;
+    /* Qui a vendu : un simple nom, retenu sur cet appareil pour ne pas le
+       retaper à chaque vente. Vide = vente non attribuée. */
+    sale.by = String(d.querySelector('#sBy').value || '').trim().slice(0, 40);
+    try {
+      if (sale.by) localStorage.setItem(SELLER_KEY, sale.by);
+    } catch {
+      /* sans stockage, le nom n'est simplement pas retenu */
+    }
     sale.party = party;
     sale.pid = pid || '';
     sale.product = product;
@@ -1408,10 +1473,21 @@ function expenseModal(id) {
 function payModal(name) {
   const list = db.sales.filter((s) => (s.party || '—') === name && creditOf(s) > 0);
   const sum = list.reduce((a, s) => a + creditOf(s), 0);
+  const nums = payNumbersLine();
+  const phone = String((db.parties.find((p) => p.name === name) || {}).phone || '').trim();
   const d = modal(`<h2>${esc(name)}</h2><p>${T('owes')} ${money(sum)}</p>
     <label>${T('payReceived')}</label><input id="payAmt" inputmode="numeric" value="${sum}">
+    ${nums ? `<p class="hint">${T('payByMobile')} : ${esc(nums)}</p>` : ''}
     <button class="btn" id="payOk">${T('savePayment')}</button>
+    ${nums && phone ? `<button class="btn small whats" id="payWa">${T('requestPayment')}</button>` : ''}
     <button class="btn out" id="payNo">${T('cancel')}</button><p class="err" id="payErr"></p>`);
+  const wa = d.querySelector('#payWa');
+  if (wa) {
+    wa.onclick = () => {
+      const amount = Math.round(+d.querySelector('#payAmt').value || 0) || sum;
+      waOpen(phone, `${name} : ${money(amount)} — ${db.shop || T('shop')}\n${T('payByMobile')} : ${nums}`);
+    };
+  }
   d.querySelector('#payNo').onclick = () => d.remove();
   d.querySelector('#payOk').onclick = () => {
     let amount = Math.round(+d.querySelector('#payAmt').value || 0);
@@ -1503,11 +1579,14 @@ function invoiceReminderText(d) {
   const shop = db.shop || T('shop');
   const phone = String((db.settings && db.settings.phone) || (me && me.phone) || '').trim();
   const tpl = invReminderTpl();
-  return tpl.replaceAll('[Nom du Client]', d.party || T('client'))
+  const nums = payNumbersLine();
+  const text = tpl.replaceAll('[Nom du Client]', d.party || T('client'))
     .replaceAll('[Nom de la Boutique]', phone ? `${shop}\n${phone}` : shop)
     .replaceAll('[Numéro Facture]', d.number || '—')
     .replaceAll('[Date Facture]', dayFR(d.date))
     .replaceAll('[Montant]', money(amountOf(d)));
+  /* Le client qui reçoit une relance doit savoir comment payer sans appeler. */
+  return nums ? `${text}\n${T('payByMobile')} : ${nums}` : text;
 }
 /* Âge de la dernière relance, en clair : « relancé il y a 3 jours ». Sert à
    éviter deux rappels dans la même semaine et à repérer les factures qu'on a
@@ -2330,6 +2409,9 @@ function settingsModal() {
     <p class="hint">${T('vatHint')}</p>
     <label>${T('remindDays')}</label><input id="setRemindDays" inputmode="numeric" value="${esc(db.settings.remindDays == null ? 30 : db.settings.remindDays)}">
     <p class="hint">${T('remindHint')}</p>
+    <label>${T('waveNumber')}</label><input id="setWave" inputmode="tel" placeholder="+225 01 00 00 00 00" value="${esc(db.settings.wave || '')}">
+    <label>${T('omNumber')}</label><input id="setOm" inputmode="tel" placeholder="+225 07 00 00 00 00" value="${esc(db.settings.om || '')}">
+    <p class="hint">${T('payNumbersHint')}</p>
     </details>
     <details><summary>${T('secLook')}</summary>
     <label>${T('logo')}</label>
@@ -2444,6 +2526,8 @@ function settingsModal() {
     db.settings.autoRemind = d.querySelector('#setAutoRemind').checked;
     db.settings.lang = l;
     db.settings.ads = ADS.client ? d.querySelector('#setAds').checked : false;
+    db.settings.wave = d.querySelector('#setWave').value.trim();
+    db.settings.om = d.querySelector('#setOm').value.trim();
     db.settings.companyForm = d.querySelector('#setForm').value;
     db.settings.country = setCountry.value;
     db.settings.currency = currencyFor(setCountry.value);
