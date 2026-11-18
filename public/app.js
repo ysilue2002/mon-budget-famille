@@ -23,7 +23,7 @@ const currencyFor = (code) => countryOf(code)[2];
 const countryOptions = (sel) => COUNTRIES.map((c) => `<option value="${c[0]}" ${c[0] === sel ? 'selected' : ''}>${c[1]} — ${c[2]}</option>`).join('');
 const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f === sel ? 'selected' : ''}>${f}</option>`).join('');
 const fresh = () => ({
-  shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], mailLog: [], tomb: [],
+  shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], mailLog: [], log: [], tomb: [],
   seq: { DEV: 0, FAC: 0 },
   settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, invRemindDays: 7, autoRemind: false, autoRemindDay: '', autoRemindInfo: null, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
@@ -31,6 +31,20 @@ const fresh = () => ({
 /* Garde-fou de taille : le serveur refuse au-delà de 2 Mo (worker.js). Prévenir
    bien avant, sinon les sauvegardes échouent en silence. */
 const MAX_STATE = 1800000;
+/* Les champs que le serveur ne montre jamais à un vendeur : prix d'achat,
+   coûts, montants de dépenses, de dettes et du journal. Même liste dans
+   worker.js (SECRET_FIELDS) : elle sert à vider le cache local du vendeur. */
+const SECRET_FIELDS = {
+  products: ['buy'],
+  sales: ['cost'],
+  docs: ['cost'],
+  expenses: ['amount'],
+  withdrawals: ['amount'],
+  debts: ['amount', 'paid', 'pays'],
+  log: ['amount'],
+};
+/* Le journal d'activité est borné : il ne doit pas peser dans la limite de 2 Mo. */
+const LOG_MAX = 300;
 const stateBytes = () => { try { return JSON.stringify(db).length; } catch { return 0; } };
 let db = loadDB();
 let tab = 'vendre';
@@ -122,6 +136,7 @@ function loadDB() {
 function migrate(d) {
   d.meta = d.meta || {};
   d.moves = Array.isArray(d.moves) ? d.moves : [];
+  d.log = Array.isArray(d.log) ? d.log.filter(Boolean).slice(-LOG_MAX) : [];
   /* Pierres tombales : un enregistrement supprimé sur un téléphone ne doit pas
      revenir lors de la fusion avec un autre téléphone. Conservées 90 jours. */
   d.tomb = Array.isArray(d.tomb) ? d.tomb.filter((t) => t && t.id && Date.now() - (t.u || 0) < 90 * 86400000) : [];
@@ -141,6 +156,9 @@ function delRecord(kind, id) {
    la synchronisation périodique ne faisait plus que tirer l'état distant. */
 let dirty = false;
 function saveDB(toucher = true) {
+  /* Un vendeur ne doit rien garder de sensible sur son téléphone, même si son
+     cache date d'avant le masquage serveur. */
+  purgeSecrets();
   if (toucher) { db.meta.updated = Date.now(); dirty = true; }
   try {
     const text = JSON.stringify(db);
@@ -791,7 +809,7 @@ function bilans() {
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
-    </div><button class="btn out" data-act="hist">${T('history')}</button>${isStaff() ? '' : `<button class="btn out" data-act="report">${T('monthlyReport')}</button>`}</div>
+    </div><button class="btn out" data-act="hist">${T('history')}</button>${isStaff() ? '' : `<button class="btn out" data-act="report">${T('monthlyReport')}</button><button class="btn out" data-act="journal">${T('journal')}</button>`}</div>
     <div class="kpis">
       <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
@@ -818,6 +836,34 @@ function bilans() {
     ${remindJournal()}
     ${isStaff() ? '' : `<p class="hint">${T('profitHint')}</p>`}
     ${invoices.length ? `<p class="hint">${T('invoiceNoCostHint')}</p>` : ''}`;
+}
+
+/* ---------------- journal d'activité ---------------- */
+/* Les actions sont enregistrées avec leur auteur. Le patron peut filtrer par
+   vendeur ; un vendeur ne voit pas ce journal (le serveur vide aussi les
+   montants qu'il contient). */
+const ACT_LABEL = {
+  sale: 'jSale', saleEdit: 'jSaleEdit', expense: 'jExpense', expenseEdit: 'jExpenseEdit',
+  withdraw: 'jWithdraw', product: 'jProduct', productEdit: 'jProductEdit', productDel: 'jProductDel',
+  purchase: 'jPurchase', pay: 'jPay',
+};
+function journalModal() {
+  if (isStaff()) return;
+  let who = 'all';
+  const d = modal(`<div class="sheetHead"><h2>${T('journal')}</h2><button type="button" class="sheetClose" id="jClose" aria-label="${T('close')}">✕</button></div>
+    <p class="hint">${T('journalHint')}</p><div class="big" id="jWho"></div><div id="jList"></div>`);
+  d.querySelector('#jClose').onclick = () => d.remove();
+  const paint = () => {
+    const all = (db.log || []).slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+    const names = [...new Set(all.map((e) => e.by || ''))];
+    d.querySelector('#jWho').innerHTML = `<button class="btn small ${who === 'all' ? '' : 'out'}" data-who="all">${T('all')}</button>`
+      + names.map((n) => `<button class="btn small ${who === n ? '' : 'out'}" data-who="${esc(n)}">${esc(n || T('owner'))}</button>`).join('');
+    const list = all.filter((e) => who === 'all' || (e.by || '') === who).slice(0, 100);
+    d.querySelector('#jList').innerHTML = list.map((e) => `<div class="row"><div><div class="t">${esc(T(ACT_LABEL[e.act] || e.act))}${Number(e.amount) > 0 ? ' · ' + money(e.amount) : ''}</div><div class="s">${dayFR(isoOf(e.at))} · ${esc(clock(e.at))}${e.label ? ' · ' + esc(e.label) : ''}</div></div><div class="right"><span class="tag">${esc(e.by || T('owner'))}</span></div></div>`).join('')
+      || `<p class="empty">${T('noJournal')}</p>`;
+    d.querySelectorAll('[data-who]').forEach((b) => { b.onclick = () => { who = b.dataset.who; paint(); }; });
+  };
+  paint();
 }
 
 /* ---------------- rapport mensuel ---------------- */
@@ -1018,6 +1064,7 @@ function productModal(id) {
     p.alert = Math.round(+m.querySelector('#epAlert').value || 0);
     p.u = Date.now();
     if (newQty !== q) db.moves.push({ id: uid(), pid: p.id, delta: newQty - q, u: Date.now() });
+    logAct('productEdit', name, 0);
     saveDB(); m.remove(); render();
   };
 }
@@ -1386,6 +1433,7 @@ function saleModal(saleId) {
         db.parties.push({ id: uid(), name: party, phone, address, u: now });
       }
     }
+    logAct(src ? 'saleEdit' : 'sale', [sale.product, party].filter(Boolean).join(' · ') || T('sale'), total);
     saveDB(); d.remove(); render(); if (!src) saleDone(sale);
   };
 }
@@ -1459,6 +1507,7 @@ function expenseModal(id) {
         linked.delivered = delivered;
         linked.u = Date.now();
       }
+      logAct('expenseEdit', label, amount);
       saveDB(); d.remove(); render(); return;
     }
     const supplier = label === 'Marchandise' ? d.querySelector('#eSup').value.trim() : '';
@@ -1478,6 +1527,7 @@ function expenseModal(id) {
       if (found) { if (phone) found.phone = phone; if (address) found.address = address; found.u = Date.now(); } else db.suppliers.push({ id: uid(), name: supplier, phone, address, u: Date.now() });
       db.debts.push({ id: 'exd-' + exId, date: todayISO(), supplier, amount, paid, delivered, expenseId: exId, u: Date.now() });
     }
+    logAct('expense', supplier || label, amount);
     saveDB(); d.remove(); render();
   };
 }
@@ -1505,7 +1555,9 @@ function payModal(name) {
     if (amount <= 0) { d.querySelector('#payErr').textContent = T('errorAmount'); return; }
     /* Le surplus n'a nulle part où aller : le refuser vaut mieux que le perdre. */
     if (amount > sum) { d.querySelector('#payErr').textContent = T('errorOverpay'); return; }
+    const received = amount;
     for (const s of list) { if (!amount) break; const take = Math.min(amount, creditOf(s)); s.pays = s.pays || []; s.pays.push({ id: uid(), amount: take, u: Date.now() }); amount -= take; }
+    logAct('pay', name, received);
     saveDB(); d.remove(); render();
   };
 }
@@ -2088,6 +2140,7 @@ document.addEventListener('click', async (e) => {
       const amount = Math.round(+d.querySelector('#wAmt').value || 0);
       if (!amount) { d.querySelector('#wErr').textContent = T('errorAmount'); return; }
       db.withdrawals.push({ id: uid(), date: todayISO(), amount, u: Date.now() });
+      logAct('withdraw', T('withdraw'), amount);
       saveDB(); d.remove(); render();
     };
   }
@@ -2102,6 +2155,7 @@ document.addEventListener('click', async (e) => {
     const buyField = document.getElementById('pBuy');
     db.products.push({ id, name, buy: buyField ? Math.round(+buyField.value || 0) : 0, sell: Math.round(+document.getElementById('pSell').value || 0), qty, alert: Math.round(+document.getElementById('pAlert').value || 0), u: now });
     db.moves.push({ id: 'mv-' + id, pid: id, delta: qty, u: now });
+    logAct('product', name, 0);
     saveDB(); render();
   }
   if (act === 'addParty') {
@@ -2157,6 +2211,7 @@ document.addEventListener('click', async (e) => {
     if (!confirm(T('confirmDelete'))) return;
     db.products = db.products.filter((x) => x.id !== p.id);
     db.moves = (db.moves || []).filter((m) => m.pid !== p.id);
+    logAct('productDel', p.name, 0);
     saveDB(); render();
   }
   if (act === 'addPurchase') {
@@ -2172,6 +2227,7 @@ document.addEventListener('click', async (e) => {
     const now = Date.now();
     db.debts.push({ id, date: todayISO(), supplier, amount, paid, delivered: receivedIn, stocked: receivedIn && !!pid, pid: pid || '', qty: pid ? qty : 0, u: now });
     if (receivedIn && pid && qty > 0) db.moves.push({ id: 'mv-' + id, pid, delta: qty, u: now });
+    logAct('purchase', supplier, amount);
     saveDB(); render();
   }
   if (act === 'payDebt') payDebtModal(b.dataset.id);
@@ -2257,6 +2313,7 @@ document.addEventListener('click', async (e) => {
      en crédit client à la date du jour. */
   if (act === 'factureToSale') factureSaleModal(b.dataset.id);
   if (act === 'report') reportModal();
+  if (act === 'journal') journalModal();
   if (act === 'print') previewDoc(b.dataset.id);
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
   if (act === 'waSale') waSale(b.dataset.id);
@@ -2816,7 +2873,7 @@ async function shareApp() {
 }
 
 /* ---------------- fusion des deux téléphones ---------------- */
-const ARRAYS = ['products', 'parties', 'suppliers', 'sales', 'expenses', 'withdrawals', 'docs', 'debts', 'moves', 'mailLog'];
+const ARRAYS = ['products', 'parties', 'suppliers', 'sales', 'expenses', 'withdrawals', 'docs', 'debts', 'moves', 'mailLog', 'log'];
 const countRecords = (d) => ARRAYS.reduce((a, k) => a + (d[k] || []).length, 0);
 function unionPays(a, b) {
   const m = new Map();
@@ -2876,6 +2933,39 @@ let me = null;
    les réglages de la boutique et la sauvegarde complète restent au patron. */
 function isStaff() {
   return Boolean(me && me.id && me.ownerId);
+}
+/* Rien de sensible ne reste dans le stockage local d'un vendeur : un appareil
+   qui a synchronisé avant le masquage serveur garderait sinon les prix d'achat
+   et les montants. On les vide à chaque écriture locale ; le serveur les
+   rétablit depuis l'état du patron quand le vendeur enregistre. */
+function purgeSecrets() {
+  if (!isStaff()) return false;
+  let changed = false;
+  for (const [key, fields] of Object.entries(SECRET_FIELDS)) {
+    for (const item of db[key] || []) {
+      if (!item || typeof item !== 'object') continue;
+      for (const field of fields) {
+        if (field in item && item[field] !== null) { item[field] = null; changed = true; }
+      }
+    }
+  }
+  return changed;
+}
+/* Journal d'activité : qui a vendu, dépensé, acheté ou modifié quoi. Il est
+   fusionné entre les appareils et seul le patron le consulte. */
+function actorName() {
+  return me && me.id ? String(me.email || me.phone || '').trim() : lastSeller();
+}
+function logAct(act, label, amount) {
+  db.log = Array.isArray(db.log) ? db.log : [];
+  db.log.push({
+    id: uid(), at: Date.now(), act,
+    by: actorName(), byId: me && me.id ? me.id : '',
+    label: String(label || '').slice(0, 60),
+    amount: Math.max(0, Math.round(Number(amount) || 0)),
+    u: Date.now(),
+  });
+  if (db.log.length > LOG_MAX) db.log = db.log.slice(-LOG_MAX);
 }
 let syncState = 'idle';
 let syncTimer = null;

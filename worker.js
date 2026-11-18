@@ -195,6 +195,7 @@ const SECRET_FIELDS = {
   expenses: ['amount'],
   withdrawals: ['amount'],
   debts: ['amount', 'paid', 'pays'],
+  log: ['amount'],
 };
 
 function maskState(text) {
@@ -247,6 +248,9 @@ function restoreMasked(storedText, incomingText) {
         }
         continue;
       }
+      /* Une entrée de journal créée par un vendeur n'a pas de montant : il ne
+         peut pas en inventer un que le patron lirait comme réel. */
+      if (key === 'log') { item.amount = 0; continue; }
       if (key === 'expenses' || key === 'withdrawals' || key === 'debts') mine.splice(i, 1);
     }
   }
