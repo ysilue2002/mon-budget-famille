@@ -37,7 +37,6 @@ let tab = 'vendre';
 let side = 'clients';
 let period = 'mois';
 let draft = null;
-let adsClosed = false;
 /* Publicité (Google AdSense). Rien ne s'affiche tant que ce bloc est vide : la
    case « Publicité » des Réglages montre alors un aperçu en pointillés pour
    juger de la place. Pour passer aux vraies annonces, coller l'identifiant
@@ -206,20 +205,16 @@ function render() {
 }
 
 /* ---------------- publicité (désactivée par défaut) ---------------- */
+/* Sans identifiant d'éditeur il n'y a rien à montrer : ni cadre, ni fausse
+   annonce, ni espace réservé. Les deux emplacements n'existent que lorsque de
+   vraies annonces sont configurées ET activées dans les réglages. */
 function adsHTML() {
-  const on = db.settings.ads && navigator.onLine;
-  if (!on) return { top: '', bottom: '' };
-  const live = Boolean(ADS.client);
+  if (!ADS.client || !db.settings.ads || !navigator.onLine) return { top: '', bottom: '' };
   const unit = (slot) =>
     `<ins class="adsbygoogle" style="display:block;min-height:90px" data-ad-client="${esc(ADS.client)}" data-ad-slot="${esc(slot)}" data-ad-format="auto" data-full-width-responsive="true"></ins>`;
   return {
-    top: live ? `<div class="adsTop live">${unit(ADS.top)}</div>` : `<div class="adsTop">${T('adsSlot')} · ${T('ads')}</div>`,
-    /* Une annonce réelle ne se ferme pas : seul l'aperçu en pointillés a une croix. */
-    bottom: live
-      ? `<div class="adsBottom live">${unit(ADS.bottom)}</div>`
-      : adsClosed
-        ? ''
-        : `<div class="adsBottom"><button data-act="closeAds">✕</button>${T('adsSlot')}</div>`,
+    top: `<div class="adsTop">${unit(ADS.top)}</div>`,
+    bottom: `<div class="adsBottom">${unit(ADS.bottom)}</div>`,
   };
 }
 
@@ -1992,7 +1987,6 @@ document.addEventListener('click', async (e) => {
   if (act === 'back') { tab = 'vendre'; render(); }
   if (act === 'side') { side = b.dataset.s; render(); }
   if (act === 'period') { period = b.dataset.p; render(); }
-  if (act === 'closeAds') { adsClosed = true; render(); }
   if (act === 'expense') expenseModal();
   if (act === 'withdraw') {
     const d = modal(`<h2>${T('withdraw')}</h2><p class="hint">${T('profitHint')}</p>
@@ -2357,7 +2351,7 @@ function settingsModal() {
     <button class="btn out" id="setMailTest">${T('testMail')}</button>
     <p class="hint" id="mailTestMsg"></p>
     <p class="hint">${T('smsUnavailable')}</p>
-    <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>
+    ${ADS.client ? `<label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>` : ''}
     </details>
     <details><summary>${T('secAccount')}</summary>
     ${accountHTML()}
@@ -2449,7 +2443,7 @@ function settingsModal() {
     db.settings.invRemindDays = Math.max(1, Math.round(+d.querySelector('#setRemDays').value || 7));
     db.settings.autoRemind = d.querySelector('#setAutoRemind').checked;
     db.settings.lang = l;
-    db.settings.ads = d.querySelector('#setAds').checked;
+    db.settings.ads = ADS.client ? d.querySelector('#setAds').checked : false;
     db.settings.companyForm = d.querySelector('#setForm').value;
     db.settings.country = setCountry.value;
     db.settings.currency = currencyFor(setCountry.value);
