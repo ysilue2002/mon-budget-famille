@@ -74,6 +74,8 @@ function ensureSchema(env) {
        ajoutées disparaîtraient avec l'ancienne table. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN owner_id TEXT').run(); } catch {}
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN role TEXT').run(); } catch {}
+    /* Droits accordés à chaque vendeur par le patron (JSON). */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN perms TEXT').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run();
@@ -86,14 +88,14 @@ async function currentUser(request, env) {
   if (!token) return null;
   const hash = await sha256(token);
   const row = await env.DB.prepare(
-    'SELECT s.user_id AS id, u.email, u.phone, u.owner_id, u.role, s.expires FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
+    'SELECT s.user_id AS id, u.email, u.phone, u.owner_id, u.role, u.perms, s.expires FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
   ).bind(hash).first();
   if (!row) return null;
   if (row.expires < Date.now()) {
     await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(hash).run();
     return null;
   }
-  return { id: row.id, email: row.email, phone: row.phone, ownerId: row.owner_id || null, role: row.role || 'owner' };
+  return { id: row.id, email: row.email, phone: row.phone, ownerId: row.owner_id || null, role: row.role || 'owner', perms: parsePerms(row.perms) };
 }
 
 async function createSession(env, userId) {
@@ -184,6 +186,17 @@ async function rememberState(env, userId, rev, json, updated) {
 /* Les données d'un vendeur sont celles de son patron. */
 const dataOwner = (user) => user.ownerId || user.id;
 
+/* Droits d'un vendeur, choisis par le patron. Par défaut tout est permis :
+   retirer un droit est une décision explicite du patron. */
+const FULL_PERMS = { del: true, price: true };
+function parsePerms(raw) {
+  if (!raw) return { ...FULL_PERMS };
+  try {
+    const p = JSON.parse(raw);
+    return { del: p.del !== false, price: p.price !== false };
+  } catch { return { ...FULL_PERMS }; }
+}
+
 /* Ce qu'un vendeur ne doit jamais recevoir : prix d'achat, marges, dépenses
    et montants fournisseurs. On les vide à la lecture et on les rétablit
    depuis l'état du patron à l'écriture, pour qu'une sauvegarde du vendeur ne
@@ -195,10 +208,9 @@ const SECRET_FIELDS = {
   expenses: ['amount'],
   withdrawals: ['amount'],
   debts: ['amount', 'paid', 'pays'],
-  log: ['amount'],
 };
 
-function maskState(text) {
+function maskState(text, viewerId = '') {
   let db;
   try { db = JSON.parse(text || '{}'); } catch { return text; }
   if (!db || typeof db !== 'object') return text;
@@ -208,6 +220,14 @@ function maskState(text) {
     for (const item of list) {
       if (!item || typeof item !== 'object') continue;
       for (const field of fields) if (field in item) item[field] = null;
+    }
+  }
+  /* Journal : un vendeur ne voit que les montants de ses propres actions.
+     Ceux du patron et des autres vendeurs restent masqués. */
+  if (Array.isArray(db.log)) {
+    const me = String(viewerId || '');
+    for (const e of db.log) {
+      if (e && typeof e === 'object' && String(e.byId || '') !== me) e.amount = null;
     }
   }
   return JSON.stringify(db);
@@ -248,10 +268,18 @@ function restoreMasked(storedText, incomingText) {
         }
         continue;
       }
-      /* Une entrée de journal créée par un vendeur n'a pas de montant : il ne
-         peut pas en inventer un que le patron lirait comme réel. */
-      if (key === 'log') { item.amount = 0; continue; }
       if (key === 'expenses' || key === 'withdrawals' || key === 'debts') mine.splice(i, 1);
+    }
+  }
+  /* Journal : le montant d'une entrée déjà connue vient du patron ; une entrée
+     créée par le vendeur garde le montant de son action (il le connaît déjà). */
+  if (Array.isArray(incoming.log)) {
+    const storedLog = new Map((Array.isArray(stored.log) ? stored.log : []).filter((x) => x && x.id).map((x) => [String(x.id), x]));
+    for (const e of incoming.log) {
+      if (!e || typeof e !== 'object') continue;
+      const source = e.id ? storedLog.get(String(e.id)) : null;
+      if (source && 'amount' in source) e.amount = source.amount;
+      else e.amount = Math.max(0, Math.round(Number(e.amount) || 0));
     }
   }
   return JSON.stringify(incoming);
@@ -478,11 +506,15 @@ async function api(request, env, url) {
       const owner = await env.DB.prepare('SELECT id, email, phone FROM users WHERE id = ?').bind(user.ownerId).first();
       return json({ role: 'staff', owner: owner ? { id: owner.id, email: owner.email, phone: owner.phone } : null });
     }
-    const staff = await env.DB.prepare('SELECT id, email, phone FROM users WHERE owner_id = ? ORDER BY created').bind(user.id).all();
+    const staff = await env.DB.prepare('SELECT id, email, phone, perms FROM users WHERE owner_id = ? ORDER BY created').bind(user.id).all();
     const invites = await env.DB.prepare(
       'SELECT code, expires FROM invites WHERE owner_id = ? AND used_by IS NULL AND expires > ? ORDER BY created DESC LIMIT 5',
     ).bind(user.id, Date.now()).all();
-    return json({ role: 'owner', staff: staff.results || [], invites: invites.results || [] });
+    return json({
+      role: 'owner',
+      staff: (staff.results || []).map((s) => ({ id: s.id, email: s.email, phone: s.phone, perms: parsePerms(s.perms) })),
+      invites: invites.results || [],
+    });
   }
 
   if (path === '/api/staff/invite' && request.method === 'POST') {
@@ -516,7 +548,7 @@ async function api(request, env, url) {
     const invite = await env.DB.prepare('SELECT owner_id, expires, used_by FROM invites WHERE code = ?').bind(code).first();
     if (!invite || invite.used_by || invite.expires < Date.now()) return json({ error: 'code' }, 400);
     if (invite.owner_id === user.id) return json({ error: 'self' }, 400);
-    await env.DB.prepare('UPDATE users SET owner_id = ?, role = ? WHERE id = ?').bind(invite.owner_id, 'staff', user.id).run();
+    await env.DB.prepare('UPDATE users SET owner_id = ?, role = ?, perms = NULL WHERE id = ?').bind(invite.owner_id, 'staff', user.id).run();
     await env.DB.prepare('UPDATE invites SET used_by = ? WHERE code = ?').bind(user.id, code).run();
     return json({ ok: true, ownerId: invite.owner_id });
   }
@@ -524,7 +556,7 @@ async function api(request, env, url) {
   if (path === '/api/staff/leave' && request.method === 'POST') {
     const user = await currentUser(request, env);
     if (!user) return json({ error: 'auth' }, 401);
-    await env.DB.prepare('UPDATE users SET owner_id = NULL, role = ? WHERE id = ?').bind('owner', user.id).run();
+    await env.DB.prepare('UPDATE users SET owner_id = NULL, role = ?, perms = NULL WHERE id = ?').bind('owner', user.id).run();
     return json({ ok: true });
   }
 
@@ -534,14 +566,28 @@ async function api(request, env, url) {
     if (user.ownerId) return json({ error: 'owner' }, 403);
     const body = await readBody(request);
     const id = String(body.id || '');
-    await env.DB.prepare('UPDATE users SET owner_id = NULL, role = ? WHERE id = ? AND owner_id = ?').bind('owner', id, user.id).run();
+    await env.DB.prepare('UPDATE users SET owner_id = NULL, role = ?, perms = NULL WHERE id = ? AND owner_id = ?').bind('owner', id, user.id).run();
     return json({ ok: true });
+  }
+
+  /* Le patron choisit ce que chaque vendeur peut faire dans la boutique. */
+  if (path === '/api/staff/perms' && request.method === 'POST') {
+    const user = await currentUser(request, env);
+    if (!user) return json({ error: 'auth' }, 401);
+    if (user.ownerId) return json({ error: 'owner' }, 403);
+    const body = await readBody(request);
+    const id = String(body.id || '');
+    const perms = { del: body.del !== false, price: body.price !== false };
+    await env.DB.prepare('UPDATE users SET perms = ? WHERE id = ? AND owner_id = ?')
+      .bind(JSON.stringify(perms), id, user.id)
+      .run();
+    return json({ ok: true, perms });
   }
 
   if (path === '/api/data' && request.method === 'GET') {
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     if (!row) return json({ json: null, rev: 0, updated: 0 });
-    const body = user.ownerId ? maskState(row.json) : row.json;
+    const body = user.ownerId ? maskState(row.json, user.id) : row.json;
     return json({ json: body, rev: row.rev, updated: row.updated });
   }
 
@@ -575,7 +621,34 @@ async function api(request, env, url) {
     const rawPayload = typeof body.json === 'string' ? body.json : JSON.stringify(body.json || {});
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     if (row && row.rev > incomingRev) {
-      return json({ saved: false, json: user.ownerId ? maskState(row.json) : row.json, rev: row.rev, updated: row.updated });
+      return json({ saved: false, json: user.ownerId ? maskState(row.json, user.id) : row.json, rev: row.rev, updated: row.updated });
+    }
+    /* Droits du vendeur : une suppression d'article ou un changement de prix
+       de vente interdit est refusé en bloc. Le client se recale alors sur
+       l'état du patron, pour qu'aucune modification partielle ne survive. */
+    if (user.ownerId && row) {
+      const perms = user.perms || FULL_PERMS;
+      if (!perms.del || !perms.price) {
+        let stored = null;
+        let mine = null;
+        try { stored = JSON.parse(row.json || '{}'); } catch {}
+        try { mine = JSON.parse(rawPayload || '{}'); } catch {}
+        if (stored && mine) {
+          const known = new Map((stored.products || []).filter((p) => p && p.id).map((p) => [String(p.id), p]));
+          const sent = new Map((mine.products || []).filter((p) => p && p.id).map((p) => [String(p.id), p]));
+          if (!perms.del) {
+            for (const pid of known.keys()) if (!sent.has(pid)) return json({ error: 'perm', what: 'del' }, 403);
+          }
+          if (!perms.price) {
+            for (const [pid, p] of sent) {
+              const old = known.get(pid);
+              if (old && Math.max(0, Number(p.sell) || 0) !== Math.max(0, Number(old.sell) || 0)) {
+                return json({ error: 'perm', what: 'price' }, 403);
+              }
+            }
+          }
+        }
+      }
     }
     /* Le vendeur envoie un état où les valeurs sensibles sont vides : on
        remet celles du patron avant d'écrire. */

@@ -41,7 +41,6 @@ const SECRET_FIELDS = {
   expenses: ['amount'],
   withdrawals: ['amount'],
   debts: ['amount', 'paid', 'pays'],
-  log: ['amount'],
 };
 /* Le journal d'activité est borné : il ne doit pas peser dans la limite de 2 Mo. */
 const LOG_MAX = 300;
@@ -357,7 +356,7 @@ function stock() {
       <div class="kpi"><span>${T('toRenew')}</span><b>${p.filter((x) => qtyOf(x) <= x.alert).length}</b></div>
     </div>
     <div class="card"><h3>${T('articles')}</h3>
-      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)} ${!isStaff() && !costKnownOf(x.buy) ? `<span class="tag warn">${T('buyZero')}</span>` : ''}</div><div class="s">${isStaff() ? `${T('sellPrice')} ${money(x.sell)}` : `${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}`}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button><button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button></div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
+      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)} ${!isStaff() && !costKnownOf(x.buy) ? `<span class="tag warn">${T('buyZero')}</span>` : ''}</div><div class="s">${isStaff() ? `${T('sellPrice')} ${money(x.sell)}` : `${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}`}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button>      ${canDeleteItems() ? `<button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button>` : ''}</div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
     </div>
     <div class="card"><h3>${T('addArticle')}</h3>
       <label>${T('name')}</label><input id="pName" placeholder="Savon">
@@ -847,12 +846,58 @@ const ACT_LABEL = {
   withdraw: 'jWithdraw', product: 'jProduct', productEdit: 'jProductEdit', productDel: 'jProductDel',
   purchase: 'jPurchase', pay: 'jPay',
 };
+/* Export CSV du journal, dans l'ordre et le filtre affichés à l'écran. */
+function journalCSV(list) {
+  const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const head = [T('logDate'), T('logTime'), T('colSeller'), T('colAction'), T('colDetail'), T('amount')];
+  const rows = list.map((e) => {
+    const dt = new Date(Number(e.at) || Date.now());
+    return [
+      isoOf(dt),
+      dt.toLocaleTimeString(lang() === 'ar' ? 'ar' : lang() === 'en' ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      e.by || T('owner'),
+      T(ACT_LABEL[e.act] || e.act),
+      e.label || '',
+      Number(e.amount) > 0 ? e.amount : '',
+    ];
+  });
+  return '\ufeff' + [head, ...rows].map((r) => r.map(cell).join(';')).join('\r\n');
+}
+function downloadJournal(list) {
+  try {
+    const url = URL.createObjectURL(new Blob([journalCSV(list)], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `journal-${todayISO()}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 6000);
+  } catch { alert(T('exportFail')); }
+}
+/* Résumé par auteur pour un mois : sert de section au rapport PDF. */
+function journalSummary(monthKey) {
+  const rows = new Map();
+  for (const e of db.log || []) {
+    if (!e || !e.at || isoOf(e.at).slice(0, 7) !== monthKey) continue;
+    const name = e.by || T('owner');
+    const cur = rows.get(name) || { name, n: 0, sales: 0, salesAmount: 0, expenses: 0, expensesAmount: 0 };
+    cur.n += 1;
+    if (e.act === 'sale') { cur.sales += 1; cur.salesAmount += Number(e.amount) || 0; }
+    if (e.act === 'expense') { cur.expenses += 1; cur.expensesAmount += Number(e.amount) || 0; }
+    rows.set(name, cur);
+  }
+  return [...rows.values()].sort((a, b) => b.n - a.n);
+}
 function journalModal() {
   if (isStaff()) return;
   let who = 'all';
   const d = modal(`<div class="sheetHead"><h2>${T('journal')}</h2><button type="button" class="sheetClose" id="jClose" aria-label="${T('close')}">✕</button></div>
-    <p class="hint">${T('journalHint')}</p><div class="big" id="jWho"></div><div id="jList"></div>`);
+    <p class="hint">${T('journalHint')}</p><div class="big" id="jWho"></div>
+    <button class="btn out" id="jCsv">${T('journalCsv')}</button><div id="jList"></div>`);
   d.querySelector('#jClose').onclick = () => d.remove();
+  d.querySelector('#jCsv').onclick = () => {
+    const all = (db.log || []).slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+    downloadJournal(all.filter((e) => who === 'all' || (e.by || '') === who));
+  };
   const paint = () => {
     const all = (db.log || []).slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
     const names = [...new Set(all.map((e) => e.by || ''))];
@@ -940,6 +985,14 @@ async function reportPdf(monthKey) {
     row(T('remindedCount'), `${rm.count} · ${pm(rm.amount)}`);
     row(T('paidAfterRemind'), `${rm.paid} · ${pm(rm.paidAmount)}${rm.amount ? ` (${rm.rate} %)` : ''}`, true);
     row(T('stillUnpaid'), `${rm.unpaid} · ${pm(rm.unpaidAmount)}`);
+  }
+  const journalRows = journalSummary(monthKey);
+  if (journalRows.length) {
+    section(T('journal'));
+    journalRows.forEach((s) => {
+      row(`${s.name} (${s.n} ${T('actions')})`, `${s.sales} ${T('jSale')} · ${pm(s.salesAmount)}`);
+      if (s.expenses) row(`  ${T('expenses')}`, `${s.expenses} · ${pm(s.expensesAmount)}`);
+    });
   }
   section(T('reportSituation'));
   row(T('uncollected'), pm(f.due));
@@ -1048,7 +1101,7 @@ function productModal(id) {
   const m = modal(`<h2>${T('editArticle')}</h2>
     <label>${T('name')}</label><input id="epName" value="${esc(p.name)}">
     ${isStaff() ? '' : `<label>${T('buyPrice')}</label><input id="epBuy" inputmode="numeric" value="${esc(p.buy)}">`}
-    <label>${T('sellPrice')}</label><input id="epSell" inputmode="numeric" value="${esc(p.sell)}">
+    <label>${T('sellPrice')}</label><input id="epSell" inputmode="numeric" value="${esc(p.sell)}" ${canEditPrices() ? '' : 'disabled'}>
     <label>${T('qty')}</label><input id="epQty" inputmode="numeric" value="${esc(q)}">
     <label>${T('alertAt')}</label><input id="epAlert" inputmode="numeric" value="${esc(p.alert)}">
     <button class="btn" id="epOk">${T('saveChanges')}</button><button class="btn out" id="epNo">${T('cancel')}</button><p class="err" id="epErr"></p>`);
@@ -1060,7 +1113,8 @@ function productModal(id) {
     p.name = name;
     /* Un vendeur ne voit pas le prix d'achat : on garde celui déjà enregistré. */
     p.buy = isStaff() ? Math.max(0, Number(p.buy) || 0) : Math.round(+m.querySelector('#epBuy').value || 0);
-    p.sell = Math.round(+m.querySelector('#epSell').value || 0);
+    /* Prix de vente verrouillé pour un vendeur qui n'a pas ce droit. */
+    p.sell = canEditPrices() ? Math.round(+m.querySelector('#epSell').value || 0) : Math.max(0, Number(p.sell) || 0);
     p.alert = Math.round(+m.querySelector('#epAlert').value || 0);
     p.u = Date.now();
     if (newQty !== q) db.moves.push({ id: uid(), pid: p.id, delta: newQty - q, u: Date.now() });
@@ -2208,6 +2262,7 @@ document.addEventListener('click', async (e) => {
   if (act === 'delProduct') {
     const p = db.products.find((x) => x.id === b.dataset.id);
     if (!p) return;
+    if (!canDeleteItems()) { alert(T('permDenied')); return; }
     if (!confirm(T('confirmDelete'))) return;
     db.products = db.products.filter((x) => x.id !== p.id);
     db.moves = (db.moves || []).filter((m) => m.pid !== p.id);
@@ -2492,7 +2547,10 @@ async function loadTeam(box) {
   box.innerHTML = `<p class="hint">${T('teamHint')}</p>
     <button class="btn" id="teamNew">${T('teamInvite')}</button>
     <div id="teamCode"></div>
-    ${staff.length ? `<h3 style="margin-top:14px">${T('teamSellers')}</h3>${staff.map((s) => `<div class="row"><div><div class="t">${esc(s.email || s.phone || '—')}</div></div><div class="right"><button class="btn small out" data-rm="${esc(s.id)}">${T('teamRemove')}</button></div></div>`).join('')}` : ''}
+    ${staff.length ? `<h3 style="margin-top:14px">${T('teamSellers')}</h3><p class="hint">${T('permHint')}</p>${staff.map((s) => `<div class="row"><div><div class="t">${esc(s.email || s.phone || '—')}</div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-perm="del" data-id="${esc(s.id)}" ${!s.perms || s.perms.del ? 'checked' : ''} style="width:auto"><span>${T('permDelete')}</span></label>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-perm="price" data-id="${esc(s.id)}" ${!s.perms || s.perms.price ? 'checked' : ''} style="width:auto"><span>${T('permPrice')}</span></label></div>
+      <div class="right"><button class="btn small out" data-rm="${esc(s.id)}">${T('teamRemove')}</button></div></div>`).join('')}` : ''}
     ${invites.length ? `<p class="hint">${T('teamPending')} : ${invites.map((i) => esc(i.code)).join(' · ')}</p>` : ''}
     <h3 style="margin-top:16px">${T('teamJoin')}</h3>
     <p class="hint">${T('teamJoinHint')}</p>
@@ -2504,6 +2562,15 @@ async function loadTeam(box) {
     box.querySelector('#teamCode').innerHTML = `<p class="tag ok" style="font-size:18px;letter-spacing:.15em">${esc(res.data.code)}</p>
       <p class="hint">${T('teamCodeHint')}</p>`;
   };
+  box.querySelectorAll('[data-perm]').forEach((c) => {
+    c.onchange = async () => {
+      const id = c.dataset.id;
+      const del = box.querySelector(`[data-perm="del"][data-id="${id}"]`).checked;
+      const price = box.querySelector(`[data-perm="price"][data-id="${id}"]`).checked;
+      const res = await api('/api/staff/perms', 'POST', { id, del, price });
+      if (!res.ok) { c.checked = !c.checked; alert(T('syncPending')); }
+    };
+  });
   box.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = async () => {
       if (!confirm(T('teamRemoveConfirm'))) return;
@@ -2924,6 +2991,9 @@ function mergeStates(local, remote) {
   out.meta = { lastSync: Date.now(), updated: Math.max(local.meta.updated || 0, remote.meta.updated || 0), rev: Math.max(local.meta.rev || 0, remote.meta.rev || 0), mv: 1 };
   ensureMoves(out);
   renumberDocs(out);
+  /* Le journal fusionné reste borné : deux téléphones ne doivent pas le faire
+     grossir sans fin. Les entrées les plus récentes sont gardées. */
+  out.log = (out.log || []).slice().sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)).slice(-LOG_MAX);
   return out;
 }
 
@@ -2949,8 +3019,23 @@ function purgeSecrets() {
       }
     }
   }
+  /* Journal : un vendeur garde les montants de ses propres actions (il les
+     connaît) ; ceux du patron et des autres vendeurs restent vides. */
+  for (const e of db.log || []) {
+    if (!e || typeof e !== 'object') continue;
+    if (e.byId && me && e.byId === me.id) continue;
+    if (e.amount !== null) { e.amount = null; changed = true; }
+  }
   return changed;
 }
+/* Droits réglés par le patron. Sans information (hors ligne, ancienne
+   version), on laisse faire comme avant. */
+function myPerms() {
+  const p = me && me.perms;
+  return { del: !p || p.del !== false, price: !p || p.price !== false };
+}
+const canDeleteItems = () => !isStaff() || myPerms().del;
+const canEditPrices = () => !isStaff() || myPerms().price;
 /* Journal d'activité : qui a vendu, dépensé, acheté ou modifié quoi. Il est
    fusionné entre les appareils et seul le patron le consulte. */
 function actorName() {
@@ -3005,7 +3090,7 @@ function storedMe() {
 }
 function rememberMe(user) {
   try {
-    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, role: user.role || 'owner', ownerId: user.ownerId || null }));
+    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, role: user.role || 'owner', ownerId: user.ownerId || null, perms: user.perms || null }));
     else localStorage.removeItem(KEY + '.me');
   } catch {}
 }
@@ -3061,6 +3146,15 @@ async function pushNow() {
       }
       /* Session expirée : ce n'est pas un problème de réseau, il faut se reconnecter. */
       if (r.status === 401) { markSync('auth'); return; }
+      /* Droit retiré par le patron : la modification locale est annulée et
+         l'application repart de l'état du serveur. */
+      if (r.status === 403 && r.data && r.data.error === 'perm') {
+        markSync('error');
+        alert(T('permDenied'));
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(() => pullNow(true), 400);
+        return;
+      }
       markSync(navigator.onLine ? 'error' : 'pending');
       return;
     }
