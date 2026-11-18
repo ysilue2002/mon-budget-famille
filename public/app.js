@@ -112,6 +112,8 @@ let docQuery = '';
 let histQuery = '';
 let histMethod = 'all';
 let histPeriod = 'mois';
+/* Filtre par vendeur : les ventes gardent le nom saisi à l'encaissement. */
+let histSeller = 'all';
 /* L'historique s'affiche par paliers : les totaux, les filtres et l'export
    continuent de porter sur la liste complète (histSales), pas sur les lignes visibles. */
 const HIST_PAGE = 50;
@@ -360,14 +362,14 @@ function stock() {
     <div class="card"><h3>${T('articles')}</h3>
       ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)} ${!isStaff() && !costKnownOf(x.buy) ? `<span class="tag warn">${T('buyZero')}</span>` : ''}</div><div class="s">${isStaff() ? `${T('sellPrice')} ${money(x.sell)}` : `${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}`}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button>      ${canDeleteItems() ? `<button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button>` : ''}</div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
     </div>
-    <div class="card"><h3>${T('addArticle')}</h3>
+    ${canEditPrices() ? `<div class="card"><h3>${T('addArticle')}</h3>
       <label>${T('name')}</label><input id="pName" placeholder="Savon">
       ${isStaff() ? '' : `<label>${T('buyPrice')}</label><input id="pBuy" inputmode="numeric" placeholder="0">`}
       <label>${T('sellPrice')}</label><input id="pSell" inputmode="numeric" placeholder="0">
       <label>${T('qty')}</label><input id="pQty" inputmode="numeric" value="0">
       <label>${T('alertAt')}</label><input id="pAlert" inputmode="numeric" value="3">
       <button class="btn" data-act="addProduct">${T('saveArticle')}</button>
-    </div>`;
+    </div>` : `<p class="hint">${T('createLocked')}</p>`}`;
 }
 
 /* ---------------- Clients / Fournisseurs ---------------- */
@@ -504,7 +506,8 @@ function histSales() {
   const term = String(histQuery || '').trim().toLowerCase();
   return db.sales.filter((s) => inPeriod(s.date, histPeriod))
     .filter((s) => histMethod === 'all' || s.method === histMethod)
-    .filter((s) => !term || [s.party, s.product, s.method, s.date, dayFR(s.date), String(s.total), money(s.total)].join(' ').toLowerCase().includes(term))
+    .filter((s) => histSeller === 'all' || String(s.by || '').trim() === histSeller)
+    .filter((s) => !term || [s.party, s.product, s.method, s.by, s.date, dayFR(s.date), String(s.total), money(s.total)].join(' ').toLowerCase().includes(term))
     .sort((a, b) => (a.date === b.date ? (b.u || 0) - (a.u || 0) : a.date < b.date ? 1 : -1));
 }
 function histSummary(list) {
@@ -516,7 +519,7 @@ function histSummary(list) {
       <div class="kpi"><span>${T('remains')}</span><b>${money(Math.max(0, ca - cash))}</b></div>`;
 }
 function histRows(list) {
-  return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div><div class="s">${dayFR(s.date)} · ${esc(methodLabel(s.method))}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">
+  return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div>      <div class="s">${dayFR(s.date)} · ${esc(methodLabel(s.method))}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}${s.by ? ' · ' + esc(s.by) : ''}</div></div><div class="right">
       ${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
       ${s.delivered === false ? `<button class="btn small out" data-act="deliverSale" data-id="${s.id}">${T('markSaleDelivered')}</button>` : ''}
       <button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button>
@@ -533,6 +536,7 @@ function hist() {
   const list = histSales();
   const chip = (p, label) => `<button class="btn ${histPeriod === p ? '' : 'out'}" data-act="histPeriod" data-p="${p}">${label}</button>`;
   const methods = [...new Set(db.sales.map((s) => s.method).filter(Boolean))];
+  const sellers = [...new Set(db.sales.map((s) => String(s.by || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   return `<button class="btn out" data-act="back">← ${T('back')}</button>
     <h2 style="margin-top:12px">${T('history')}</h2>
     <button class="btn out" data-act="exportCsv">${T('exportCsv')}</button>
@@ -541,6 +545,8 @@ function hist() {
       <input id="histSearch" type="search" placeholder="${T('searchSales')}" value="${esc(histQuery)}" autocomplete="off">
       <label>${T('method')}</label>
       <select id="histMethod"><option value="all">${T('allMethods')}</option>${methods.map((m) => `<option value="${esc(m)}" ${m === histMethod ? 'selected' : ''}>${esc(methodLabel(m))}</option>`).join('')}</select>
+      ${sellers.length ? `<label>${T('colSeller')}</label>
+      <select id="histSeller"><option value="all">${T('allSellers')}</option>${sellers.map((n) => `<option value="${esc(n)}" ${n === histSeller ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
     </div>
     <div class="kpis" id="histSum">${histSummary(list)}</div>
     <div class="card" id="histList">${histListHTML(list, histShown)}</div>`;
@@ -810,7 +816,7 @@ function bilans() {
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
-    </div><button class="btn out" data-act="hist">${T('history')}</button>${isStaff() ? '' : `<button class="btn out" data-act="report">${T('monthlyReport')}</button><button class="btn out" data-act="journal">${T('journal')}</button>`}</div>
+    </div><button class="btn out" data-act="hist">${T('history')}</button>${isStaff() ? '' : `<button class="btn out" data-act="report">${T('monthlyReport')}</button>`}<button class="btn out" data-act="journal">${T('journal')}</button></div>
     <div class="kpis">
       <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
@@ -890,25 +896,32 @@ function journalSummary(monthKey) {
   return [...rows.values()].sort((a, b) => b.n - a.n);
 }
 function journalModal() {
-  if (isStaff()) return;
+  /* Le patron voit tout et filtre par vendeur ; un vendeur ne voit que ses
+     propres actions, avec leurs montants (le serveur masque les autres). */
+  const staff = isStaff();
+  const sorted = () => (db.log || [])
+    .filter((e) => e && (!staff || (me && e.byId === me.id)))
+    .slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
   let who = 'all';
   const d = modal(`<div class="sheetHead"><h2>${T('journal')}</h2><button type="button" class="sheetClose" id="jClose" aria-label="${T('close')}">✕</button></div>
-    <p class="hint">${T('journalHint')}</p><div class="chips" id="jWho"></div>
+    <p class="hint">${staff ? T('journalMineHint') : T('journalHint')}</p>${staff ? '' : '<div class="chips" id="jWho"></div>'}
     <button class="btn out" id="jCsv">${T('journalCsv')}</button><div id="jList"></div>`);
   d.querySelector('#jClose').onclick = () => d.remove();
   d.querySelector('#jCsv').onclick = () => {
-    const all = (db.log || []).slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
-    downloadJournal(all.filter((e) => who === 'all' || (e.by || '') === who));
+    downloadJournal(sorted().filter((e) => who === 'all' || (e.by || '') === who));
   };
   const paint = () => {
-    const all = (db.log || []).slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
-    const names = [...new Set(all.map((e) => e.by || ''))];
-    d.querySelector('#jWho').innerHTML = `<button class="btn small ${who === 'all' ? '' : 'out'}" data-who="all">${T('all')}</button>`
-      + names.map((n) => `<button class="btn small ${who === n ? '' : 'out'}" data-who="${esc(n)}" title="${esc(n || T('owner'))}">${esc(n || T('owner'))}</button>`).join('');
+    const all = sorted();
+    const box = d.querySelector('#jWho');
+    if (box) {
+      const names = [...new Set(all.map((e) => e.by || ''))];
+      box.innerHTML = `<button class="btn small ${who === 'all' ? '' : 'out'}" data-who="all">${T('all')}</button>`
+        + names.map((n) => `<button class="btn small ${who === n ? '' : 'out'}" data-who="${esc(n)}" title="${esc(n || T('owner'))}">${esc(n || T('owner'))}</button>`).join('');
+      box.querySelectorAll('[data-who]').forEach((b) => { b.onclick = () => { who = b.dataset.who; paint(); }; });
+    }
     const list = all.filter((e) => who === 'all' || (e.by || '') === who).slice(0, 100);
     d.querySelector('#jList').innerHTML = list.map((e) => `<div class="row"><div><div class="t">${esc(T(ACT_LABEL[e.act] || e.act))}${Number(e.amount) > 0 ? ' · ' + money(e.amount) : ''}</div><div class="s">${dayFR(isoOf(e.at))} · ${esc(clock(e.at))}${e.label ? ' · ' + esc(e.label) : ''}</div></div><div class="right"><span class="tag">${esc(e.by || T('owner'))}</span></div></div>`).join('')
       || `<p class="empty">${T('noJournal')}</p>`;
-    d.querySelectorAll('[data-who]').forEach((b) => { b.onclick = () => { who = b.dataset.who; paint(); }; });
   };
   paint();
 }
@@ -2201,6 +2214,7 @@ document.addEventListener('click', async (e) => {
     };
   }
   if (act === 'addProduct') {
+    if (!canEditPrices()) { alert(T('permDenied')); return; }
     const name = document.getElementById('pName').value.trim();
     if (!name) return;
     const id = uid();
@@ -2439,6 +2453,18 @@ document.addEventListener('click', async (e) => {
       render();
     });
   }
+  if (act === 'saveName') {
+    const box = document.getElementById('acName');
+    const name = (box ? box.value : '').trim();
+    if (name.length < 2) { alert(T('nameBad')); return; }
+    api('/api/name', 'POST', { name }).then((r) => {
+      if (!r.ok) { alert(T('nameBad')); return; }
+      me = r.data.user;
+      rememberMe(me);
+      alert(T('nameSaved'));
+      render();
+    });
+  }
   if (act === 'syncNow') pushNow();
   if (act === 'logout') {
     await logout();
@@ -2549,7 +2575,7 @@ async function loadTeam(box) {
   box.innerHTML = `<p class="hint">${T('teamHint')}</p>
     <button class="btn" id="teamNew">${T('teamInvite')}</button>
     <div id="teamCode"></div>
-    ${staff.length ? `<h3 style="margin-top:14px">${T('teamSellers')}</h3><p class="hint">${T('permHint')}</p>${staff.map((s) => `<div class="row"><div><div class="t">${esc(s.email || s.phone || '—')}</div>
+    ${staff.length ? `<h3 style="margin-top:14px">${T('teamSellers')}</h3><p class="hint">${T('permHint')}</p>${staff.map((s) => `<div class="row"><div><div class="t">${esc(s.name || s.email || s.phone || '—')}</div>${s.name && (s.email || s.phone) ? `<div class="s">${esc(s.email || s.phone)}</div>` : ''}
       <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-perm="del" data-id="${esc(s.id)}" ${!s.perms || s.perms.del ? 'checked' : ''} style="width:auto"><span>${T('permDelete')}</span></label>
       <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-perm="price" data-id="${esc(s.id)}" ${!s.perms || s.perms.price ? 'checked' : ''} style="width:auto"><span>${T('permPrice')}</span></label></div>
       <div class="right"><button class="btn small out" data-rm="${esc(s.id)}">${T('teamRemove')}</button></div></div>`).join('')}` : ''}
@@ -3040,8 +3066,15 @@ const canDeleteItems = () => !isStaff() || myPerms().del;
 const canEditPrices = () => !isStaff() || myPerms().price;
 /* Journal d'activité : qui a vendu, dépensé, acheté ou modifié quoi. Il est
    fusionné entre les appareils et seul le patron le consulte. */
+/* Nom lisible pour le journal : le nom choisi dans les réglages d'abord, puis
+   la partie locale de l'e-mail (« awa.traore » → « Awa Traore »). */
 function actorName() {
-  return me && me.id ? String(me.email || me.phone || '').trim() : lastSeller();
+  if (!me || !me.id) return lastSeller();
+  const named = String(me.name || '').trim();
+  if (named) return named;
+  const local = String(me.email || '').split('@')[0].replace(/[._+\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const pretty = local.replace(/(^|\s)(\p{L})/gu, (m, s, c) => s + c.toUpperCase());
+  return pretty || String(me.phone || '').trim();
 }
 function logAct(act, label, amount) {
   db.log = Array.isArray(db.log) ? db.log : [];
@@ -3092,7 +3125,7 @@ function storedMe() {
 }
 function rememberMe(user) {
   try {
-    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, role: user.role || 'owner', ownerId: user.ownerId || null, perms: user.perms || null }));
+    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, name: user.name || null, role: user.role || 'owner', ownerId: user.ownerId || null, perms: user.perms || null }));
     else localStorage.removeItem(KEY + '.me');
   } catch {}
 }
@@ -3256,6 +3289,9 @@ function accountHTML() {
       <p class="hint">${T('lastSaved')} ${clock(db.meta.lastSync)}</p>
       <button class="btn out" data-act="syncNow">${T('syncNow')}</button>
       <button class="btn out" data-act="logout">${T('signOut')}</button>
+      <label>${T('yourName')}</label><input id="acName" maxlength="40" value="${esc(me.name || '')}" placeholder="Awa">
+      <button class="btn out" data-act="saveName">${T('saveName')}</button>
+      <p class="hint">${T('yourNameHint')}</p>
       <p class="hint">${T('multiPhoneHint')}</p>
       ${me.email ? '' : `<h3 style="margin-top:16px">${T('addEmail')}</h3>
       <p class="hint">${T('addEmailHint')}</p>
@@ -3506,6 +3542,7 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'histMethod') { histMethod = e.target.value; histShown = HIST_PAGE; render(); }
+  if (e.target.id === 'histSeller') { histSeller = e.target.value; histShown = HIST_PAGE; render(); }
   if (e.target.id === 'dParty') {
     const p = db.parties.find((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase());
     if (p) {

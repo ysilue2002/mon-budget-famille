@@ -76,6 +76,8 @@ function ensureSchema(env) {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN role TEXT').run(); } catch {}
     /* Droits accordés à chaque vendeur par le patron (JSON). */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN perms TEXT').run(); } catch {}
+    /* Nom affiché dans le journal, à la place de l'e-mail. */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN name TEXT').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run();
@@ -88,14 +90,14 @@ async function currentUser(request, env) {
   if (!token) return null;
   const hash = await sha256(token);
   const row = await env.DB.prepare(
-    'SELECT s.user_id AS id, u.email, u.phone, u.owner_id, u.role, u.perms, s.expires FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
+    'SELECT s.user_id AS id, u.email, u.phone, u.name, u.owner_id, u.role, u.perms, s.expires FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
   ).bind(hash).first();
   if (!row) return null;
   if (row.expires < Date.now()) {
     await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(hash).run();
     return null;
   }
-  return { id: row.id, email: row.email, phone: row.phone, ownerId: row.owner_id || null, role: row.role || 'owner', perms: parsePerms(row.perms) };
+  return { id: row.id, email: row.email, phone: row.phone, name: row.name || null, ownerId: row.owner_id || null, role: row.role || 'owner', perms: parsePerms(row.perms) };
 }
 
 async function createSession(env, userId) {
@@ -205,6 +207,7 @@ function publicUser(u) {
     id: u.id,
     email: u.email || null,
     phone: u.phone || null,
+    name: u.name || null,
     ownerId: u.ownerId || u.owner_id || null,
     role: u.role || 'owner',
     perms: parsePerms(u.perms),
@@ -512,21 +515,32 @@ async function api(request, env, url) {
     return json({ ok: true, user: publicUser({ ...user, email }) });
   }
 
+  /* Nom affiché dans le journal : choisi par chaque compte, jamais deviné. */
+  if (path === '/api/name' && request.method === 'POST') {
+    const user = await currentUser(request, env);
+    if (!user) return json({ error: 'auth' }, 401);
+    const body = await readBody(request);
+    const name = String(body.name || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (name.length < 2) return json({ error: 'name' }, 400);
+    await env.DB.prepare('UPDATE users SET name = ? WHERE id = ?').bind(name, user.id).run();
+    return json({ ok: true, user: publicUser({ ...user, name }) });
+  }
+
   /* ---------------- équipe ---------------- */
   if (path === '/api/staff' && request.method === 'GET') {
     const user = await currentUser(request, env);
     if (!user) return json({ error: 'auth' }, 401);
     if (user.ownerId) {
-      const owner = await env.DB.prepare('SELECT id, email, phone FROM users WHERE id = ?').bind(user.ownerId).first();
-      return json({ role: 'staff', owner: owner ? { id: owner.id, email: owner.email, phone: owner.phone } : null });
+      const owner = await env.DB.prepare('SELECT id, email, phone, name FROM users WHERE id = ?').bind(user.ownerId).first();
+      return json({ role: 'staff', owner: owner ? { id: owner.id, email: owner.email, phone: owner.phone, name: owner.name || null } : null });
     }
-    const staff = await env.DB.prepare('SELECT id, email, phone, perms FROM users WHERE owner_id = ? ORDER BY created').bind(user.id).all();
+    const staff = await env.DB.prepare('SELECT id, email, phone, name, perms FROM users WHERE owner_id = ? ORDER BY created').bind(user.id).all();
     const invites = await env.DB.prepare(
       'SELECT code, expires FROM invites WHERE owner_id = ? AND used_by IS NULL AND expires > ? ORDER BY created DESC LIMIT 5',
     ).bind(user.id, Date.now()).all();
     return json({
       role: 'owner',
-      staff: (staff.results || []).map((s) => ({ id: s.id, email: s.email, phone: s.phone, perms: parsePerms(s.perms) })),
+      staff: (staff.results || []).map((s) => ({ id: s.id, email: s.email, phone: s.phone, name: s.name || null, perms: parsePerms(s.perms) })),
       invites: invites.results || [],
     });
   }
