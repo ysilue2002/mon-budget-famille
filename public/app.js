@@ -891,7 +891,7 @@ function journalModal() {
   if (isStaff()) return;
   let who = 'all';
   const d = modal(`<div class="sheetHead"><h2>${T('journal')}</h2><button type="button" class="sheetClose" id="jClose" aria-label="${T('close')}">✕</button></div>
-    <p class="hint">${T('journalHint')}</p><div class="big" id="jWho"></div>
+    <p class="hint">${T('journalHint')}</p><div class="chips" id="jWho"></div>
     <button class="btn out" id="jCsv">${T('journalCsv')}</button><div id="jList"></div>`);
   d.querySelector('#jClose').onclick = () => d.remove();
   d.querySelector('#jCsv').onclick = () => {
@@ -902,7 +902,7 @@ function journalModal() {
     const all = (db.log || []).slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
     const names = [...new Set(all.map((e) => e.by || ''))];
     d.querySelector('#jWho').innerHTML = `<button class="btn small ${who === 'all' ? '' : 'out'}" data-who="all">${T('all')}</button>`
-      + names.map((n) => `<button class="btn small ${who === n ? '' : 'out'}" data-who="${esc(n)}">${esc(n || T('owner'))}</button>`).join('');
+      + names.map((n) => `<button class="btn small ${who === n ? '' : 'out'}" data-who="${esc(n)}" title="${esc(n || T('owner'))}">${esc(n || T('owner'))}</button>`).join('');
     const list = all.filter((e) => who === 'all' || (e.by || '') === who).slice(0, 100);
     d.querySelector('#jList').innerHTML = list.map((e) => `<div class="row"><div><div class="t">${esc(T(ACT_LABEL[e.act] || e.act))}${Number(e.amount) > 0 ? ' · ' + money(e.amount) : ''}</div><div class="s">${dayFR(isoOf(e.at))} · ${esc(clock(e.at))}${e.label ? ' · ' + esc(e.label) : ''}</div></div><div class="right"><span class="tag">${esc(e.by || T('owner'))}</span></div></div>`).join('')
       || `<p class="empty">${T('noJournal')}</p>`;
@@ -990,7 +990,7 @@ async function reportPdf(monthKey) {
   if (journalRows.length) {
     section(T('journal'));
     journalRows.forEach((s) => {
-      row(`${s.name} (${s.n} ${T('actions')})`, `${s.sales} ${T('jSale')} · ${pm(s.salesAmount)}`);
+      row(`${s.name} (${s.n} ${s.n === 1 ? T('actionOne') : T('actionMany')})`, `${s.sales} ${T('jSale')} · ${pm(s.salesAmount)}`);
       if (s.expenses) row(`  ${T('expenses')}`, `${s.expenses} · ${pm(s.expensesAmount)}`);
     });
   }
