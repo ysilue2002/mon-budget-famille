@@ -502,9 +502,19 @@ function docs() {
     </div>`;
 }
 /* ---------------- Historique des ventes ---------------- */
+/* Un vendeur ne voit dans l'historique que les ventes qu'il a enregistrées.
+   Les ventes antérieures n'ont pas d'identifiant : on retombe sur le nom
+   saisi à l'encaissement. */
+function ownSaleOnly(s) {
+  if (!isStaff() || !me) return true;
+  if (s.byId) return s.byId === me.id;
+  const name = String(s.by || '').trim();
+  return !!name && (name === actorName() || name === lastSeller());
+}
 function histSales() {
   const term = String(histQuery || '').trim().toLowerCase();
   return db.sales.filter((s) => inPeriod(s.date, histPeriod))
+    .filter(ownSaleOnly)
     .filter((s) => histMethod === 'all' || s.method === histMethod)
     .filter((s) => histSeller === 'all' || String(s.by || '').trim() === histSeller)
     .filter((s) => !term || [s.party, s.product, s.method, s.by, s.date, dayFR(s.date), String(s.total), money(s.total)].join(' ').toLowerCase().includes(term))
@@ -548,6 +558,7 @@ function hist() {
       ${sellers.length ? `<label>${T('colSeller')}</label>
       <select id="histSeller"><option value="all">${T('allSellers')}</option>${sellers.map((n) => `<option value="${esc(n)}" ${n === histSeller ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
     </div>
+    ${isStaff() ? `<p class="hint">${T('histMineHint')}</p>` : ''}
     <div class="kpis" id="histSum">${histSummary(list)}</div>
     <div class="card" id="histList">${histListHTML(list, histShown)}</div>`;
 }
@@ -1469,6 +1480,9 @@ function saleModal(saleId) {
     /* Qui a vendu : un simple nom, retenu sur cet appareil pour ne pas le
        retaper à chaque vente. Vide = vente non attribuée. */
     sale.by = String(d.querySelector('#sBy').value || '').trim().slice(0, 40);
+    /* L'identifiant du compte rend le filtre par vendeur fiable, même si le
+       nom saisi change d'un appareil à l'autre. */
+    sale.byId = me && me.id ? me.id : '';
     try {
       if (sale.by) localStorage.setItem(SELLER_KEY, sale.by);
     } catch {
@@ -3047,12 +3061,13 @@ function purgeSecrets() {
       }
     }
   }
-  /* Journal : un vendeur garde les montants de ses propres actions (il les
-     connaît) ; ceux du patron et des autres vendeurs restent vides. */
-  for (const e of db.log || []) {
-    if (!e || typeof e !== 'object') continue;
-    if (e.byId && me && e.byId === me.id) continue;
-    if (e.amount !== null) { e.amount = null; changed = true; }
+  /* Journal : un vendeur ne garde que ses propres lignes. Le serveur ne les
+     envoie plus, mais un cache datant d'avant ce filtrage peut encore
+     contenir celles des autres : on les supprime dès le démarrage. */
+  if (me && Array.isArray(db.log)) {
+    const before = db.log.length;
+    db.log = db.log.filter((e) => e && typeof e === 'object' && e.byId === me.id);
+    if (db.log.length !== before) changed = true;
   }
   return changed;
 }
