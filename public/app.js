@@ -377,13 +377,13 @@ function clients() {
   const exps = pendingExpenses();
   return `<div class="kpis">
       <div class="kpi"><span>${T('cashOut')}</span><b>${money(totalDue() + invoiceDue())}</b></div>
-      <div class="kpi"><span>${T('debts')}</span><b>${money(totalDebt())}</b></div>
+      ${isStaff() ? '' : `<div class="kpi"><span>${T('debts')}</span><b>${money(totalDebt())}</b></div>`}
     </div>
     <div class="seg">
       <button class="${side === 'clients' ? 'on' : ''}" data-act="side" data-s="clients">${T('clients')}</button>
       <button class="${side === 'suppliers' ? 'on' : ''}" data-act="side" data-s="suppliers">${T('suppliers')}</button>
     </div>
-    <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
+    ${isStaff() ? '' : `<button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>`}
     ${side === 'clients' ? `
       ${unpaidInvoices().length ? `<div class="card"><h3>${T('unpaidInvoices')}</h3>
         ${remindQueue().length ? `<button class="btn out" data-act="bulkRemind">${T('bulkRemind')} (${remindQueue().length})</button>` : ''}
@@ -412,28 +412,29 @@ function clients() {
       </div>
 ` : `
       <div class="kpis">
-        <div class="kpi"><span>${T('totalPurchases')}</span><b>${money(supTotal)}</b></div>
-        <div class="kpi"><span>${T('debts')}</span><b>${money(supRest)}</b></div>
+        ${isStaff() ? '' : `<div class="kpi"><span>${T('totalPurchases')}</span><b>${money(supTotal)}</b></div>
+        <div class="kpi"><span>${T('debts')}</span><b>${money(supRest)}</b></div>`}
         <div class="kpi"><span>${T('notDelivered')}</span><b>${pendingRows().length + exps.length}</b></div>
       </div>
+      ${isStaff() ? `<p class="hint">${T('amountsHidden')}</p>` : ''}
       <div class="card"><h3>${T('debts')}</h3>
-        ${owedTo.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${T('totalPurchases')} ${money(x.total)} · ${T('paid')} ${money(x.paid)}${x.pend.length ? ` · ${x.pend.length} ${T('notDelivered').toLowerCase()}` : ''}</div></div><div class="right">
-          <span class="tag bad">${T('remains')} ${money(x.rest)}</span><br>
-          ${x.s.id ? `<button class="btn small" data-act="supDetail" data-id="${x.s.id}">${T('paySupplier')}</button>` : ''}
+        ${owedTo.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${isStaff() ? (x.pend.length ? `${x.pend.length} ${T('notDelivered').toLowerCase()}` : T('amountsHidden')) : `${T('totalPurchases')} ${money(x.total)} · ${T('paid')} ${money(x.paid)}${x.pend.length ? ` · ${x.pend.length} ${T('notDelivered').toLowerCase()}` : ''}`}</div></div><div class="right">
+          ${isStaff() ? '' : `<span class="tag bad">${T('remains')} ${money(x.rest)}</span><br>`}
+          ${x.s.id && !isStaff() ? `<button class="btn small" data-act="supDetail" data-id="${x.s.id}">${T('paySupplier')}</button>` : ''}
           ${x.s.phone ? `<button class="btn small whats" data-act="waSup" data-name="${esc(x.s.name)}">${T('whatsapp')}</button>` : ''}
         </div></div>`).join('') || `<p class="empty">${T('noSupDebt')}</p>`}
       </div>
       <div class="card"><h3>${T('goodsToReceive')}</h3>
-        ${toReceive.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${x.pend.map((d) => `${dayFR(d.date)} · ${money(d.amount)}`).join('<br>')}</div></div><div class="right">
+        ${toReceive.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${x.pend.map((d) => `${dayFR(d.date)}${isStaff() ? '' : ` · ${money(d.amount)}`}`).join('<br>')}</div></div><div class="right">
           ${x.pend.map((d) => `<button class="btn small out" data-act="deliverDebt" data-id="${d.id}">${T('markDelivered')}</button>`).join(' ')}
-          ${x.s.phone ? `<br><button class="btn small whats" data-act="waPending" data-name="${esc(x.s.name)}">${T('remind')}</button>` : ''}
+          ${x.s.phone && !isStaff() ? `<br><button class="btn small whats" data-act="waPending" data-name="${esc(x.s.name)}">${T('remind')}</button>` : ''}
         </div></div>`).join('')}
-        ${exps.map((e) => `<div class="row"><div><div class="t">${esc(e.label)}</div><div class="s">${dayFR(e.date)} · ${money(e.amount)}${e.note ? ' · ' + esc(e.note) : ''}</div></div><div class="right">${daysSince(e.date) >= 7 ? `<span class="tag bad">${daysSince(e.date)} ${T('days')}</span> ` : ''}<button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
+        ${exps.map((e) => `<div class="row"><div><div class="t">${esc(e.label)}</div><div class="s">${dayFR(e.date)}${isStaff() ? '' : ` · ${money(e.amount)}`}${e.note ? ' · ' + esc(e.note) : ''}</div></div><div class="right">${daysSince(e.date) >= 7 ? `<span class="tag bad">${daysSince(e.date)} ${T('days')}</span> ` : ''}<button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button></div></div>`).join('')}
         ${toReceive.length || exps.length ? '' : `<p class="empty">${T('noGoodsToReceive')}</p>`}
-        <button class="btn out" data-act="printPending">${T('printList')}</button>
+        ${isStaff() ? '' : `<button class="btn out" data-act="printPending">${T('printList')}</button>`}
       </div>
       <div class="card"><h3>${T('suppliersUpToDate')}</h3>
-        ${uptodate.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${x.last ? `${dayFR(x.last.date)} · ${money(x.total)}` : ''}</div></div><div class="right"><span class="tag ok">${T('paid')}</span> ${x.s.id ? `<button class="btn small" data-act="supDetail" data-id="${x.s.id}">${T('detail')}</button>` : ''}</div></div>`).join('') || `<p class="empty">${T('noUpToDate')}</p>`}
+        ${uptodate.map((x) => `<div class="row"><div><div class="t">${esc(x.s.name)}</div><div class="s">${x.last ? `${dayFR(x.last.date)}${isStaff() ? '' : ` · ${money(x.total)}`}` : ''}</div></div><div class="right"><span class="tag ok">${T('paid')}</span> ${x.s.id ? `<button class="btn small" data-act="supDetail" data-id="${x.s.id}">${T('detail')}</button>` : ''}</div></div>`).join('') || `<p class="empty">${T('noUpToDate')}</p>`}
       </div>
       <div class="card"><h3>${T('supplierList')}</h3>
         ${db.suppliers.map((s) => `<div class="row"><div><div class="t">${esc(s.name)}</div><div class="s">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
@@ -442,7 +443,7 @@ function clients() {
           <button class="btn small out" data-act="editSupplier" data-id="${s.id}">${T('edit')}</button>
           <button class="btn small out" data-act="delSupplier" data-id="${s.id}">${T('delete')}</button>
         </div></div>`).join('') || `<p class="empty">${T('noSuppliers')}</p>`}
-        <button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>
+        ${isStaff() ? '' : `<button class="btn out" data-act="exportContacts">${T('exportContacts')}</button>`}
       </div>
 `}`;
 }
@@ -805,7 +806,7 @@ function bilans() {
       <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(due + invDue)}</div></div>
       ${isStaff() ? '' : `<div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>`}
       <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
-      <div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>
+      ${isStaff() ? '' : `<div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>`}
     </div>
     ${rm.count ? `<div class="card">
       <h3>${T('remindStats')}</h3>
@@ -1161,27 +1162,32 @@ function pending() {
     }).join('') || `<p class="empty">${T('noPending')}</p>`}`;
 }
 function supplierDetail(id) {
+  /* Un vendeur n'a pas à voir les montants fournisseurs : la fiche montre les
+     livraisons et les dates, pas l'argent. */
   const s = db.suppliers.find((x) => x.id === id);
   if (!s) return;
+  const hide = isStaff();
   const list = db.debts.filter((d) => d.supplier === s.name).sort((a, b) => (a.date < b.date ? 1 : -1));
   const total = list.reduce((a, d) => a + (Number(d.amount) || 0), 0);
   const paid = list.reduce((a, d) => a + (Number(d.paid) || 0), 0);
   const rest = list.reduce((a, d) => a + debtOf(d), 0);
   const m = modal(`<h2>${esc(s.name)}</h2>
     <p class="hint">${[s.phone, s.address].filter(Boolean).map(esc).join(' · ') || '—'}</p>
-    <div class="kpis">
+    ${hide ? `<p class="hint">${T('amountsHidden')}</p>` : `<div class="kpis">
       <div class="kpi"><span>${T('totalPurchases')}</span><b>${money(total)}</b></div>
       <div class="kpi"><span>${T('paid')}</span><b>${money(paid)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(rest)}</b></div>
-    </div>
-    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)} · ${money(d.amount)}</div><div class="s">${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}</div></div><div class="right"><span class="tag">${payMode(d)}</span> ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}${debtOf(d) ? ` <button class="btn small" data-pay="${d.id}">${T('paySupplier')}</button>` : ''} <button class="btn small out" data-act="delDebt" data-id="${d.id}">${T('delete')}</button></div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
-    <button class="btn" id="sdPrint">${T('printSheet')}</button>
+    </div>`}
+    <div class="card">${list.map((d) => `<div class="row"><div><div class="t">${dayFR(d.date)}${hide ? '' : ` · ${money(d.amount)}`}</div><div class="s">${hide ? payMode(d) : `${T('paid')} ${money(d.paid || 0)} · ${T('remains')} ${money(debtOf(d))}`}</div></div><div class="right"><span class="tag">${payMode(d)}</span> ${d.delivered === false ? `<span class="tag warn">${T('notDelivered')}</span>` : `<span class="tag ok">${T('received')}</span>`}${debtOf(d) && !hide ? ` <button class="btn small" data-pay="${d.id}">${T('paySupplier')}</button>` : ''} ${hide ? '' : `<button class="btn small out" data-act="delDebt" data-id="${d.id}">${T('delete')}</button>`}</div></div>`).join('') || `<p class="empty">${T('noPurchases')}</p>`}</div>
+    ${hide ? '' : `<button class="btn" id="sdPrint">${T('printSheet')}</button>`}
     <button class="btn out" id="sdNo">${T('close')}</button>`);
   m.querySelector('#sdNo').onclick = () => m.remove();
-  m.querySelector('#sdPrint').onclick = () => { m.remove(); printSupplier(id); };
+  const sdPrint = m.querySelector('#sdPrint');
+  if (sdPrint) sdPrint.onclick = () => { m.remove(); printSupplier(id); };
   m.querySelectorAll('[data-pay]').forEach((b) => { b.onclick = () => { m.remove(); payDebtModal(b.dataset.pay); }; });
 }
 function printSupplier(id) {
+  if (isStaff()) return;
   const s = db.suppliers.find((x) => x.id === id);
   if (!s) return;
   const list = db.debts.filter((d) => d.supplier === s.name).sort((a, b) => (a.date < b.date ? 1 : -1));
