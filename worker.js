@@ -184,6 +184,75 @@ async function rememberState(env, userId, rev, json, updated) {
 /* Les données d'un vendeur sont celles de son patron. */
 const dataOwner = (user) => user.ownerId || user.id;
 
+/* Ce qu'un vendeur ne doit jamais recevoir : prix d'achat, marges, dépenses
+   et montants fournisseurs. On les vide à la lecture et on les rétablit
+   depuis l'état du patron à l'écriture, pour qu'une sauvegarde du vendeur ne
+   les efface pas. */
+const SECRET_FIELDS = {
+  products: ['buy'],
+  sales: ['cost'],
+  docs: ['cost'],
+  expenses: ['amount'],
+  withdrawals: ['amount'],
+  debts: ['amount', 'paid', 'pays'],
+};
+
+function maskState(text) {
+  let db;
+  try { db = JSON.parse(text || '{}'); } catch { return text; }
+  if (!db || typeof db !== 'object') return text;
+  for (const [key, fields] of Object.entries(SECRET_FIELDS)) {
+    const list = db[key];
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || typeof item !== 'object') continue;
+      for (const field of fields) if (field in item) item[field] = null;
+    }
+  }
+  return JSON.stringify(db);
+}
+
+function restoreMasked(storedText, incomingText) {
+  let stored;
+  let incoming;
+  try { stored = JSON.parse(storedText || '{}'); incoming = JSON.parse(incomingText || '{}'); } catch { return incomingText; }
+  if (!stored || !incoming || typeof incoming !== 'object') return incomingText;
+  const buyOf = new Map();
+  if (Array.isArray(stored.products)) {
+    for (const p of stored.products) if (p && p.id) buyOf.set(String(p.id), Math.max(0, Number(p.buy) || 0));
+  }
+  for (const [key, fields] of Object.entries(SECRET_FIELDS)) {
+    const mine = incoming[key];
+    if (!Array.isArray(mine)) continue;
+    const theirs = Array.isArray(stored[key]) ? stored[key] : [];
+    const byId = new Map(theirs.filter((x) => x && x.id).map((x) => [String(x.id), x]));
+    for (let i = mine.length - 1; i >= 0; i--) {
+      const item = mine[i];
+      if (!item || typeof item !== 'object') continue;
+      const source = item.id ? byId.get(String(item.id)) : null;
+      if (source) {
+        for (const field of fields) if (field in source) item[field] = source[field];
+        continue;
+      }
+      /* Élément créé par le vendeur : le coût d'une vente se recalcule avec le
+         prix d'achat du patron. Une dépense, un prélèvement ou un achat sans
+         montant ne peut pas venir de son écran : on ne l'enregistre pas. */
+      if (key === 'sales') {
+        const pid = String(item.pid || '');
+        if (pid && buyOf.has(pid)) {
+          item.cost = (Number(item.qty) || 0) * buyOf.get(pid);
+          item.costKnown = true;
+        } else {
+          item.cost = 0;
+        }
+        continue;
+      }
+      if (key === 'expenses' || key === 'withdrawals' || key === 'debts') mine.splice(i, 1);
+    }
+  }
+  return JSON.stringify(incoming);
+}
+
 async function api(request, env, url) {
   const path = url.pathname.replace(/\/+$/, '');
 
@@ -467,7 +536,9 @@ async function api(request, env, url) {
 
   if (path === '/api/data' && request.method === 'GET') {
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
-    return json(row ? { json: row.json, rev: row.rev, updated: row.updated } : { json: null, rev: 0, updated: 0 });
+    if (!row) return json({ json: null, rev: 0, updated: 0 });
+    const body = user.ownerId ? maskState(row.json) : row.json;
+    return json({ json: body, rev: row.rev, updated: row.updated });
   }
 
   if (path === '/api/data/history' && request.method === 'GET') {
@@ -478,6 +549,7 @@ async function api(request, env, url) {
   }
 
   if (path === '/api/data/restore' && request.method === 'POST') {
+    if (user.ownerId) return json({ error: 'owner' }, 403);
     const body = await readBody(request);
     const id = Number(body.id) || 0;
     const version = await env.DB.prepare('SELECT json, rev, updated FROM state_history WHERE user_id = ? AND id = ?').bind(dataOwner(user), id).first();
@@ -496,11 +568,14 @@ async function api(request, env, url) {
     const body = await readBody(request);
     const incoming = Number(body.updated) || 0;
     const incomingRev = Number(body.rev) || 0;
-    const payload = typeof body.json === 'string' ? body.json : JSON.stringify(body.json || {});
+    const rawPayload = typeof body.json === 'string' ? body.json : JSON.stringify(body.json || {});
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     if (row && row.rev > incomingRev) {
-      return json({ saved: false, json: row.json, rev: row.rev, updated: row.updated });
+      return json({ saved: false, json: user.ownerId ? maskState(row.json) : row.json, rev: row.rev, updated: row.updated });
     }
+    /* Le vendeur envoie un état où les valeurs sensibles sont vides : on
+       remet celles du patron avant d'écrire. */
+    const payload = user.ownerId && row ? restoreMasked(row.json, rawPayload) : rawPayload;
     /* La version écrasée est conservée avant écriture : c'est le filet de
        sécurité si une synchronisation remplace un état par erreur. */
     if (row && row.json !== payload) await rememberState(env, dataOwner(user), row.rev, row.json, row.updated);

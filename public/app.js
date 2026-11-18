@@ -307,8 +307,8 @@ function vendre() {
   const ca = t.reduce((a, s) => a + s.total, 0);
   const list = [
     ...t.map((s) => `<div class="row"><div><div class="t">${T('sale')} ${money(s.total)}</div><div class="s">${esc(methodLabel(s.method))}${s.party ? ' · ' + esc(s.party) : ''}${s.by ? ' · ' + esc(s.by) : ''}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}</div></div><div class="right">${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br><button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button><button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button></div></div>`),
-    ...db.expenses.filter((e) => e.date === todayISO()).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(methodLabel(e.method))}</div></div><div class="right">${e.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button>` : ''}<button class="btn small out" data-act="editExpense" data-id="${e.id}">${T('edit')}</button></div></div>`),
-    ...db.withdrawals.filter((w) => w.date === todayISO()).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
+    ...(isStaff() ? [] : db.expenses.filter((e) => e.date === todayISO())).map((e) => `<div class="row"><div><div class="t">${T('expense')} ${money(e.amount)}</div><div class="s">${esc(e.label)}${e.note ? ' · ' + esc(e.note) : ''} · ${esc(methodLabel(e.method))}</div></div><div class="right">${e.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span><button class="btn small out" data-act="deliverExpense" data-id="${e.id}">${T('markSaleDelivered')}</button>` : ''}<button class="btn small out" data-act="editExpense" data-id="${e.id}">${T('edit')}</button></div></div>`),
+    ...(isStaff() ? [] : db.withdrawals.filter((w) => w.date === todayISO())).map((w) => `<div class="row"><div><div class="t">${T('withdraw')} ${money(w.amount)}</div><div class="s">${T('withdraw')}</div></div></div>`),
   ].join('');
   const forgotten = forgottenInvoices();
   return `<div class="kpis">
@@ -325,9 +325,9 @@ function vendre() {
     ${autoMailNote()}
     <div class="big">
       <button class="btn" data-act="sale">＋ ${T('sell')}</button>
-      <button class="btn out" data-act="expense">− ${T('expense')}</button>
+      ${isStaff() ? '' : `<button class="btn out" data-act="expense">− ${T('expense')}</button>`}
     </div>
-    <button class="btn out" data-act="withdraw">${T('withdraw')}</button>
+    ${isStaff() ? '' : `<button class="btn out" data-act="withdraw">${T('withdraw')}</button>`}
     <div class="card" style="margin-top:16px"><h3 style="display:flex;justify-content:space-between;align-items:center;gap:8px">${T('today')}<button class="btn small out" data-act="hist">${T('history')}</button></h3>${list || `<p class="empty">${T('nothing')}</p>`}</div>`;
 }
 
@@ -795,17 +795,17 @@ function bilans() {
     <div class="kpis">
       <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
-      <div class="kpi"><span>${T('expenses')}</span><b>${money(dep)}</b></div>
+      ${isStaff() ? '' : `<div class="kpi"><span>${T('expenses')}</span><b>${money(dep)}</b></div>`}
       ${isStaff() ? '' : `<div class="kpi"><span>${unknownCost.length ? T('profitEstimated') : T('profit')}</span><b>${money(profit)}</b></div>`}
     </div>
     ${!isStaff() && unknownCost.length ? `<div class="card" style="border-color:#f3d08a;background:#fffaeb"><p class="hint" style="margin:0">${T('profitUnknownHint')} <b>${unknownCost.length}</b> ${T('salesNoCost')}</p><button class="btn out" data-act="hist">${T('fixSalesCost')}</button></div>` : ''}
     <div class="card">
       ${isStaff() ? '' : `<div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>`}
-      <div class="row"><div class="t">${T('goodsPurchases')}</div><div class="t">${money(purchases)}</div></div>
+      ${isStaff() ? '' : `<div class="row"><div class="t">${T('goodsPurchases')}</div><div class="t">${money(purchases)}</div></div>`}
       <div class="row"><div class="t">${T('invoicesInRevenue')}</div><div class="t">${money(inv)}</div></div>
       <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(due + invDue)}</div></div>
       ${isStaff() ? '' : `<div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>`}
-      <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
+      ${isStaff() ? '' : `<div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>`}
       ${isStaff() ? '' : `<div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>`}
     </div>
     ${rm.count ? `<div class="card">
@@ -1391,6 +1391,9 @@ function saleModal(saleId) {
 }
 const EXPENSE_LABELS = ['Transport', 'Loyer', 'Électricité', 'Salaire', 'Marchandise', 'Autre'];
 function expenseModal(id) {
+  /* Les dépenses et les achats fournisseurs sont réservés au patron : ce qui
+     entre dans la boutique, ce qui en sort et à quel prix. */
+  if (isStaff()) return;
   const src = id ? db.expenses.find((x) => x.id === id) : null;
   const labels = [...new Set([...EXPENSE_LABELS, ...(src && !EXPENSE_LABELS.includes(src.label) ? [src.label] : [])])];
   const linked = src ? db.debts.find((x) => x.expenseId === src.id) : null;
@@ -2076,6 +2079,7 @@ document.addEventListener('click', async (e) => {
   if (act === 'period') { period = b.dataset.p; render(); }
   if (act === 'expense') expenseModal();
   if (act === 'withdraw') {
+    if (isStaff()) return;
     const d = modal(`<h2>${T('withdraw')}</h2><p class="hint">${T('profitHint')}</p>
       <label>${T('amount')}</label><input id="wAmt" inputmode="numeric">
       <button class="btn" id="wOk">${T('saveWithdraw')}</button><button class="btn out" id="wNo">${T('cancel')}</button><p class="err" id="wErr"></p>`);
