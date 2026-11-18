@@ -339,11 +339,11 @@ function stock() {
       <div class="kpi"><span>${T('toRenew')}</span><b>${p.filter((x) => qtyOf(x) <= x.alert).length}</b></div>
     </div>
     <div class="card"><h3>${T('articles')}</h3>
-      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)} ${costKnownOf(x.buy) ? '' : `<span class="tag warn">${T('buyZero')}</span>`}</div><div class="s">${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button><button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button></div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
+      ${p.map((x) => { const q = qtyOf(x); return `<div class="row"><div><div class="t">${esc(x.name)} ${!isStaff() && !costKnownOf(x.buy) ? `<span class="tag warn">${T('buyZero')}</span>` : ''}</div><div class="s">${isStaff() ? `${T('sellPrice')} ${money(x.sell)}` : `${T('buyPrice')} ${money(x.buy)} · ${T('sellPrice')} ${money(x.sell)} · ${T('margin')} ${money(x.sell - x.buy)}`}</div></div>    <div class="right">${q <= 0 ? `<span class="tag bad">${T('outOfStock')}</span>` : q <= x.alert ? `<span class="tag warn">${T('left')} ${q}</span>` : `<span class="tag">${q}</span>`}<br><button class="btn small out" data-act="editProduct" data-id="${x.id}">${T('edit')}</button><button class="btn small out" data-act="delProduct" data-id="${x.id}">${T('delete')}</button></div></div>`; }).join('') || `<p class="empty">${T('noArticles')}</p>`}
     </div>
     <div class="card"><h3>${T('addArticle')}</h3>
       <label>${T('name')}</label><input id="pName" placeholder="Savon">
-      <label>${T('buyPrice')}</label><input id="pBuy" inputmode="numeric" placeholder="0">
+      ${isStaff() ? '' : `<label>${T('buyPrice')}</label><input id="pBuy" inputmode="numeric" placeholder="0">`}
       <label>${T('sellPrice')}</label><input id="pSell" inputmode="numeric" placeholder="0">
       <label>${T('qty')}</label><input id="pQty" inputmode="numeric" value="0">
       <label>${T('alertAt')}</label><input id="pAlert" inputmode="numeric" value="3">
@@ -790,20 +790,20 @@ function bilans() {
   const chip = (p, label) => `<button class="btn ${period === p ? '' : 'out'}" data-act="period" data-p="${p}">${label}</button>`;
   return `<div class="card"><h3>${T('period')}</h3><div class="big">
       ${chip('jour', T('today'))}${chip('mois', T('thisMonth'))}${chip('annee', T('thisYear'))}${chip('tout', T('all'))}
-    </div><button class="btn out" data-act="hist">${T('history')}</button><button class="btn out" data-act="report">${T('monthlyReport')}</button></div>
+    </div><button class="btn out" data-act="hist">${T('history')}</button>${isStaff() ? '' : `<button class="btn out" data-act="report">${T('monthlyReport')}</button>`}</div>
     <div class="kpis">
       <div class="kpi"><span>${T('revenue')}</span><b>${money(ca)}</b></div>
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
       <div class="kpi"><span>${T('expenses')}</span><b>${money(dep)}</b></div>
-      <div class="kpi"><span>${unknownCost.length ? T('profitEstimated') : T('profit')}</span><b>${money(profit)}</b></div>
+      ${isStaff() ? '' : `<div class="kpi"><span>${unknownCost.length ? T('profitEstimated') : T('profit')}</span><b>${money(profit)}</b></div>`}
     </div>
-    ${unknownCost.length ? `<div class="card" style="border-color:#f3d08a;background:#fffaeb"><p class="hint" style="margin:0">${T('profitUnknownHint')} <b>${unknownCost.length}</b> ${T('salesNoCost')}</p><button class="btn out" data-act="hist">${T('fixSalesCost')}</button></div>` : ''}
+    ${!isStaff() && unknownCost.length ? `<div class="card" style="border-color:#f3d08a;background:#fffaeb"><p class="hint" style="margin:0">${T('profitUnknownHint')} <b>${unknownCost.length}</b> ${T('salesNoCost')}</p><button class="btn out" data-act="hist">${T('fixSalesCost')}</button></div>` : ''}
     <div class="card">
-      <div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>
+      ${isStaff() ? '' : `<div class="row"><div class="t">${T('cogs')}</div><div class="t">${money(cogs)}</div></div>`}
       <div class="row"><div class="t">${T('goodsPurchases')}</div><div class="t">${money(purchases)}</div></div>
       <div class="row"><div class="t">${T('invoicesInRevenue')}</div><div class="t">${money(inv)}</div></div>
       <div class="row"><div class="t">${T('uncollected')}</div><div class="t">${money(due + invDue)}</div></div>
-      <div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>
+      ${isStaff() ? '' : `<div class="row"><div class="t">${T('stockValue')}</div><div class="t">${money(stockValue())}</div></div>`}
       <div class="row"><div class="t">${T('withdrawals')}</div><div class="t">${money(wd)}</div></div>
       <div class="row"><div class="t">${T('debts')}</div><div class="t">${money(totalDebt())}</div></div>
     </div>
@@ -815,7 +815,7 @@ function bilans() {
       <p class="hint">${T('remindStatsHint')}</p>
     </div>` : ''}
     ${remindJournal()}
-    <p class="hint">${T('profitHint')}</p>
+    ${isStaff() ? '' : `<p class="hint">${T('profitHint')}</p>`}
     ${invoices.length ? `<p class="hint">${T('invoiceNoCostHint')}</p>` : ''}`;
 }
 
@@ -1000,7 +1000,7 @@ function productModal(id) {
   const q = qtyOf(p);
   const m = modal(`<h2>${T('editArticle')}</h2>
     <label>${T('name')}</label><input id="epName" value="${esc(p.name)}">
-    <label>${T('buyPrice')}</label><input id="epBuy" inputmode="numeric" value="${esc(p.buy)}">
+    ${isStaff() ? '' : `<label>${T('buyPrice')}</label><input id="epBuy" inputmode="numeric" value="${esc(p.buy)}">`}
     <label>${T('sellPrice')}</label><input id="epSell" inputmode="numeric" value="${esc(p.sell)}">
     <label>${T('qty')}</label><input id="epQty" inputmode="numeric" value="${esc(q)}">
     <label>${T('alertAt')}</label><input id="epAlert" inputmode="numeric" value="${esc(p.alert)}">
@@ -1011,7 +1011,8 @@ function productModal(id) {
     if (!name) { m.querySelector('#epErr').textContent = T('badBusiness'); return; }
     const newQty = Math.max(0, Math.round(+m.querySelector('#epQty').value || 0));
     p.name = name;
-    p.buy = Math.round(+m.querySelector('#epBuy').value || 0);
+    /* Un vendeur ne voit pas le prix d'achat : on garde celui déjà enregistré. */
+    p.buy = isStaff() ? Math.max(0, Number(p.buy) || 0) : Math.round(+m.querySelector('#epBuy').value || 0);
     p.sell = Math.round(+m.querySelector('#epSell').value || 0);
     p.alert = Math.round(+m.querySelector('#epAlert').value || 0);
     p.u = Date.now();
@@ -1250,7 +1251,7 @@ function saleModal(saleId) {
     <label>${T('product')}</label><select id="sProduct"><option value="">${T('none')}</option>${db.products.map((p) => `<option value="${p.id}" ${src && src.pid === p.id ? 'selected' : ''}>${esc(p.name)} (${qtyOf(p) + (src && src.pid === p.id ? src.qty : 0)})</option>`).join('')}</select>
     <p class="hint" id="sCostWarn" style="display:none;color:#b45309;font-weight:600">${T('costZeroWarn')}</p>
     <label>${T('qtySold')}</label><input id="sQty" inputmode="numeric" value="${src && src.product ? esc(src.qty) : 1}">
-    <div id="sCostBox" style="display:${src && src.product ? 'none' : 'block'}">
+    <div id="sCostBox" style="display:${isStaff() || (src && src.product) ? 'none' : 'block'}">
       <label>${T('costOptional')}</label><input id="sCost" inputmode="numeric" placeholder="0" value="${src && !src.product && src.cost ? esc(src.cost) : ''}">
       <p class="hint">${T('costHint')}</p>
     </div>
@@ -1276,7 +1277,7 @@ function saleModal(saleId) {
   /* Un article acheté à 0 rend le bénéfice faux : on le dit avant d'enregistrer. */
   const warnZeroCost = () => {
     const p = db.products.find((x) => x.id === prodSel.value);
-    costWarn.style.display = p && !costKnownOf(p.buy) ? 'block' : 'none';
+    costWarn.style.display = !isStaff() && p && !costKnownOf(p.buy) ? 'block' : 'none';
   };
   prodSel.onchange = () => { costBox.style.display = prodSel.value ? 'none' : 'block'; warnZeroCost(); };
   warnZeroCost();
@@ -1327,7 +1328,8 @@ function saleModal(saleId) {
         if (!total) total = qty * p.sell;
       }
     } else {
-      cost = Math.max(0, Math.round(+d.querySelector('#sCost').value || 0));
+      /* Sans prix d'achat à l'écran, on garde le coût déjà connu de la vente. */
+      cost = isStaff() ? Math.max(0, Number(src && src.cost) || 0) : Math.max(0, Math.round(+d.querySelector('#sCost').value || 0));
     }
     const costKnown = costKnownOf(cost);
     /* L'acompte saisi à la vente est ce que le client paie tout de suite ; le
@@ -2085,7 +2087,10 @@ document.addEventListener('click', async (e) => {
     const id = uid();
     const qty = Math.round(+document.getElementById('pQty').value || 0);
     const now = Date.now();
-    db.products.push({ id, name, buy: Math.round(+document.getElementById('pBuy').value || 0), sell: Math.round(+document.getElementById('pSell').value || 0), qty, alert: Math.round(+document.getElementById('pAlert').value || 0), u: now });
+    /* Sans champ prix d'achat (vendeur), l'article part à 0 : le patron le
+       complètera, et le bénéfice reste marqué « estimé » en attendant. */
+    const buyField = document.getElementById('pBuy');
+    db.products.push({ id, name, buy: buyField ? Math.round(+buyField.value || 0) : 0, sell: Math.round(+document.getElementById('pSell').value || 0), qty, alert: Math.round(+document.getElementById('pAlert').value || 0), u: now });
     db.moves.push({ id: 'mv-' + id, pid: id, delta: qty, u: now });
     saveDB(); render();
   }
@@ -2442,7 +2447,10 @@ async function loadTeam(box) {
   });
   box.querySelector('#teamJoinBtn').onclick = async () => {
     const code = box.querySelector('#teamCodeIn').value.trim().toUpperCase();
+    /* Rejoindre masque les données déjà saisies : on prévient avant, pas après. */
+    if (!code || !confirm(T('teamJoinWarn'))) return;
     const res = await api('/api/staff/join', 'POST', { code });
+    if (res.status === 429) { alert(T('teamJoinSlow')); return; }
     if (!res.ok) { alert(T('teamJoinError')); return; }
     location.reload();
   };

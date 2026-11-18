@@ -429,6 +429,14 @@ async function api(request, env, url) {
     const user = await currentUser(request, env);
     if (!user) return json({ error: 'auth' }, 401);
     if (user.ownerId) return json({ error: 'already' }, 409);
+    /* Un code à 6 caractères se devine : on limite les essais par compte et
+       par adresse, sans jamais révéler si le code existe. */
+    const ip = request.headers.get('cf-connecting-ip') || 'local';
+    if ((await blocked(env, 'join:' + user.id, 10)) || (await blocked(env, 'joinip:' + ip, 30))) {
+      return json({ error: 'slow' }, 429);
+    }
+    await tooMany(env, 'join:' + user.id, 10, 15 * 60000);
+    await tooMany(env, 'joinip:' + ip, 30, 15 * 60000);
     const body = await readBody(request);
     const code = String(body.code || '').trim().toUpperCase();
     if (!/^[A-Z0-9]{6}$/.test(code)) return json({ error: 'code' }, 400);
