@@ -351,8 +351,10 @@ function vendre() {
 /* ---------------- Stock ---------------- */
 function stock() {
   const p = [...db.products].sort((a, b) => a.name.localeCompare(b.name));
+  /* La valeur du stock repose sur les prix d'achat : masquée au vendeur, qui
+     verrait sinon un montant faux (achats inconnus de lui). */
   return `<div class="kpis">
-      <div class="kpi"><span>${T('stockValue')}</span><b>${money(stockValue())}</b></div>
+      ${isStaff() ? '' : `<div class="kpi"><span>${T('stockValue')}</span><b>${money(stockValue())}</b></div>`}
       <div class="kpi"><span>${T('toRenew')}</span><b>${p.filter((x) => qtyOf(x) <= x.alert).length}</b></div>
     </div>
     <div class="card"><h3>${T('articles')}</h3>

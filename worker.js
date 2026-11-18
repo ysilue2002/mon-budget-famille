@@ -191,10 +191,24 @@ const dataOwner = (user) => user.ownerId || user.id;
 const FULL_PERMS = { del: true, price: true };
 function parsePerms(raw) {
   if (!raw) return { ...FULL_PERMS };
+  if (typeof raw === 'object') return { del: raw.del !== false, price: raw.price !== false };
   try {
     const p = JSON.parse(raw);
     return { del: p.del !== false, price: p.price !== false };
   } catch { return { ...FULL_PERMS }; }
+}
+
+/* Identité renvoyée au client : le rôle et les droits doivent être connus dès
+   la connexion, sinon un vendeur est traité comme patron jusqu'au rechargement. */
+function publicUser(u) {
+  return {
+    id: u.id,
+    email: u.email || null,
+    phone: u.phone || null,
+    ownerId: u.ownerId || u.owner_id || null,
+    role: u.role || 'owner',
+    perms: parsePerms(u.perms),
+  };
 }
 
 /* Ce qu'un vendeur ne doit jamais recevoir : prix d'achat, marges, dépenses
@@ -320,7 +334,7 @@ async function api(request, env, url) {
     const pass = await pbkdf2(password, salt);
     await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, email || null, phone || null, phoneDigits, pass, salt, Date.now()).run();
     const cookie = await createSession(env, id);
-    return json({ user: { id, email: email || null, phone: phone || null } }, 200, { 'set-cookie': cookie });
+    return json({ user: publicUser({ id, email: email || null, phone: phone || null }) }, 200, { 'set-cookie': cookie });
   }
 
   if (path === '/api/login' && request.method === 'POST') {
@@ -353,7 +367,7 @@ async function api(request, env, url) {
     const hash = await pbkdf2(password, user.salt);
     if (!same(hash, user.pass)) { await tooMany(env, ipKey, 20, 15 * 60000); return json({ error: 'credentials' }, 401); }
     const cookie = await createSession(env, user.id);
-    return json({ user: { id: user.id, email: user.email, phone: user.phone } }, 200, { 'set-cookie': cookie });
+    return json({ user: publicUser(user) }, 200, { 'set-cookie': cookie });
   }
 
   if (path === '/api/forgot' && request.method === 'POST') {
@@ -495,7 +509,7 @@ async function api(request, env, url) {
     if (taken && taken.id !== user.id) return json({ error: 'exists' }, 409);
     await tooMany(env, 'email:' + user.id, 10, 60 * 60000);
     await env.DB.prepare('UPDATE users SET email = ? WHERE id = ?').bind(email, user.id).run();
-    return json({ ok: true, user: { id: user.id, email, phone: user.phone } });
+    return json({ ok: true, user: publicUser({ ...user, email }) });
   }
 
   /* ---------------- équipe ---------------- */
