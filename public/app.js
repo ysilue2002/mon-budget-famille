@@ -38,6 +38,12 @@ let side = 'clients';
 let period = 'mois';
 let draft = null;
 let adsClosed = false;
+/* Publicité (Google AdSense). Rien ne s'affiche tant que ce bloc est vide : la
+   case « Publicité » des Réglages montre alors un aperçu en pointillés pour
+   juger de la place. Pour passer aux vraies annonces, coller l'identifiant
+   d'éditeur (ca-pub-…) et les deux identifiants d'emplacement créés dans
+   AdSense. Sans identifiant, aucune requête ne part vers Google. */
+const ADS = { client: '', top: '', bottom: '' };
 let docQuery = '';
 let histQuery = '';
 let histMethod = 'all';
@@ -190,19 +196,59 @@ function render() {
   });
   const view = { vendre, stock, clients, docs, bilans, hist, pending }[tab]();
   const ads = adsHTML();
+  /* La bande fixe du bas recouvre le contenu : on réserve sa hauteur, et
+     seulement sur l'écran qui la porte. */
+  document.body.classList.toggle('adsOn', Boolean(tab === 'vendre' && ads.bottom));
   document.getElementById('app').innerHTML = sizeWarning() + (tab === 'vendre' ? ads.top : '') + view + (tab === 'vendre' ? ads.bottom : '');
   if (draft) document.getElementById('app').insertAdjacentHTML('beforeend', docForm());
   linkLabels(document.getElementById('app'));
+  fillAds();
 }
 
 /* ---------------- publicité (désactivée par défaut) ---------------- */
 function adsHTML() {
   const on = db.settings.ads && navigator.onLine;
   if (!on) return { top: '', bottom: '' };
+  const live = Boolean(ADS.client);
+  const unit = (slot) =>
+    `<ins class="adsbygoogle" style="display:block;min-height:90px" data-ad-client="${esc(ADS.client)}" data-ad-slot="${esc(slot)}" data-ad-format="auto" data-full-width-responsive="true"></ins>`;
   return {
-    top: `<div class="adsTop">${T('adsSlot')} · ${T('ads')}</div>`,
-    bottom: adsClosed ? '' : `<div class="adsBottom"><button data-act="closeAds">✕</button>${T('adsSlot')}</div>`,
+    top: live ? `<div class="adsTop live">${unit(ADS.top)}</div>` : `<div class="adsTop">${T('adsSlot')} · ${T('ads')}</div>`,
+    /* Une annonce réelle ne se ferme pas : seul l'aperçu en pointillés a une croix. */
+    bottom: live
+      ? `<div class="adsBottom live">${unit(ADS.bottom)}</div>`
+      : adsClosed
+        ? ''
+        : `<div class="adsBottom"><button data-act="closeAds">✕</button>${T('adsSlot')}</div>`,
   };
+}
+
+/* Le script AdSense ne se charge qu'une fois, et seulement si des annonces sont
+   réellement configurées : pas de requête vers Google pour rien. */
+function loadAdSense() {
+  if (document.querySelector('script[src*="adsbygoogle.js"]')) return;
+  const s = document.createElement('script');
+  s.async = true;
+  s.crossOrigin = 'anonymous';
+  s.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(ADS.client)}`;
+  document.head.appendChild(s);
+}
+
+/* Un seul push remplit tous les emplacements affichés : pousser une fois par
+   emplacement fait lever à AdSense « all ins already have ads ». On ne pousse
+   donc que s'il reste un emplacement neuf (un rendu recrée les nœuds). */
+function fillAds() {
+  if (!ADS.client || !db.settings.ads) return;
+  const empty = [...document.querySelectorAll('#app ins.adsbygoogle')].some(
+    (el) => !el.dataset.adStatus && !el.dataset.adsbygoogleStatus,
+  );
+  if (!empty) return;
+  loadAdSense();
+  try {
+    (window.adsbygoogle = window.adsbygoogle || []).push({});
+  } catch {
+    /* Un bloqueur de publicité fait échouer ce push : la page doit vivre. */
+  }
 }
 
 /* ---------------- Vendre ---------------- */
