@@ -114,6 +114,20 @@ let histMethod = 'all';
 let histPeriod = 'mois';
 /* Filtre par vendeur : les ventes gardent le nom saisi à l'encaissement. */
 let histSeller = 'all';
+/* Comptes vendeurs de la boutique, pour rattacher une vente ancienne : celles
+   saisies avant que l'application n'enregistre l'identifiant du compte. */
+let sellerIds = [];
+let sellerIdsAsked = false;
+async function loadSellerIds() {
+  if (isStaff() || sellerIdsAsked) return;
+  sellerIdsAsked = true;
+  const r = await api('/api/staff');
+  const staff = (r.ok && r.data && r.data.staff) || [];
+  sellerIds = staff
+    .map((u) => ({ id: u.id, name: u.name || u.email || u.phone || '' }))
+    .filter((u) => u.id && u.name);
+  if (sellerIds.length && tab === 'hist') render();
+}
 /* L'historique s'affiche par paliers : les totaux, les filtres et l'export
    continuent de porter sur la liste complète (histSales), pas sur les lignes visibles. */
 const HIST_PAGE = 50;
@@ -528,13 +542,22 @@ function histSummary(list) {
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(Math.max(0, ca - cash))}</b></div>`;
 }
+/* Sélecteur du patron sur une vente non attribuée : elle réapparaît ensuite
+   dans l'historique du vendeur choisi, sans retoucher le nom d'origine. */
+function attachSelect(s) {
+  if (isStaff() || s.byId || !sellerIds.length) return '';
+  return `<select data-attach="${s.id}" aria-label="${esc(T('attachSale'))}" style="margin-left:6px">
+    <option value="">${esc(T('attachSale'))}</option>
+    ${sellerIds.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}
+  </select>`;
+}
 function histRows(list) {
   return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div>      <div class="s">${dayFR(s.date)} · ${esc(methodLabel(s.method))}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}${s.by ? ' · ' + esc(s.by) : ''}</div></div><div class="right">
       ${s.delivered === false ? `<span class="tag warn">${T('saleNotDelivered')}</span> ` : ''}${creditOf(s) ? `<span class="tag warn">${T('remains')} ${money(creditOf(s))}</span>` : `<span class="tag ok">${T('paid')}</span>`}<br>
       ${s.delivered === false ? `<button class="btn small out" data-act="deliverSale" data-id="${s.id}">${T('markSaleDelivered')}</button>` : ''}
       <button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button>
       <button class="btn small pdf" data-act="receiptPdf" data-id="${s.id}">${T('pdf')}</button>
-      <button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button>
+      ${attachSelect(s)}<button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button>
     </div></div>`).join('') || `<p class="empty">${T('noSalesFound')}</p>`;
 }
 function histListHTML(list, shown) {
@@ -543,6 +566,7 @@ function histListHTML(list, shown) {
   return histRows(list.slice(0, n)) + `<div id="histMoreWrap">${more}</div>`;
 }
 function hist() {
+  loadSellerIds();
   const list = histSales();
   const chip = (p, label) => `<button class="btn ${histPeriod === p ? '' : 'out'}" data-act="histPeriod" data-p="${p}">${label}</button>`;
   const methods = [...new Set(db.sales.map((s) => s.method).filter(Boolean))];
@@ -1481,8 +1505,9 @@ function saleModal(saleId) {
        retaper à chaque vente. Vide = vente non attribuée. */
     sale.by = String(d.querySelector('#sBy').value || '').trim().slice(0, 40);
     /* L'identifiant du compte rend le filtre par vendeur fiable, même si le
-       nom saisi change d'un appareil à l'autre. */
-    sale.byId = me && me.id ? me.id : '';
+       nom saisi change d'un appareil à l'autre. Corriger la vente d'un vendeur
+       ne la lui vole pas : une attribution déjà enregistrée est conservée. */
+    sale.byId = src && src.byId ? src.byId : (me && me.id ? me.id : '');
     try {
       if (sale.by) localStorage.setItem(SELLER_KEY, sale.by);
     } catch {
@@ -3556,6 +3581,19 @@ document.addEventListener('input', (e) => {
   }
 });
 document.addEventListener('change', (e) => {
+  const attachId = e.target.dataset && e.target.dataset.attach;
+  if (attachId) {
+    const s = !isStaff() && db.sales.find((x) => x.id === attachId);
+    if (s) {
+      s.byId = e.target.value || '';
+      if (s.byId && !String(s.by || '').trim()) {
+        const u = sellerIds.find((x) => x.id === s.byId);
+        if (u) s.by = u.name;
+      }
+      s.u = Date.now();
+      saveDB(); render();
+    }
+  }
   if (e.target.id === 'histMethod') { histMethod = e.target.value; histShown = HIST_PAGE; render(); }
   if (e.target.id === 'histSeller') { histSeller = e.target.value; histShown = HIST_PAGE; render(); }
   if (e.target.id === 'dParty') {
