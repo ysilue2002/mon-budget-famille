@@ -19,6 +19,10 @@ const INCLUDED = /\.(html|css|js|webmanifest|png|svg|ico|woff2?)$/i;
 /* Fichiers figés (bibliothèques, icônes) : servis depuis le cache d'abord,
    ils ne changeront pas avant une nouvelle version du cache. */
 const CACHE_FIRST = /^(qrcode\.js|jspdf\.umd\.min\.js|icons\/)/;
+/* Icônes que seul le système lit, à l'installation ou à l'ajout à l'écran
+   d'accueil — toujours en ligne. Les précharger coûtait 450 Ko au premier
+   lancement pour des images que l'application n'affiche jamais. */
+const NOT_PRECACHED = new Set(['icons/icon-512.png', 'icons/icon-512-maskable.png']);
 
 function walk(dir, base = '') {
     return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -35,7 +39,7 @@ function listFiles(publicDir = PUBLIC) {
 }
 
 function listPrecache(publicDir = PUBLIC) {
-    const files = listFiles(publicDir);
+    const files = listFiles(publicDir).filter((f) => !NOT_PRECACHED.has(f));
     return { files, urls: ['./', ...files.map((f) => `./${f}`)] };
 }
 
@@ -51,7 +55,9 @@ function versionOf(files, publicDir = PUBLIC) {
 
 function build(publicDir = PUBLIC) {
     const { files, urls } = listPrecache(publicDir);
-    const version = versionOf(files, publicDir);
+    /* La version couvre aussi les icônes non préchargées : les changer doit
+       renouveler le cache. */
+    const version = versionOf(listFiles(publicDir), publicDir);
     const cacheFirst = urls.filter((u) => CACHE_FIRST.test(u.replace(/^\.\//, '')));
     const out = fs
         .readFileSync(TEMPLATE, 'utf8')

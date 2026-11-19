@@ -230,7 +230,7 @@ test('le bilan n’affiche qu’une seule ligne d’argent dehors', () => {
   const f = dansVm('figures("tout")');
   assert.equal(f.due, 1500, 'reste dû sur les ventes de la période');
   const html = dansVm('bilans()');
-  assert.equal((html.match(/Argent non encore encaissé/g) || []).length, 1, 'une seule ligne');
+  assert.equal((html.match(/On me doit encore/g) || []).length, 1, 'une seule ligne');
   assert.ok(!html.includes('Argent dehors'), 'le doublon est supprimé');
 });
 

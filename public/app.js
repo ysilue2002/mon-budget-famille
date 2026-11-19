@@ -3532,6 +3532,7 @@ function closeGate() { const g = document.getElementById('gate'); if (g) g.remov
 function afterGate() { closeGate(); askShop(); render(); loadMailStatus(); autoRemind(); }
 function showLangGate() {
   closeGate();
+  applyBigText();
   const g = document.createElement('div');
   g.id = 'gate';
   g.className = 'gate';
@@ -3541,7 +3542,15 @@ function showLangGate() {
     <button class="btn lang" data-lang="fr">Français</button>
     <button class="btn out lang" data-lang="en">English</button>
     <button class="btn out lang" data-lang="ar" dir="rtl">العربية</button>
-    <p class="hint">${T('chooseLangHint')}</p></div>`;
+    <p class="hint">${T('chooseLangHint')}</p>
+    <button class="btn out" id="langBig" aria-pressed="${bigTextOn()}">${bigTextOn() ? '✔ ' : ''}${esc(T('bigText'))}</button></div>`;
+  const bigBtn = g.querySelector('#langBig');
+  if (bigBtn) bigBtn.onclick = () => {
+    try { localStorage.setItem(BIG_KEY, bigTextOn() ? '0' : '1'); } catch {}
+    applyBigText();
+    bigBtn.textContent = (bigTextOn() ? '✔ ' : '') + T('bigText');
+    bigBtn.setAttribute('aria-pressed', String(bigTextOn()));
+  };
   document.body.appendChild(g);
   setBackgroundInert(true);
   g.querySelectorAll('[data-lang]').forEach((b) => {
