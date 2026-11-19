@@ -1,6 +1,6 @@
 /* GÉNÉRÉ par scripts/cache.js — ne pas modifier à la main.
    Modèle : scripts/sw.template.js. */
-const CACHE = 'assistant-commercial-a202483b94';
+const CACHE = 'assistant-commercial-9aa14acfec';
 const PRECACHE = [
   "./",
   "./app.js",
