@@ -118,6 +118,11 @@ let histSeller = 'all';
    saisies avant que l'application n'enregistre l'identifiant du compte. */
 let sellerIds = [];
 let sellerIdsAsked = false;
+/* Nom saisi à l'encaissement et nom de compte : comparaison sans casse ni
+   espaces superflus, pour ne pas rater « awa  vendeuse ». */
+const normName = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+/* Le bandeau du patron : une vente, ou plusieurs. */
+const looseSalesText = (n) => T(n === 1 ? 'unattachedSale' : 'unattachedSales').replace('{n}', String(n));
 async function loadSellerIds() {
   if (isStaff() || sellerIdsAsked) return sellerIds;
   sellerIdsAsked = true;
@@ -129,8 +134,28 @@ async function loadSellerIds() {
   sellerIds = staff
     .map((u) => ({ id: u.id, name: u.name || u.email || u.phone || '' }))
     .filter((u) => u.id && u.name);
+  if (!isStaff()) autoAttachSales();
   if (sellerIds.length && tab === 'hist') render();
   return sellerIds;
+}
+/* Reprise automatique : une vente sans identifiant dont le nom saisi est
+   exactement celui d'un compte vendeur lui est rattachée. Les autres restent
+   au patron, qui les rattache à la main. Ne déclenche pas de rendu : l'appel
+   vient d'un chargement qui rend juste après. */
+function autoAttachSales() {
+  if (isStaff() || !sellerIds.length) return 0;
+  const byName = new Map(sellerIds.map((u) => [normName(u.name), u.id]));
+  let n = 0;
+  for (const s of db.sales || []) {
+    if (!s || s.byId) continue;
+    const id = byName.get(normName(s.by));
+    if (!id) continue;
+    s.byId = id;
+    s.u = Date.now();
+    n += 1;
+  }
+  if (n) saveDB();
+  return n;
 }
 /* L'historique s'affiche par paliers : les totaux, les filtres et l'export
    continuent de porter sur la liste complète (histSales), pas sur les lignes visibles. */
@@ -571,6 +596,7 @@ function histListHTML(list, shown) {
 }
 function hist() {
   loadSellerIds();
+  const loose = sellerIds.length ? db.sales.filter((s) => s && !s.byId).length : 0;
   const list = histSales();
   const chip = (p, label) => `<button class="btn ${histPeriod === p ? '' : 'out'}" data-act="histPeriod" data-p="${p}">${label}</button>`;
   const methods = [...new Set(db.sales.map((s) => s.method).filter(Boolean))];
@@ -587,6 +613,7 @@ function hist() {
       <select id="histSeller"><option value="all">${T('allSellers')}</option>${sellers.map((n) => `<option value="${esc(n)}" ${n === histSeller ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
     </div>
     ${isStaff() ? `<p class="hint">${T('histMineHint')}</p>` : ''}
+    ${loose ? `<p class="hint">${esc(looseSalesText(loose))}</p>` : ''}
     <div class="kpis" id="histSum">${histSummary(list)}</div>
     <div class="card" id="histList">${histListHTML(list, histShown)}</div>`;
 }

@@ -230,7 +230,12 @@ const SECRET_FIELDS = {
   debts: ['amount', 'paid', 'pays'],
 };
 
-function maskState(text, viewerId = '') {
+/* Comparaison des noms saisis à l'encaissement : espaces et casse ignorés.
+   Une vente antérieure sans identifiant reste celle du vendeur qui porte ce
+   nom, sans quoi il perdrait tout son historique d'avant les comptes. */
+const normName = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+function maskState(text, viewerId = '', viewerNames = []) {
   let db;
   try { db = JSON.parse(text || '{}'); } catch { return text; }
   if (!db || typeof db !== 'object') return text;
@@ -247,8 +252,10 @@ function maskState(text, viewerId = '') {
      autres vendeurs ne quittent pas le serveur. Une vente antérieure, sans
      identifiant, reste au patron : il peut la rattacher à un vendeur. */
   const me = String(viewerId || '');
+  const myNames = new Set((Array.isArray(viewerNames) ? viewerNames : []).map(normName).filter(Boolean));
   if (Array.isArray(db.sales)) {
-    db.sales = db.sales.filter((s) => s && typeof s === 'object' && String(s.byId || '') === me);
+    db.sales = db.sales.filter((s) => s && typeof s === 'object'
+      && (String(s.byId || '') === me || (!s.byId && myNames.has(normName(s.by)))));
   }
   if (Array.isArray(db.log)) {
     db.log = db.log.filter((e) => e && typeof e === 'object' && String(e.byId || '') === me);
@@ -640,7 +647,7 @@ async function api(request, env, url) {
   if (path === '/api/data' && request.method === 'GET') {
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     if (!row) return json({ json: null, rev: 0, updated: 0 });
-    const body = user.ownerId ? maskState(row.json, user.id) : row.json;
+    const body = user.ownerId ? maskState(row.json, user.id, [user.name, user.email]) : row.json;
     return json({ json: body, rev: row.rev, updated: row.updated });
   }
 
@@ -674,7 +681,7 @@ async function api(request, env, url) {
     const rawPayload = typeof body.json === 'string' ? body.json : JSON.stringify(body.json || {});
     const row = await env.DB.prepare('SELECT json, rev, updated FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
     if (row && row.rev > incomingRev) {
-      return json({ saved: false, json: user.ownerId ? maskState(row.json, user.id) : row.json, rev: row.rev, updated: row.updated });
+      return json({ saved: false, json: user.ownerId ? maskState(row.json, user.id, [user.name, user.email]) : row.json, rev: row.rev, updated: row.updated });
     }
     /* Droits du vendeur : une suppression d'article ou un changement de prix
        de vente interdit est refusé en bloc. Le client se recale alors sur

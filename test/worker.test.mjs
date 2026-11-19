@@ -105,6 +105,17 @@ test('maskState ne renvoie au vendeur que ses propres ventes', () => {
   assert.deepEqual(out.sales.map((s) => s.id), ['s1']);
 });
 
+test('maskState garde au vendeur ses ventes anciennes reconnues par son nom', () => {
+  const state = etat();
+  state.sales.push({ id: 's2', total: 16000, by: '  Awa ', cost: 6000 });
+  state.sales.push({ id: 's3', total: 4000, by: 'Koffi', cost: 1000 });
+  const out = JSON.parse(maskState(JSON.stringify(state), SELLER, ['awa']));
+  assert.deepEqual(out.sales.map((s) => s.id), ['s1', 's2']);
+  /* Sans le nom du compte, la vente antérieure reste au patron. */
+  const strict = JSON.parse(maskState(JSON.stringify(state), SELLER));
+  assert.deepEqual(strict.sales.map((s) => s.id), ['s1']);
+});
+
 test('restoreMasked remet les ventes des autres comptes', () => {
   const stored = etat();
   stored.sales.push({ id: 's2', total: 16000, by: 'Patron', byId: OWNER, cost: 6000 });
