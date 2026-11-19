@@ -1,6 +1,6 @@
 /* GÉNÉRÉ par scripts/cache.js — ne pas modifier à la main.
    Modèle : scripts/sw.template.js. */
-const CACHE = 'assistant-commercial-e5c7418bc0';
+const CACHE = 'assistant-commercial-778408a155';
 const PRECACHE = [
   "./",
   "./app.js",
@@ -9,7 +9,6 @@ const PRECACHE = [
   "./icons/icon-192.png",
   "./icons/logo-header.png",
   "./index.html",
-  "./jspdf.umd.min.js",
   "./manifest.webmanifest",
   "./qrcode.js",
   "./style.css"
@@ -18,7 +17,6 @@ const CACHE_FIRST = [
   "./icons/apple-touch-icon.png",
   "./icons/icon-192.png",
   "./icons/logo-header.png",
-  "./jspdf.umd.min.js",
   "./qrcode.js"
 ];
 

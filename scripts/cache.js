@@ -22,7 +22,11 @@ const CACHE_FIRST = /^(qrcode\.js|jspdf\.umd\.min\.js|icons\/)/;
 /* Icônes que seul le système lit, à l'installation ou à l'ajout à l'écran
    d'accueil — toujours en ligne. Les précharger coûtait 450 Ko au premier
    lancement pour des images que l'application n'affiche jamais. */
-const NOT_PRECACHED = new Set(['icons/icon-512.png', 'icons/icon-512-maskable.png']);
+const NOT_PRECACHED = new Set([
+    'icons/icon-512.png',
+    'icons/icon-512-maskable.png',
+    'jspdf.umd.min.js', // chargé à la demande, puis gardé par le cache de service
+]);
 
 function walk(dir, base = '') {
     return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

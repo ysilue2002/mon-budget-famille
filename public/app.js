@@ -1051,7 +1051,9 @@ function reportModal() {
   m.querySelector('#rpOk').onclick = () => { const k = m.querySelector('#rpMonth').value; m.remove(); downloadReport(k); };
 }
 async function reportPdf(monthKey) {
-  const { jsPDF } = window.jspdf;
+  const lib = await loadJsPDF();
+  if (!lib) return alert(T('pdfNeedsNet'));
+  const { jsPDF } = lib;
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const f = figures('mois', monthKey);
   const st = db.settings || {};
@@ -1971,7 +1973,9 @@ function waSale(id) {
   waOpen(phone, receiptText(s));
 }
 async function receiptPdf(s) {
-  const { jsPDF } = window.jspdf;
+  const lib = await loadJsPDF();
+  if (!lib) return alert(T('pdfNeedsNet'));
+  const { jsPDF } = lib;
   const pdf = new jsPDF({ unit: 'mm', format: [80, 140] });
   const st = db.settings || {};
   let y = 10;
@@ -2104,6 +2108,22 @@ function printFormat(id, format) {
   area.innerHTML = docHTML(d, format);
   window.print();
 }
+/* jsPDF pèse 366 Ko et ne sert qu'aux PDF : on le télécharge au premier usage,
+   puis le service worker le garde pour les fois suivantes, même hors ligne. */
+let pdfLoad = null;
+function loadJsPDF() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf);
+  if (!pdfLoad) {
+    pdfLoad = new Promise((res) => {
+      const s = document.createElement('script');
+      s.src = 'jspdf.umd.min.js';
+      s.onload = () => res(window.jspdf || null);
+      s.onerror = () => { pdfLoad = null; res(null); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfLoad;
+}
 function imgSize(src) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -2113,7 +2133,9 @@ function imgSize(src) {
   });
 }
 async function docPdf(d) {
-  const { jsPDF } = window.jspdf;
+  const lib = await loadJsPDF();
+  if (!lib) return alert(T('pdfNeedsNet'));
+  const { jsPDF } = lib;
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const s = db.settings || {};
   const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
@@ -2739,6 +2761,8 @@ function settingsModal() {
   if (mailReady === null) loadMailStatus();
   let logoDraft = db.settings.logo || '';
   const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
+    <label>${T('language')}</label>
+    <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.id === 'en' ? 'English' : 'Français'}</option>`).join('')}</select>
     <details data-owner><summary>${T('secShop')}</summary>
     <label>${T('shopName')}</label><input id="setShop" value="${esc(db.shop)}">
     <label>${T('companyForm')}</label><select id="setForm">${formOptions(db.settings.companyForm || '')}</select>
@@ -2763,9 +2787,6 @@ function settingsModal() {
     <div id="logoPrev" style="margin-top:8px">${logoDraft ? `<img src="${esc(logoDraft)}" class="logoPrev" alt="">` : ''}</div>
     <button class="btn out" id="logoDel">${T('logoRemove')}</button>
     <p class="hint">${T('logoHint')}</p>
-    <label>${T('language')}</label>
-    <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
-
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
     <label>${T('invReminderText')}</label><textarea id="setInvRem" rows="6">${esc(invReminderTpl())}</textarea>
     <p class="hint">${T('invReminderHint')}</p>
