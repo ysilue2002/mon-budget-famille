@@ -118,8 +118,7 @@ let histSeller = 'all';
    saisies avant que l'application n'enregistre l'identifiant du compte. */
 let sellerIds = [];
 let sellerIdsAsked = false;
-/* Nom saisi à l'encaissement et nom de compte : comparaison sans casse ni
-   espaces superflus, pour ne pas rater « awa  vendeuse ». */
+/* Nom saisi et nom de compte : casse et espaces ignorés. */
 const normName = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
 /* Le bandeau du patron : une vente, ou plusieurs. */
 const looseSalesText = (n) => T(n === 1 ? 'unattachedSale' : 'unattachedSales').replace('{n}', String(n));
@@ -127,8 +126,6 @@ async function loadSellerIds() {
   if (isStaff() || sellerIdsAsked) return sellerIds;
   sellerIdsAsked = true;
   const r = await api('/api/staff');
-  /* Hors ligne, la liste reste à charger : le sélecteur apparaît au retour du
-     réseau, sans rechargement. */
   if (!r.ok || !r.data) { sellerIdsAsked = false; return sellerIds; }
   const staff = r.data.staff || [];
   sellerIds = staff
@@ -138,10 +135,6 @@ async function loadSellerIds() {
   if (sellerIds.length && tab === 'hist') render();
   return sellerIds;
 }
-/* Reprise automatique : une vente sans identifiant dont le nom saisi est
-   exactement celui d'un compte vendeur lui est rattachée. Les autres restent
-   au patron, qui les rattache à la main. Ne déclenche pas de rendu : l'appel
-   vient d'un chargement qui rend juste après. */
 function autoAttachSales() {
   if (isStaff() || !sellerIds.length) return 0;
   const byName = new Map(sellerIds.map((u) => [normName(u.name), u.id]));
@@ -288,8 +281,14 @@ function applyLang() {
   document.documentElement.dir = lang() === 'ar' ? 'rtl' : 'ltr';
   document.title = T('app');
 }
+const BIG_KEY = 'ac_bigtext';
+const bigTextOn = () => { try { return localStorage.getItem(BIG_KEY) === '1'; } catch { return false; } };
+function applyBigText() {
+  document.body.classList.toggle('bigText', bigTextOn());
+}
 function render() {
   applyLang();
+  applyBigText();
   document.getElementById('appName').textContent = T('app');
   document.getElementById('shopName').textContent = db.shop || T('shop');
   /* Logo de la boutique s'il a été chargé dans Réglages ; sinon le logo de
@@ -571,8 +570,6 @@ function histSummary(list) {
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(Math.max(0, ca - cash))}</b></div>`;
 }
-/* Attribution d'une ligne au vendeur qui l'a faite : une icône et un mot, puis
-   une liste de gros boutons. Rien à lire pour comprendre. */
 function assignButton(id, act) {
   if (isStaff() || !sellerIds.length) return '';
   return `<button class="btn small out" data-act="${act}" data-id="${id}">👤 ${esc(T('assign'))}</button>`;
@@ -581,8 +578,6 @@ function sellerPicker(onPick) {
   const d = modal(`<div class="sheetHead"><h2>${esc(T('assignTitle'))}</h2><button type="button" class="sheetClose" aria-label="${esc(T('close'))}">✕</button></div>
     ${sellerIds.map((u) => `<button class="btn out" data-pick="${esc(u.id)}">👤 ${esc(u.name)}</button>`).join('')}
     <button class="btn out" data-pick="none">${esc(T('assignNobody'))}</button>`);
-  /* La croix ferme sans rien changer : seule « Aucun vendeur » retire
-     l'attribution. */
   const close = d.querySelector('.sheetClose');
   if (close) close.onclick = () => d.remove();
   d.addEventListener('click', (ev) => {
@@ -978,9 +973,7 @@ function journalModal() {
   /* Le patron voit tout et filtre par vendeur ; un vendeur ne voit que ses
      propres actions, avec leurs montants (le serveur masque les autres). */
   const staff = isStaff();
-  /* Un ancien nom peut être une adresse e-mail (d'avant les noms de compte) :
-     on affiche le nom du compte quand on le connaît, sinon un mot simple.
-     Personne n'a à lire « vendeur-mwm6y3i9@exemple.com » sur son écran. */
+  /* Un ancien nom est parfois une e-mail : on affiche le nom du compte. */
   const byName = (e) => {
     const id = e && e.byId ? String(e.byId) : '';
     const mine = me && me.id === id ? me.name : '';
@@ -2772,6 +2765,7 @@ function settingsModal() {
     <p class="hint">${T('logoHint')}</p>
     <label>${T('language')}</label>
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.label}</option>`).join('')}</select>
+
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
     <label>${T('invReminderText')}</label><textarea id="setInvRem" rows="6">${esc(invReminderTpl())}</textarea>
     <p class="hint">${T('invReminderHint')}</p>
@@ -2795,6 +2789,7 @@ function settingsModal() {
     <div id="teamBox"><p class="hint">…</p></div>
     </details>
     <details><summary>${T('secAccount')}</summary>
+    <label style="display:flex;gap:10px;align-items:center;min-height:44px;cursor:pointer"><input type="checkbox" id="setBigText" ${bigTextOn() ? 'checked' : ''} style="width:24px;height:24px"><span>${T('bigText')}</span></label>
     ${accountHTML()}
     ${me ? `<h3 style="margin-top:16px">${T('changePassword')}</h3>
       <label>${T('currentPassword')}</label><input id="pwCur" type="password" autocomplete="current-password">
@@ -2896,6 +2891,12 @@ function settingsModal() {
       const box = d.querySelector('#acMailFlag');
       if (box) box.innerHTML = mailFlagHTML();
     }
+  };
+  /* Taille de texte : réglage de l'appareil, ouvert aussi aux vendeurs. */
+  const bigCb = d.querySelector('#setBigText');
+  if (bigCb) bigCb.onchange = () => {
+    try { localStorage.setItem(BIG_KEY, bigCb.checked ? '1' : '0'); } catch {}
+    applyBigText();
   };
   d.querySelector('#setOk').onclick = () => {
     db.shop = d.querySelector('#setShop').value.trim();
@@ -3171,11 +3172,6 @@ function purgeSecrets() {
       }
     }
   }
-  /* Ventes et journal : un vendeur ne garde que son propre travail. Le serveur
-     ne l'envoie plus, mais un cache datant d'avant ce filtrage peut encore
-     contenir celui des autres : on le supprime dès le démarrage. Une vente
-     antérieure sans identifiant est effacée aussi ; le patron peut la
-     rattacher, elle reviendra alors à la synchronisation suivante. */
   if (me && Array.isArray(db.sales)) {
     const before = db.sales.length;
     db.sales = db.sales.filter((s) => s && s.byId === me.id);
@@ -3560,6 +3556,7 @@ function showLangGate() {
   });
 }
 function showAuthGate() {
+  applyBigText();
   closeGate();
   const g = document.createElement('div');
   g.id = 'gate';
@@ -3592,8 +3589,10 @@ function showAuthGate() {
          <label>${T('country')}</label><select id="gCountry">${countryOptions(db.settings.country || 'CI')}</select>
          <p class="hint">${T('currency')} : <b id="gCur">${currencyFor(db.settings.country || 'CI')}</b></p>
          <label>${T('city')}</label><input id="gCity" autocomplete="address-level2">
+         <details><summary>${T('moreInfo')}</summary>
          <label>${T('district')}</label><input id="gDistrict">
          <label>${T('address')}</label><input id="gAddress" autocomplete="street-address">
+         </details>
          <button class="btn" id="gGo">${T('createAccount')}</button><p class="err" id="gErr"></p>`
       : `<label>${T('loginId')}</label><input id="gLoginId" type="text" autocomplete="username" placeholder="awa@exemple.com / +225 07 00 00 00 00">
          <label>${T('password')}</label><input id="gPass" type="password" autocomplete="current-password">
