@@ -119,14 +119,18 @@ let histSeller = 'all';
 let sellerIds = [];
 let sellerIdsAsked = false;
 async function loadSellerIds() {
-  if (isStaff() || sellerIdsAsked) return;
+  if (isStaff() || sellerIdsAsked) return sellerIds;
   sellerIdsAsked = true;
   const r = await api('/api/staff');
-  const staff = (r.ok && r.data && r.data.staff) || [];
+  /* Hors ligne, la liste reste à charger : le sélecteur apparaît au retour du
+     réseau, sans rechargement. */
+  if (!r.ok || !r.data) { sellerIdsAsked = false; return sellerIds; }
+  const staff = r.data.staff || [];
   sellerIds = staff
     .map((u) => ({ id: u.id, name: u.name || u.email || u.phone || '' }))
     .filter((u) => u.id && u.name);
   if (sellerIds.length && tab === 'hist') render();
+  return sellerIds;
 }
 /* L'historique s'affiche par paliers : les totaux, les filtres et l'export
    continuent de porter sur la liste complète (histSales), pas sur les lignes visibles. */
@@ -546,7 +550,7 @@ function histSummary(list) {
    dans l'historique du vendeur choisi, sans retoucher le nom d'origine. */
 function attachSelect(s) {
   if (isStaff() || s.byId || !sellerIds.length) return '';
-  return `<select data-attach="${s.id}" aria-label="${esc(T('attachSale'))}" style="margin-left:6px">
+  return `<select data-attach="${s.id}" aria-label="${esc(T('attachSale'))}" style="width:auto;max-width:100%;font-size:13px;padding:6px 8px;margin:0 0 6px">
     <option value="">${esc(T('attachSale'))}</option>
     ${sellerIds.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}
   </select>`;
@@ -930,6 +934,15 @@ function journalSummary(monthKey) {
   }
   return [...rows.values()].sort((a, b) => b.n - a.n);
 }
+/* Une action ancienne n'a pas d'identifiant de compte : le patron la rattache
+   au vendeur, qui la retrouve alors dans son journal. */
+function logAttachSelect(e) {
+  if (isStaff() || e.byId || !sellerIds.length) return '';
+  return `<select data-jlog-attach="${e.id}" aria-label="${esc(T('attachSale'))}" style="width:auto;max-width:100%;font-size:13px;padding:4px 6px;margin-right:6px">
+    <option value="">${esc(T('attachSale'))}</option>
+    ${sellerIds.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}
+  </select>`;
+}
 function journalModal() {
   /* Le patron voit tout et filtre par vendeur ; un vendeur ne voit que ses
      propres actions, avec leurs montants (le serveur masque les autres). */
@@ -955,9 +968,25 @@ function journalModal() {
       box.querySelectorAll('[data-who]').forEach((b) => { b.onclick = () => { who = b.dataset.who; paint(); }; });
     }
     const list = all.filter((e) => who === 'all' || (e.by || '') === who).slice(0, 100);
-    d.querySelector('#jList').innerHTML = list.map((e) => `<div class="row"><div><div class="t">${esc(T(ACT_LABEL[e.act] || e.act))}${Number(e.amount) > 0 ? ' · ' + money(e.amount) : ''}</div><div class="s">${dayFR(isoOf(e.at))} · ${esc(clock(e.at))}${e.label ? ' · ' + esc(e.label) : ''}</div></div><div class="right"><span class="tag">${esc(e.by || T('owner'))}</span></div></div>`).join('')
+    d.querySelector('#jList').innerHTML = list.map((e) => `<div class="row"><div><div class="t">${esc(T(ACT_LABEL[e.act] || e.act))}${Number(e.amount) > 0 ? ' · ' + money(e.amount) : ''}</div><div class="s">${dayFR(isoOf(e.at))} · ${esc(clock(e.at))}${e.label ? ' · ' + esc(e.label) : ''}</div></div><div class="right">${logAttachSelect(e)}<span class="tag">${esc(e.by || T('owner'))}</span></div></div>`).join('')
       || `<p class="empty">${T('noJournal')}</p>`;
   };
+  if (!staff) {
+    loadSellerIds().then(() => { if (sellerIds.length) paint(); });
+    d.addEventListener('change', (ev) => {
+      const id = ev.target.dataset && ev.target.dataset.jlogAttach;
+      if (!id) return;
+      const entry = (db.log || []).find((x) => x.id === id);
+      if (!entry) return;
+      entry.byId = ev.target.value || '';
+      if (entry.byId && !String(entry.by || '').trim()) {
+        const u = sellerIds.find((x) => x.id === entry.byId);
+        if (u) entry.by = u.name;
+      }
+      entry.u = Date.now();
+      saveDB(); paint();
+    });
+  }
   paint();
 }
 
@@ -3086,9 +3115,16 @@ function purgeSecrets() {
       }
     }
   }
-  /* Journal : un vendeur ne garde que ses propres lignes. Le serveur ne les
-     envoie plus, mais un cache datant d'avant ce filtrage peut encore
-     contenir celles des autres : on les supprime dès le démarrage. */
+  /* Ventes et journal : un vendeur ne garde que son propre travail. Le serveur
+     ne l'envoie plus, mais un cache datant d'avant ce filtrage peut encore
+     contenir celui des autres : on le supprime dès le démarrage. Une vente
+     antérieure sans identifiant est effacée aussi ; le patron peut la
+     rattacher, elle reviendra alors à la synchronisation suivante. */
+  if (me && Array.isArray(db.sales)) {
+    const before = db.sales.length;
+    db.sales = db.sales.filter((s) => s && s.byId === me.id);
+    if (db.sales.length !== before) changed = true;
+  }
   if (me && Array.isArray(db.log)) {
     const before = db.log.length;
     db.log = db.log.filter((e) => e && typeof e === 'object' && e.byId === me.id);

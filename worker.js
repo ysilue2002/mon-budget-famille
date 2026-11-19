@@ -242,10 +242,15 @@ function maskState(text, viewerId = '') {
       for (const field of fields) if (field in item) item[field] = null;
     }
   }
-  /* Journal : un vendeur ne reçoit que ses propres lignes. Celles du patron et
-     des autres vendeurs ne quittent pas le serveur (libellés compris). */
+  /* Un vendeur ne reçoit que son propre travail : ses ventes (noms de clients
+     et montants compris) et ses lignes de journal. Celles du patron et des
+     autres vendeurs ne quittent pas le serveur. Une vente antérieure, sans
+     identifiant, reste au patron : il peut la rattacher à un vendeur. */
+  const me = String(viewerId || '');
+  if (Array.isArray(db.sales)) {
+    db.sales = db.sales.filter((s) => s && typeof s === 'object' && String(s.byId || '') === me);
+  }
   if (Array.isArray(db.log)) {
-    const me = String(viewerId || '');
     db.log = db.log.filter((e) => e && typeof e === 'object' && String(e.byId || '') === me);
   }
   return JSON.stringify(db);
@@ -287,6 +292,16 @@ function restoreMasked(storedText, incomingText) {
         continue;
       }
       if (key === 'expenses' || key === 'withdrawals' || key === 'debts') mine.splice(i, 1);
+    }
+  }
+  /* Ventes : le vendeur n'en reçoit que les siennes, on remet donc celles des
+     autres avant écriture — sinon sa sauvegarde effacerait les ventes du
+     patron. Elles sont ajoutées après le calcul des coûts : un coût déjà
+     enregistré n'est pas recalculé. */
+  if (Array.isArray(incoming.sales)) {
+    const seen = new Set(incoming.sales.filter((s) => s && s.id).map((s) => String(s.id)));
+    for (const s of (Array.isArray(stored.sales) ? stored.sales : [])) {
+      if (s && s.id && !seen.has(String(s.id))) incoming.sales.push(s);
     }
   }
   /* Journal : le montant d'une entrée déjà connue vient du patron ; une entrée

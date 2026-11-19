@@ -95,6 +95,27 @@ test('restoreMasked refuse une dépense créée par un vendeur', () => {
   assert.equal(out.expenses[0].amount, 12000);
 });
 
+test('maskState ne renvoie au vendeur que ses propres ventes', () => {
+  const state = etat();
+  state.sales.push({ id: 's2', total: 16000, by: 'Patron', byId: OWNER, cost: 6000 });
+  state.sales.push({ id: 's3', total: 9000, by: 'Koffi', byId: OTHER, cost: 4000 });
+  /* Vente antérieure, sans identifiant : elle reste au patron. */
+  state.sales.push({ id: 's4', total: 8000, by: 'Vendeur Awa', cost: 5000 });
+  const out = JSON.parse(maskState(JSON.stringify(state), SELLER));
+  assert.deepEqual(out.sales.map((s) => s.id), ['s1']);
+});
+
+test('restoreMasked remet les ventes des autres comptes', () => {
+  const stored = etat();
+  stored.sales.push({ id: 's2', total: 16000, by: 'Patron', byId: OWNER, cost: 6000 });
+  const incoming = etat();
+  incoming.sales = [{ id: 's3', pid: 'p1', qty: 2, total: 16000, by: 'Awa', byId: SELLER }];
+  const out = JSON.parse(restoreMasked(JSON.stringify(stored), JSON.stringify(incoming)));
+  assert.deepEqual(out.sales.map((s) => s.id), ['s3', 's1', 's2']);
+  assert.equal(out.sales.find((s) => s.id === 's2').cost, 6000);
+  assert.equal(out.sales.find((s) => s.id === 's3').cost, 10000);
+});
+
 test('restoreMasked garde le journal borné à 300 lignes', () => {
   const stored = etat();
   stored.log = Array.from({ length: 300 }, (_, i) => ({
