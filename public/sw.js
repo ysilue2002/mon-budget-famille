@@ -1,6 +1,6 @@
 /* GÉNÉRÉ par scripts/cache.js — ne pas modifier à la main.
    Modèle : scripts/sw.template.js. */
-const CACHE = 'assistant-commercial-778408a155';
+const CACHE = 'assistant-commercial-c17182c371';
 const PRECACHE = [
   "./",
   "./app.js",
@@ -10,14 +10,12 @@ const PRECACHE = [
   "./icons/logo-header.png",
   "./index.html",
   "./manifest.webmanifest",
-  "./qrcode.js",
   "./style.css"
 ];
 const CACHE_FIRST = [
   "./icons/apple-touch-icon.png",
   "./icons/icon-192.png",
-  "./icons/logo-header.png",
-  "./qrcode.js"
+  "./icons/logo-header.png"
 ];
 
 self.addEventListener('install', (event) => {

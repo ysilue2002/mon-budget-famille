@@ -1046,7 +1046,8 @@ function reportModal() {
   const m = modal(`<h2>${T('monthlyReport')}</h2><p class="hint">${T('monthlyReportHint')}</p>
     <label>${T('month')}</label><select id="rpMonth">${months.map((k) => `<option value="${k}" ${k === todayISO().slice(0, 7) ? 'selected' : ''}>${esc(monthLabel(k))}</option>`).join('')}</select>
     <button class="btn" id="rpOk">${T('downloadPdf')}</button>
-    <button class="btn out" id="rpNo">${T('cancel')}</button>`);
+    <button class="btn out" id="rpNo">${T('cancel')}</button>
+    ${window.jspdf ? '' : `<p class="hint">${T('pdfFirstHint')}</p>`}`);
   m.querySelector('#rpNo').onclick = () => m.remove();
   m.querySelector('#rpOk').onclick = () => { const k = m.querySelector('#rpMonth').value; m.remove(); downloadReport(k); };
 }
@@ -2032,7 +2033,8 @@ function saleDone(sale) {
     <p class="hint">${money(sale.total)}${sale.product ? ' · ' + esc(sale.product) + ' ×' + sale.qty : ''}${sale.party ? ' · ' + esc(sale.party) : ''}</p>
     <button class="btn whats" id="rdWa">${T('sendReceipt')}</button>
     <button class="btn pdf" id="rdPdf">${T('receiptPdf')}</button>
-    <button class="btn out" id="rdNo">${T('close')}</button>`);
+    <button class="btn out" id="rdNo">${T('close')}</button>
+    ${window.jspdf ? '' : `<p class="hint">${T('pdfFirstHint')}</p>`}`);
   m.querySelector('#rdWa').onclick = () => { m.remove(); waSale(sale.id); };
   m.querySelector('#rdPdf').onclick = () => { m.remove(); shareReceiptPDF(sale.id); };
   m.querySelector('#rdNo').onclick = () => m.remove();
@@ -2110,6 +2112,20 @@ function printFormat(id, format) {
 }
 /* jsPDF pèse 366 Ko et ne sert qu'aux PDF : on le télécharge au premier usage,
    puis le service worker le garde pour les fois suivantes, même hors ligne. */
+let qrLoad = null;
+function loadQR() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  if (!qrLoad) {
+    qrLoad = new Promise((res) => {
+      const s = document.createElement('script');
+      s.src = 'qrcode.js';
+      s.onload = () => res(window.qrcode || null);
+      s.onerror = () => { qrLoad = null; res(null); };
+      document.head.appendChild(s);
+    });
+  }
+  return qrLoad;
+}
 let pdfLoad = null;
 function loadJsPDF() {
   if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf);
@@ -3085,7 +3101,7 @@ function installModal() {
   const now = d.querySelector('#inNow');
   if (now) now.onclick = async () => { installEvt.prompt(); await installEvt.userChoice; installEvt = null; d.remove(); };
 }
-function shareModal() {
+async function shareModal() {
   const url = location.origin + location.pathname;
   const d = modal(`<h2>${T('share')}</h2><p class="hint">${T('shareHint')}</p>
     <div class="qrbox" id="qrBox"></div>
@@ -3094,12 +3110,14 @@ function shareModal() {
     <button class="btn" id="qrNative">${T('share')}</button>
     <button class="btn out" id="qrCopy">${T('copy')}</button>
     <button class="btn out" id="qrClose">${T('close')}</button>`);
+  const QR = await loadQR();
+  const box = d.querySelector('#qrBox');
   try {
-    const qr = qrcode(0, 'M');
+    const qr = QR(0, 'M');
     qr.addData(url);
     qr.make();
-    d.querySelector('#qrBox').innerHTML = qr.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
-  } catch { d.querySelector('#qrBox').textContent = url; }
+    box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
+  } catch { box.textContent = url; }
   d.querySelector('#qrClose').onclick = () => d.remove();
   d.querySelector('#qrNative').onclick = () => shareApp();
   d.querySelector('#qrCopy').onclick = async () => {

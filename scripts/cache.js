@@ -25,7 +25,8 @@ const CACHE_FIRST = /^(qrcode\.js|jspdf\.umd\.min\.js|icons\/)/;
 const NOT_PRECACHED = new Set([
     'icons/icon-512.png',
     'icons/icon-512-maskable.png',
-    'jspdf.umd.min.js', // chargé à la demande, puis gardé par le cache de service
+    'jspdf.umd.min.js', // chargés à la demande, puis gardés par le cache de service
+    'qrcode.js',
 ]);
 
 function walk(dir, base = '') {
