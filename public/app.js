@@ -571,14 +571,27 @@ function histSummary(list) {
       <div class="kpi"><span>${T('collected')}</span><b>${money(cash)}</b></div>
       <div class="kpi"><span>${T('remains')}</span><b>${money(Math.max(0, ca - cash))}</b></div>`;
 }
-/* Sélecteur du patron sur une vente non attribuée : elle réapparaît ensuite
-   dans l'historique du vendeur choisi, sans retoucher le nom d'origine. */
-function attachSelect(s) {
-  if (isStaff() || s.byId || !sellerIds.length) return '';
-  return `<select data-attach="${s.id}" aria-label="${esc(T('attachSale'))}" style="width:auto;max-width:100%;font-size:13px;padding:6px 8px;margin:0 0 6px">
-    <option value="">${esc(T('attachSale'))}</option>
-    ${sellerIds.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}
-  </select>`;
+/* Attribution d'une ligne au vendeur qui l'a faite : une icône et un mot, puis
+   une liste de gros boutons. Rien à lire pour comprendre. */
+function assignButton(id, act) {
+  if (isStaff() || !sellerIds.length) return '';
+  return `<button class="btn small out" data-act="${act}" data-id="${id}">👤 ${esc(T('assign'))}</button>`;
+}
+function sellerPicker(onPick) {
+  const d = modal(`<div class="sheetHead"><h2>${esc(T('assignTitle'))}</h2><button type="button" class="sheetClose" aria-label="${esc(T('close'))}">✕</button></div>
+    ${sellerIds.map((u) => `<button class="btn out" data-pick="${esc(u.id)}">👤 ${esc(u.name)}</button>`).join('')}
+    <button class="btn out" data-pick="none">${esc(T('assignNobody'))}</button>`);
+  /* La croix ferme sans rien changer : seule « Aucun vendeur » retire
+     l'attribution. */
+  const close = d.querySelector('.sheetClose');
+  if (close) close.onclick = () => d.remove();
+  d.addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-pick]');
+    if (!b) return;
+    const pick = b.dataset.pick === 'none' ? '' : b.dataset.pick;
+    d.remove();
+    onPick(pick);
+  });
 }
 function histRows(list) {
   return list.map((s) => `<div class="row"><div><div class="t">${money(s.total)}${s.party ? ' · ' + esc(s.party) : ''}</div>      <div class="s">${dayFR(s.date)} · ${esc(methodLabel(s.method))}${s.product ? ' · ' + esc(s.product) + ' ×' + s.qty : ''}${s.by ? ' · ' + esc(s.by) : ''}</div></div><div class="right">
@@ -586,7 +599,7 @@ function histRows(list) {
       ${s.delivered === false ? `<button class="btn small out" data-act="deliverSale" data-id="${s.id}">${T('markSaleDelivered')}</button>` : ''}
       <button class="btn small whats" data-act="waSale" data-id="${s.id}">${T('receipt')}</button>
       <button class="btn small pdf" data-act="receiptPdf" data-id="${s.id}">${T('pdf')}</button>
-      ${attachSelect(s)}<button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button>
+      ${s.byId ? '' : assignButton(s.id, 'assignSale')}<button class="btn small out" data-act="editSale" data-id="${s.id}">${T('edit')}</button>
     </div></div>`).join('') || `<p class="empty">${T('noSalesFound')}</p>`;
 }
 function histListHTML(list, shown) {
@@ -961,19 +974,20 @@ function journalSummary(monthKey) {
   }
   return [...rows.values()].sort((a, b) => b.n - a.n);
 }
-/* Une action ancienne n'a pas d'identifiant de compte : le patron la rattache
-   au vendeur, qui la retrouve alors dans son journal. */
-function logAttachSelect(e) {
-  if (isStaff() || e.byId || !sellerIds.length) return '';
-  return `<select data-jlog-attach="${e.id}" aria-label="${esc(T('attachSale'))}" style="width:auto;max-width:100%;font-size:13px;padding:4px 6px;margin-right:6px">
-    <option value="">${esc(T('attachSale'))}</option>
-    ${sellerIds.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}
-  </select>`;
-}
 function journalModal() {
   /* Le patron voit tout et filtre par vendeur ; un vendeur ne voit que ses
      propres actions, avec leurs montants (le serveur masque les autres). */
   const staff = isStaff();
+  /* Un ancien nom peut être une adresse e-mail (d'avant les noms de compte) :
+     on affiche le nom du compte quand on le connaît, sinon un mot simple.
+     Personne n'a à lire « vendeur-mwm6y3i9@exemple.com » sur son écran. */
+  const byName = (e) => {
+    const id = e && e.byId ? String(e.byId) : '';
+    const mine = me && me.id === id ? me.name : '';
+    const seller = id ? (sellerIds.find((u) => u.id === id) || {}).name : '';
+    const label = String(mine || seller || (e && e.by) || '').trim();
+    return label && !label.includes('@') ? label : T('account');
+  };
   const sorted = () => (db.log || [])
     .filter((e) => e && (!staff || (me && e.byId === me.id)))
     .slice().sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
@@ -983,35 +997,37 @@ function journalModal() {
     <button class="btn out" id="jCsv">${T('journalCsv')}</button><div id="jList"></div>`);
   d.querySelector('#jClose').onclick = () => d.remove();
   d.querySelector('#jCsv').onclick = () => {
-    downloadJournal(sorted().filter((e) => who === 'all' || (e.by || '') === who));
+    downloadJournal(sorted().filter((e) => who === 'all' || byName(e) === who));
   };
   const paint = () => {
     const all = sorted();
     const box = d.querySelector('#jWho');
     if (box) {
-      const names = [...new Set(all.map((e) => e.by || ''))];
+      const names = [...new Set(all.map(byName))];
       box.innerHTML = `<button class="btn small ${who === 'all' ? '' : 'out'}" data-who="all">${T('all')}</button>`
-        + names.map((n) => `<button class="btn small ${who === n ? '' : 'out'}" data-who="${esc(n)}" title="${esc(n || T('owner'))}">${esc(n || T('owner'))}</button>`).join('');
+        + names.map((n) => `<button class="btn small ${who === n ? '' : 'out'}" data-who="${esc(n)}">${esc(n)}</button>`).join('');
       box.querySelectorAll('[data-who]').forEach((b) => { b.onclick = () => { who = b.dataset.who; paint(); }; });
     }
-    const list = all.filter((e) => who === 'all' || (e.by || '') === who).slice(0, 100);
-    d.querySelector('#jList').innerHTML = list.map((e) => `<div class="row"><div><div class="t">${esc(T(ACT_LABEL[e.act] || e.act))}${Number(e.amount) > 0 ? ' · ' + money(e.amount) : ''}</div><div class="s">${dayFR(isoOf(e.at))} · ${esc(clock(e.at))}${e.label ? ' · ' + esc(e.label) : ''}</div></div><div class="right">${logAttachSelect(e)}<span class="tag">${esc(e.by || T('owner'))}</span></div></div>`).join('')
+    const list = all.filter((e) => who === 'all' || byName(e) === who).slice(0, 100);
+    d.querySelector('#jList').innerHTML = list.map((e) => `<div class="row"><div><div class="t">${esc(T(ACT_LABEL[e.act] || e.act))}${Number(e.amount) > 0 ? ' · ' + money(e.amount) : ''}</div><div class="s">${dayFR(isoOf(e.at))} · ${esc(clock(e.at))}${e.label ? ' · ' + esc(e.label) : ''}</div></div><div class="right">${e.byId ? '' : assignButton(e.id, 'assignLog')}<span class="tag">${esc(byName(e))}</span></div></div>`).join('')
       || `<p class="empty">${T('noJournal')}</p>`;
   };
   if (!staff) {
     loadSellerIds().then(() => { if (sellerIds.length) paint(); });
-    d.addEventListener('change', (ev) => {
-      const id = ev.target.dataset && ev.target.dataset.jlogAttach;
-      if (!id) return;
-      const entry = (db.log || []).find((x) => x.id === id);
+    d.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-act="assignLog"]');
+      if (!b) return;
+      const entry = (db.log || []).find((x) => x.id === b.dataset.id);
       if (!entry) return;
-      entry.byId = ev.target.value || '';
-      if (entry.byId && !String(entry.by || '').trim()) {
-        const u = sellerIds.find((x) => x.id === entry.byId);
-        if (u) entry.by = u.name;
-      }
-      entry.u = Date.now();
-      saveDB(); paint();
+      sellerPicker((id) => {
+        entry.byId = id;
+        if (id && !String(entry.by || '').trim()) {
+          const u = sellerIds.find((x) => x.id === id);
+          if (u) entry.by = u.name;
+        }
+        entry.u = Date.now();
+        saveDB(); paint();
+      });
     });
   }
   paint();
@@ -2484,6 +2500,19 @@ document.addEventListener('click', async (e) => {
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
   if (act === 'waSale') waSale(b.dataset.id);
   if (act === 'receiptPdf') shareReceiptPDF(b.dataset.id);
+  if (act === 'assignSale') {
+    if (isStaff()) return;
+    const s = db.sales.find((x) => x.id === b.dataset.id);
+    if (s) sellerPicker((id) => {
+      s.byId = id;
+      if (id && !String(s.by || '').trim()) {
+        const u = sellerIds.find((x) => x.id === id);
+        if (u) s.by = u.name;
+      }
+      s.u = Date.now();
+      saveDB(); render();
+    });
+  }
   if (act === 'deliverSale') {
     const s = db.sales.find((x) => x.id === b.dataset.id);
     if (s) { s.delivered = true; s.u = Date.now(); saveDB(); render(); }
@@ -3644,19 +3673,6 @@ document.addEventListener('input', (e) => {
   }
 });
 document.addEventListener('change', (e) => {
-  const attachId = e.target.dataset && e.target.dataset.attach;
-  if (attachId) {
-    const s = !isStaff() && db.sales.find((x) => x.id === attachId);
-    if (s) {
-      s.byId = e.target.value || '';
-      if (s.byId && !String(s.by || '').trim()) {
-        const u = sellerIds.find((x) => x.id === s.byId);
-        if (u) s.by = u.name;
-      }
-      s.u = Date.now();
-      saveDB(); render();
-    }
-  }
   if (e.target.id === 'histMethod') { histMethod = e.target.value; histShown = HIST_PAGE; render(); }
   if (e.target.id === 'histSeller') { histSeller = e.target.value; histShown = HIST_PAGE; render(); }
   if (e.target.id === 'dParty') {
