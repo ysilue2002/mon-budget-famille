@@ -8,7 +8,11 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Sans ça, en développement, le repli vers index.html répond aux navigations
+    // vers /f/<jeton> : la facture ne s'affiche jamais dans un navigateur local,
+    // alors qu'en production le Worker passe bien en premier.
+    "run_worker_first": ["/f/*", "/api/*"]
   },
   "d1_databases": [
     {

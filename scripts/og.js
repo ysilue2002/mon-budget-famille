@@ -43,7 +43,7 @@ function findBrowser() {
    que comprend un commerçant, pas des noms de fonctionnalités. */
 const PAGES = {
   fr: {
-    out: 'og.png',
+    out: 'og.jpg',
     dir: 'ltr',
     name: 'Assistant<br><span>Commercial</span>',
     pill: 'Français · English · العربية',
@@ -56,7 +56,7 @@ const PAGES = {
     cta: '＋ Nouvelle vente',
   },
   en: {
-    out: 'og-en.png',
+    out: 'og-en.jpg',
     dir: 'ltr',
     name: 'Assistant<br><span>Commercial</span>',
     pill: 'English · Français · العربية',
@@ -69,7 +69,7 @@ const PAGES = {
     cta: '＋ New sale',
   },
   ar: {
-    out: 'og-ar.png',
+    out: 'og-ar.jpg',
     dir: 'rtl',
     name: 'المساعد<br><span>التجاري</span>',
     pill: 'العربية · Français · English',
@@ -176,30 +176,91 @@ function pngSize(file) {
   return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
 }
 
+/* Poids et dimensions d'un JPEG, lus dans ses segments (SOF0 à SOF15). */
+function jpegInfo(file) {
+  const b = fs.readFileSync(file);
+  if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return null;
+  let i = 2;
+  while (i < b.length - 9) {
+    if (b[i] !== 0xff) { i += 1; continue; }
+    const marker = b[i + 1];
+    const len = b.readUInt16BE(i + 2);
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7), bytes: b.length };
+    }
+    i += 2 + len;
+  }
+  return null;
+}
+
+/* Le PNG pèse 220 Ko : trop pour une vignette qu'un téléphone en 3G télécharge
+   avant même d'ouvrir la conversation. On le passe en JPEG avec le navigateur
+   déjà présent — image chargée dans un canvas, export data-URL, aucune
+   dépendance à installer. */
+function toJpeg(browser, png, jpg, quality = 86) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-og-conv-'));
+  try {
+    const page = path.join(tmp, 'conv.html');
+    const img = pathToFileURL(png).href;
+    fs.writeFileSync(page, `<!doctype html><meta charset="utf-8"><body><script>
+const img = new Image();
+img.onload = () => {
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  document.body.textContent = c.toDataURL('image/jpeg', ${quality / 100});
+};
+img.onerror = () => { document.body.textContent = 'ERREUR'; };
+img.src = ${JSON.stringify(img)};
+</script></body>`);
+    const run = spawnSync(browser, [
+      '--headless=new', '--disable-gpu', '--no-first-run', '--allow-file-access-from-files',
+      '--virtual-time-budget=5000', `--user-data-dir=${path.join(tmp, 'profil')}`,
+      '--dump-dom', pathToFileURL(page).href,
+    ], { encoding: 'utf8', timeout: 120000 });
+    const m = String(run.stdout || '').match(/data:image\/jpeg;base64,([A-Za-z0-9+/=]+)/);
+    if (!m) {
+      console.error('✗ conversion JPEG : le navigateur n’a rien renvoyé.');
+      return false;
+    }
+    fs.writeFileSync(jpg, Buffer.from(m[1], 'base64'));
+    return true;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 function render(browser, lang) {
   const p = PAGES[lang];
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-og-'));
   try {
     const src = path.join(tmp, 'og.html');
     fs.writeFileSync(src, html(lang));
+    const png = path.join(tmp, 'og.png');
     const out = path.join(PUBLIC, p.out);
     const run = spawnSync(browser, [
       '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
       '--force-device-scale-factor=1', `--window-size=${W},${H}`,
       `--user-data-dir=${path.join(tmp, 'profil')}`,
-      `--screenshot=${out}`, pathToFileURL(src).href,
+      `--screenshot=${png}`, pathToFileURL(src).href,
     ], { stdio: 'ignore', timeout: 120000 });
-    if (!fs.existsSync(out)) {
+    if (!fs.existsSync(png)) {
       console.error(`✗ ${p.out} : le navigateur n'a rien écrit (code ${run.status}).`);
       return false;
     }
-    const size = pngSize(out);
-    if (!size || size.w !== W || size.h !== H) {
-      console.error(`✗ ${p.out} : taille ${size ? size.w + '×' + size.h : 'inconnue'}, attendu ${W}×${H}.`);
+    const shot = pngSize(png);
+    if (!shot || shot.w !== W || shot.h !== H) {
+      console.error(`✗ ${p.out} : taille ${shot ? shot.w + '×' + shot.h : 'inconnue'}, attendu ${W}×${H}.`);
       return false;
     }
-    const ko = Math.round(fs.statSync(out).size / 1024);
-    console.log(`✓ ${p.out} — ${size.w}×${size.h}, ${ko} Ko`);
+    if (!toJpeg(browser, png, out)) return false;
+    const size = jpegInfo(out);
+    if (!size || size.w !== W || size.h !== H) {
+      console.error(`✗ ${p.out} : JPEG ${size ? size.w + '×' + size.h : 'illisible'}, attendu ${W}×${H}.`);
+      return false;
+    }
+    console.log(`✓ ${p.out} — ${size.w}×${size.h}, ${Math.round(size.bytes / 1024)} Ko`);
     return true;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

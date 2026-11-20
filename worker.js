@@ -848,6 +848,10 @@ function publicDocHtml(text, nonce) {
   const vat = s.vat && typeof s.vat === 'object' && s.vat.value
     ? `<tr><th colspan="3">${escHtml(s.vat.label)}</th><td class="n">${escHtml(s.vat.value)}</td></tr>` : '';
   const lang = /^[a-z]{2}$/.test(String(s.lang || '')) ? String(s.lang) : 'fr';
+  /* Numéro de la boutique pour répondre en un geste : uniquement des chiffres,
+     sinon le lien ne s'affiche pas (mieux vaut aucun bouton qu'un lien cassé). */
+  const wa = String(s.wa || '').replace(/\D/g, '').slice(0, 15);
+  const waText = String(s.waText || '').slice(0, 200);
   return `<!doctype html>
 <html lang="${lang}" dir="${s.rtl ? 'rtl' : 'ltr'}">
 <head>
@@ -875,8 +879,10 @@ th{font-size:14px;text-transform:uppercase;color:#5b6b60}
 .state.warn{background:#fff4d6;color:#7a4a00;border:1px solid #b7791f}
 .notes{color:#5b6b60;font-size:14px;margin-top:14px}
 footer{margin-top:16px;padding-top:12px;border-top:1px solid #e6ece7;font-size:13px;color:#5b6b60;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.print{display:inline-flex;align-items:center;min-height:48px;padding:10px 18px;border-radius:12px;border:2px solid #14532d;background:#fff;color:#14532d;font:inherit;font-weight:700;cursor:pointer;margin-top:14px}
-@media print{body{background:#fff;padding:0}.sheet{border:0;border-radius:0;padding:0}.print{display:none}}
+.acts{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.print{display:inline-flex;align-items:center;min-height:48px;padding:10px 18px;border-radius:12px;border:2px solid #14532d;background:#fff;color:#14532d;font:inherit;font-weight:700;cursor:pointer;text-decoration:none}
+.write{display:inline-flex;align-items:center;min-height:48px;padding:10px 18px;border-radius:12px;border:2px solid #14532d;background:#14532d;color:#fff;font:inherit;font-weight:700;text-decoration:none}
+@media print{body{background:#fff;padding:0}.sheet{border:0;border-radius:0;padding:0}.acts{display:none}}
 </style>
 </head>
 <body>
@@ -898,7 +904,10 @@ ${vat}
 </tbody></table>
 ${s.kind === 'FAC' ? `<div class="state ${s.paid ? 'ok' : 'warn'}">${s.paid ? `✓ ${L('paid', 'Payée')}${s.paidOn ? ' · ' + L('paidOn', 'payée le') + ' ' + escHtml(s.paidOn) : ''}` : L('unpaid', 'Non payée')}</div>` : ''}
 ${notes ? `<div class="notes">${notes}</div>` : ''}
+<div class="acts">
 <button class="print" id="docPrint">${L('print', 'Imprimer')}</button>
+${wa ? `<a class="write" href="https://wa.me/${wa}?text=${escHtml(encodeURIComponent(waText))}" target="_blank" rel="noopener noreferrer">${L('waShop', 'Écrire à la boutique')}</a>` : ''}
+</div>
 <script nonce="${escHtml(nonce)}">document.getElementById('docPrint').addEventListener('click', function () { window.print(); });</script>
 <footer><span>Assistant Commercial</span><span>${escHtml(s.number)}</span></footer>
 </main>

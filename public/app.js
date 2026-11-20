@@ -2268,6 +2268,10 @@ function docSnapshot(d) {
     date: dayFR(d.date),
     paid: !!(d.kind === 'FAC' && d.paidDate),
     paidOn: d.kind === 'FAC' && d.paidDate ? dayFR(d.paidDate) : '',
+    /* Le client peut répondre à la boutique depuis la facture. Le numéro part
+       sans mise en forme : le serveur ne garde de toute façon que les chiffres. */
+    wa: String((me && me.phone) || '').replace(/[^\d+]/g, '').replace('+', ''),
+    waText: `${T('waShopText')} ${d.number}.`,
     client: { name: d.party || '', phone: d.clientPhone || '', email: d.clientEmail || '', address: d.clientAddress || '' },
     lines: (Array.isArray(d.lines) ? d.lines : []).map((l) => ({ label: l.label, qty: l.qty, price: money(+l.price), amount: money((+l.qty || 1) * +l.price) })),
     ht: money(d.total),
@@ -2276,7 +2280,7 @@ function docSnapshot(d) {
     notes: [T('docNote1'), T('docNote2')],
     labels: {
       client: T('client'), line: T('line'), qty: T('quantity'), price: T('unitPriceHT'), ht: T('ht'), total: T('ttc'),
-      paid: T('invoicePaid'), unpaid: T('invoiceUnpaid'), paidOn: T('invoicePaidOn'),
+      paid: T('invoicePaid'), unpaid: T('invoiceUnpaid'), paidOn: T('invoicePaidOn'), waShop: T('waShop'),
     },
   };
 }

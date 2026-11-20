@@ -235,16 +235,28 @@ test('chaque langue a sa page de présentation et sa vignette', () => {
   const src = fs.readFileSync(path.join(root, 'public', 'presentation.html'), 'utf8');
   const en = variant(src, 'en');
   assert.ok(en.includes('<html lang="en"'), 'langue de la page');
-  assert.ok(en.includes('/og-en.png'), 'vignette anglaise');
+  assert.ok(en.includes('/og-en.jpg'), 'vignette anglaise');
   assert.ok(en.includes('content="en_US"'), 'locale anglaise');
   assert.ok(en.includes('/presentation-en"'), 'adresse propre');
-  assert.ok(!en.includes('/og.png"'), 'aucune vignette française');
+  assert.ok(!en.includes('/og.jpg"'), 'aucune vignette française');
   const ar = variant(src, 'ar');
-  assert.ok(ar.includes('/og-ar.png'));
+  assert.ok(ar.includes('/og-ar.jpg'));
   assert.ok(ar.includes('dir="rtl"'), 'arabe de droite à gauche');
   assert.ok(ar.includes('/presentation-ar"'));
-  assert.ok(variant(src, 'qq').includes('/og.png'), 'langue inconnue : français');
-  assert.ok(variant(variant(src, 'en'), 'ar').includes('/og-ar.png'), 'pas de suffixe empilé');
+  assert.ok(variant(src, 'qq').includes('/og.jpg'), 'langue inconnue : français');
+  assert.ok(variant(variant(src, 'en'), 'ar').includes('/og-ar.jpg'), 'pas de suffixe empilé');
+});
+
+test('la facture publique permet d’écrire à la boutique, sans lien cassé', () => {
+  const base = { kind: 'FAC', title: 'Facture', number: 'FAC-2026-001', shop: 'B', lines: [], ht: '', ttc: '', labels: {} };
+  const ok = publicDocHtml(JSON.stringify({ ...base, wa: '+225 07 00 00 00 00', waText: 'Bonjour & merci' }));
+  assert.ok(ok.includes('https://wa.me/2250700000000?text=Bonjour%20%26%20merci'), 'lien WhatsApp propre');
+  assert.ok(ok.includes('rel="noopener noreferrer"'), 'ouvre sans donner la main sur la page');
+  assert.ok(ok.includes('Écrire à la boutique'));
+  const none = publicDocHtml(JSON.stringify({ ...base, wa: '', waText: 'x' }));
+  assert.ok(!none.includes('wa.me/'), 'sans numéro : aucun bouton');
+  const dirty = publicDocHtml(JSON.stringify({ ...base, wa: 'abc"><script>', waText: 'x' }));
+  assert.ok(!dirty.includes('wa.me/'), 'numéro invalide : aucun bouton');
 });
 
 test('cleanSrc ne garde qu’un mot de canal', () => {

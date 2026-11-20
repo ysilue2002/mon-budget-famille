@@ -23,7 +23,7 @@ export function variant(html, lang) {
   const suffix = l === 'fr' ? '' : '-' + l;
   return String(html)
     .replace(/<html lang="[^"]*"/, `<html lang="${l}"${l === 'ar' ? ' dir="rtl"' : ''}`)
-    .replace(/content="([^"]*)\/og(-en|-ar)?\.png"/, `content="$1/og${suffix}.png"`)
+    .replace(/content="([^"]*)\/og(-en|-ar)?\.jpe?g"/, `content="$1/og${suffix}.jpg"`)
     .replace(/(<meta property="og:locale" content=")[^"]*"/, `$1${OG_LOCALES[l]}"`)
     .replace(/(<meta property="og:url" content="[^"]*\/)presentation(\.html)?"/, `$1presentation${suffix}"`);
 }
@@ -36,8 +36,8 @@ function main() {
     const out = path.join(PUBLIC, `presentation-${lang}.html`);
     const body = variant(html, lang);
     const image = (body.match(/og:image" content="[^"]*\/(og[^"]*)"/) || [])[1];
-    if (image !== `og-${lang}.png`) {
-      console.error(`✗ presentation-${lang}.html : vignette « ${image} » au lieu de og-${lang}.png`);
+    if (image !== `og-${lang}.jpg`) {
+      console.error(`✗ presentation-${lang}.html : vignette « ${image} » au lieu de og-${lang}.jpg`);
       ok = false;
       continue;
     }
