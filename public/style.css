@@ -163,6 +163,8 @@ body.adsOn{padding-bottom:196px}
   #printArea.ticket th,#printArea.ticket td{font-size:9pt;padding:1mm 0}
   #printArea .tot{display:flex;justify-content:space-between;font-weight:800;font-size:14pt;margin-top:3mm}
   #printArea .small{font-size:9pt;color:#333}
+  #printArea .qrbox{margin:3mm auto;padding:0;border:0;background:none;justify-content:center}
+  #printArea .qrbox svg{width:34mm;height:34mm}
   #printArea table.rep tr.sec td{padding-top:4mm;font-size:10pt}
   #printArea table.rep td.num{text-align:end;white-space:nowrap}
   @page{margin:8mm}

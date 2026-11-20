@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, docExists };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, docExists } = mod;
 
 const OWNER = 'owner-1';
 const SELLER = 'seller-1';
@@ -158,4 +158,21 @@ test('parsePerms lit le JSON, l’objet, et retombe sur tout permis', () => {
   assert.deepEqual(parsePerms('pas du json'), { del: true, price: true });
   assert.deepEqual(parsePerms({ del: false }), { del: false, price: true });
   assert.deepEqual(parsePerms('{"del":false,"price":false}'), { del: false, price: false });
+});
+
+/* --- envoi d'un document par e-mail --- */
+
+const etatDocs = JSON.stringify({ docs: [
+  { id: 'f1', kind: 'FAC', number: 'FAC-2026-001' },
+  { id: 'd1', kind: 'DEV', number: 'DEV-2026-002' },
+] });
+
+test('un document doit exister dans l’état du compte pour partir', () => {
+  assert.equal(docExists(etatDocs, 'FAC-2026-001'), true);
+  assert.equal(docExists(etatDocs, 'DEV-2026-002'), true);
+  assert.equal(docExists(etatDocs, 'FAC-2026-999'), false, 'numéro inventé : refusé');
+  assert.equal(docExists(etatDocs, 'FAC-1'), false, 'numéro hors format : refusé');
+  assert.equal(docExists(etatDocs, ''), false);
+  assert.equal(docExists('', 'FAC-2026-001'), false, 'compte sans état : refusé');
+  assert.equal(docExists('pas du json', 'FAC-2026-001'), false, 'état illisible : refusé');
 });

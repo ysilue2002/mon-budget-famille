@@ -1057,20 +1057,49 @@ function reportModal() {
    l'arabe correctement, puis on choisit « Enregistrer en PDF » dans la
    fenêtre d'impression. */
 const arabicPdf = () => lang() === 'ar';
-function printSheetHTML(html, cls) {
-  const area = document.getElementById('printArea');
-  area.className = cls || 'a4';
-  area.innerHTML = html;
+/* Une seule sortie pour toutes les feuilles (reçu, facture, rapport, fiche
+   client, fiche fournisseur, mentions légales) : en français le navigateur
+   fait un PDF correct, on imprime tout de suite ; en arabe le texte n'est
+   juste que dessiné par le téléphone, on explique donc qu'il faut choisir
+   « Enregistrer en PDF » après « Imprimer ». */
+function printAreaNow() {
+  if (!arabicPdf()) { window.print(); return; }
   const m = modal(`<h2>${T('pdfArabicTitle')}</h2><p class="hint">${T('pdfArabic')}</p>
     <button class="btn" id="psOk">${T('printNow')}</button>
     <button class="btn out" id="psNo">${T('cancel')}</button>`);
   m.querySelector('#psNo').onclick = () => m.remove();
   m.querySelector('#psOk').onclick = () => { m.remove(); window.print(); };
 }
+function printHtml(html, cls) {
+  const area = document.getElementById('printArea');
+  area.className = cls || 'a4';
+  area.innerHTML = html;
+  printAreaNow();
+}
+/* QR du reçu : le client scanne l'image et retrouve la boutique. Dessiné
+   module par module dans le PDF (net à l'impression, aucune image à charger)
+   et en SVG dans la feuille imprimée. */
+const appUrl = () => location.origin + location.pathname;
+async function qrCode(text) {
+  const QR = await loadQR();
+  if (!QR) return null;
+  try { const qr = QR(0, 'M'); qr.addData(text); qr.make(); return qr; } catch { return null; }
+}
+async function addQrPdf(pdf, text, x, y, size) {
+  const qr = await qrCode(text);
+  if (!qr) return false;
+  const n = qr.getModuleCount();
+  const cell = size / n;
+  pdf.setFillColor(0, 0, 0);
+  for (let r = 0; r < n; r += 1) for (let c = 0; c < n; c += 1) if (qr.isDark(r, c)) pdf.rect(x + c * cell, y + r * cell, cell, cell, 'F');
+  return true;
+}
 /* Reçu d'une vente en HTML : même contenu que le PDF, mais écrit par le
    téléphone pour que l'arabe reste lisible. */
-function receiptHtml(s) {
+async function receiptHtml(s) {
   const st = db.settings || {};
+  const qr = await qrCode(appUrl());
+  const qrTag = qr ? `<div class="qrbox">${qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true })}</div>` : '';
   return `${st.logo ? `<img class="docLogo" src="${esc(st.logo)}" alt="">` : ''}
     <h2>${esc(db.shop || T('app'))}</h2>
     <div class="small">${dayFR(s.date)}</div>
@@ -1081,6 +1110,7 @@ function receiptHtml(s) {
     ${creditOf(s) > 0 ? `<div class="small">${T('paid')} : ${money(paidOf(s))} · ${T('remains')} : ${money(creditOf(s))}</div>` : ''}
     <div class="small">${T('method')} : ${esc(s.method || '—')}</div>
     <hr>
+    ${qrTag}
     <p class="small">${T('thanks')}</p>`;
 }
 /* Rapport mensuel en HTML : les mêmes lignes que le PDF, en tableau lisible
@@ -1143,7 +1173,7 @@ function reportHtml(monthKey) {
     <p class="small">${T('generatedOn')} ${dayFR(todayISO())}</p>`;
 }
 async function reportPdf(monthKey) {
-  if (arabicPdf()) { printSheetHTML(reportHtml(monthKey)); return null; }
+  if (arabicPdf()) { printHtml(reportHtml(monthKey)); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -1415,7 +1445,7 @@ function printClient(id) {
     </tbody></table>
     ${docs.length ? `<h3 style="margin:4mm 0 1mm">${T('documents')}</h3><table><thead><tr><th>${T('dueDate')}</th><th>${T('line')}</th><th>${T('total')}</th></tr></thead><tbody>${docs.map((d) => `<tr><td>${dayFR(d.date)}</td><td>${d.kind === 'DEV' ? T('quote') : T('invoice')} ${esc(d.number)}</td><td>${money(amountOf(d))}</td></tr>`).join('')}</tbody></table>` : ''}
     <p class="small">${T('thanks')}</p>`;
-  window.print();
+  printAreaNow();
 }
 function pendingRows() {
   return db.debts.filter((d) => d.delivered === false).sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -1447,7 +1477,7 @@ function printPending() {
       </tbody></table></div>`).join('')}
     <div class="tot"><span>${T('remains')}</span><span>${money(total)}</span></div>
     <p class="small">${T('thanks')}</p>`;
-  window.print();
+  printAreaNow();
 }
 function pending() {
   const list = pendingRows();
@@ -1526,7 +1556,7 @@ function printSupplier(id) {
     </tbody></table>
     ${payments.length ? `<h3 style="margin:4mm 0 1mm">${T('payments')}</h3><table><thead><tr><th>${T('dueDate')}</th><th>${T('amount')}</th><th>${T('line')}</th></tr></thead><tbody>${payments.map((p) => `<tr><td>${dayFR(p.date)}</td><td>${money(p.amount)}</td><td>${T('newPurchase')} ${dayFR(p.ref)}</td></tr>`).join('')}</tbody></table>` : ''}
     <p class="small">${T('thanks')}</p>`;
-  window.print();
+  printAreaNow();
 }
 function exportContacts() {
   const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
@@ -2067,7 +2097,7 @@ function waSale(id) {
   waOpen(phone, receiptText(s));
 }
 async function receiptPdf(s) {
-  if (arabicPdf()) { printSheetHTML(receiptHtml(s), 'ticket'); return null; }
+  if (arabicPdf()) { printHtml(await receiptHtml(s), 'ticket'); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -2099,8 +2129,14 @@ async function receiptPdf(s) {
   }
   pdf.text(`${T('method')} : ${s.method || '—'}`, 7, y); y += 6;
   pdf.line(7, y, 73, y); y += 6;
+  /* QR de la boutique s'il tient sur la page : au premier usage hors ligne,
+     le module QR peut manquer, le reçu part simplement sans lui. */
+  if (y + 24 < 128) {
+    const qrSize = 22;
+    if (await addQrPdf(pdf, appUrl(), (80 - qrSize) / 2, y, qrSize)) y += qrSize + 4;
+  }
   pdf.setFontSize(8); pdf.setTextColor(90, 90, 90);
-  pdf.text(T('thanks'), 40, y, { align: 'center' });
+  pdf.text(T('thanks'), 40, Math.min(y, 136), { align: 'center' });
   return pdf.output('blob');
 }
 async function shareReceiptPDF(id) {
@@ -2203,7 +2239,7 @@ function printFormat(id, format) {
   const area = document.getElementById('printArea');
   area.className = format === 'ticket' ? 'ticket' : 'a4';
   area.innerHTML = docHTML(d, format);
-  window.print();
+  printAreaNow();
 }
 /* jsPDF pèse 366 Ko et ne sert qu'aux PDF : on le télécharge au premier usage,
    puis le service worker le garde pour les fois suivantes, même hors ligne. */
@@ -2244,7 +2280,7 @@ function imgSize(src) {
   });
 }
 async function docPdf(d) {
-  if (arabicPdf()) { printSheetHTML(docHTML(d)); return null; }
+  if (arabicPdf()) { printHtml(docHTML(d)); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -2386,7 +2422,7 @@ async function emailDocPDF(id) {
     const file = await docFile(d);
     const to = (d.clientEmail || '').trim();
     if (file && isEmail(to)) {
-      const r = await api('/api/send-doc', 'POST', { to, subject, text: body, filename: file.name, pdf: await fileToBase64(file) });
+      const r = await api('/api/send-doc', 'POST', { to, subject, text: body, number: d.number, filename: file.name, pdf: await fileToBase64(file) });
       if (r.ok && r.data && r.data.mail) { alert(T('mailSent')); return; }
       if (r.ok && r.data && r.data.error === 'limit') { alert(T('mailLimit')); return; }
     }
@@ -3145,7 +3181,7 @@ function printLegal(kind) {
   const area = document.getElementById('printArea');
   area.className = 'a4 legalP';
   area.innerHTML = `<div class="small">${esc(db.shop || T('app'))} · ${dayFR(todayISO())}</div>${legalBody(kind)}`;
-  window.print();
+  printAreaNow();
 }
 function legalModal(kind) {
   const d = modal(`<div class="legal" dir="auto">${legalBody(kind)}

@@ -460,12 +460,19 @@ async function api(request, env, url) {
   if (!user) return json({ error: 'auth' }, 401);
 
   if (path === '/api/send-doc' && request.method === 'POST') {
+    /* Seul le patron envoie un document : un vendeur n'a pas à faire partir
+       un PDF vers une adresse choisie. */
+    if (user.ownerId) return json({ error: 'owner' }, 403);
     const body = await readBody(request);
     const to = String(body.to || '').trim().toLowerCase();
     if (!validEmail(to)) return json({ error: 'email' }, 400);
     const filename = String(body.filename || 'document.pdf').replace(/[^\w.-]+/g, '-').slice(0, 80) || 'document.pdf';
     const pdf = String(body.pdf || '').replace(/\s/g, '');
     if (pdf.length < 100 || pdf.length > 1600000 || !/^[A-Za-z0-9+/=]+$/.test(pdf)) return json({ error: 'pdf' }, 400);
+    /* Seule une facture ou un devis déjà enregistré part : le numéro est
+       vérifié dans l'état du compte, pas cru sur parole. */
+    const stateRow = await env.DB.prepare('SELECT json FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
+    if (!stateRow || !docExists(stateRow.json, body.number)) return json({ error: 'doc' }, 400);
     const day = new Date().toISOString().slice(0, 10);
     const row = await env.DB.prepare('SELECT day, count FROM mail_log WHERE user_id = ?').bind(user.id).first();
     const count = row && row.day === day ? row.count : 0;
@@ -732,6 +739,18 @@ async function api(request, env, url) {
   }
 
   return json({ error: 'notfound' }, 404);
+}
+
+/* Numéro de document produit par l'application : DEV-2026-001, FAC-2026-012. */
+const DOC_NUMBER = /^[A-Z]{3}-\d{4}-\d{3}$/;
+/* Le document doit exister dans l'état du compte pour partir par e-mail. */
+function docExists(stateText, number) {
+  const wanted = String(number || '').trim();
+  if (!DOC_NUMBER.test(wanted)) return false;
+  try {
+    const state = JSON.parse(stateText || '{}');
+    return (Array.isArray(state.docs) ? state.docs : []).some((d) => d && String(d.number) === wanted);
+  } catch { return false; }
 }
 
 /* Une origine illisible ("null", valeur bricolée) est refusée, jamais une
