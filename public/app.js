@@ -1047,7 +1047,7 @@ function reportModal() {
     <label>${T('month')}</label><select id="rpMonth">${months.map((k) => `<option value="${k}" ${k === todayISO().slice(0, 7) ? 'selected' : ''}>${esc(monthLabel(k))}</option>`).join('')}</select>
     <button class="btn" id="rpOk">${T('downloadPdf')}</button>
     <button class="btn out" id="rpNo">${T('cancel')}</button>
-    ${window.jspdf ? '' : `<p class="hint">${T('pdfFirstHint')}</p>`}`);
+    ${window.jspdf || arabicPdf() ? '' : `<p class="hint">${T('pdfFirstHint')}</p>`}`);
   m.querySelector('#rpNo').onclick = () => m.remove();
   m.querySelector('#rpOk').onclick = () => { const k = m.querySelector('#rpMonth').value; m.remove(); downloadReport(k); };
 }
@@ -2129,7 +2129,7 @@ function saleDone(sale) {
     <button class="btn whats" id="rdWa">${T('sendReceipt')}</button>
     <button class="btn pdf" id="rdPdf">${T('receiptPdf')}</button>
     <button class="btn out" id="rdNo">${T('close')}</button>
-    ${window.jspdf ? '' : `<p class="hint">${T('pdfFirstHint')}</p>`}`);
+    ${window.jspdf || arabicPdf() ? '' : `<p class="hint">${T('pdfFirstHint')}</p>`}`);
   m.querySelector('#rdWa').onclick = () => { m.remove(); waSale(sale.id); };
   m.querySelector('#rdPdf').onclick = () => { m.remove(); shareReceiptPDF(sale.id); };
   m.querySelector('#rdNo').onclick = () => m.remove();
