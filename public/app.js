@@ -2270,7 +2270,7 @@ function docSnapshot(d) {
     paidOn: d.kind === 'FAC' && d.paidDate ? dayFR(d.paidDate) : '',
     /* Le client peut répondre à la boutique depuis la facture. Le numéro part
        sans mise en forme : le serveur ne garde de toute façon que les chiffres. */
-    wa: String((me && me.phone) || '').replace(/[^\d+]/g, '').replace('+', ''),
+    wa: String((db.settings && db.settings.wa) || (me && me.phone) || '').replace(/[^\d+]/g, '').replace('+', ''),
     waText: `${T('waShopText')} ${d.number}.`,
     client: { name: d.party || '', phone: d.clientPhone || '', email: d.clientEmail || '', address: d.clientAddress || '' },
     lines: (Array.isArray(d.lines) ? d.lines : []).map((l) => ({ label: l.label, qty: l.qty, price: money(+l.price), amount: money((+l.qty || 1) * +l.price) })),
@@ -3046,6 +3046,8 @@ function settingsModal() {
     <label>${T('city')}</label><input id="setCity" value="${esc(db.settings.city || '')}">
     <label>${T('district')}</label><input id="setDistrict" value="${esc(db.settings.district || '')}">
     <label>${T('address')}</label><input id="setAddress" value="${esc(db.settings.address || '')}">
+    <label>${T('shopWa')}</label><input id="setWa" inputmode="tel" value="${esc(db.settings.wa || '')}" placeholder="+225 07 00 00 00 00">
+    <p class="hint">${T('shopWaHint')}</p>
     </details>
     <details><summary>${T('secSales')}</summary>
     <label>${T('vat')}</label><input id="setVat" inputmode="numeric" value="${esc(db.settings.vat == null ? 18 : db.settings.vat)}">
@@ -3223,6 +3225,7 @@ function settingsModal() {
     db.settings.city = d.querySelector('#setCity').value.trim();
     db.settings.district = d.querySelector('#setDistrict').value.trim();
     db.settings.address = d.querySelector('#setAddress').value.trim();
+    db.settings.wa = d.querySelector('#setWa').value.trim().slice(0, 24);
     db.settings.vat = Math.max(0, Math.round(+d.querySelector('#setVat').value || 0));
     db.settings.remindDays = Math.min(365, Math.max(1, Math.round(+d.querySelector('#setRemindDays').value || 30)));
     db.settings.logo = logoDraft;
