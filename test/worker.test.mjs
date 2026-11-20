@@ -207,6 +207,21 @@ test('la page publique d’une facture n’exécute rien de ce qu’on lui envoi
   assert.equal(publicDocHtml('pas du json'), null, 'contenu illisible : rien à afficher');
 });
 
+test('la page publique dit si la facture est payée', () => {
+  const base = { title: 'Facture', number: 'FAC-2026-001', shop: 'Boutique', lines: [], ht: '1 FCFA', ttc: '1 FCFA' };
+  const paid = publicDocHtml(JSON.stringify({ ...base, kind: 'FAC', paid: true, paidOn: '12/11/2026' }));
+  assert.ok(paid.includes('Payée'), 'badge payée');
+  assert.ok(paid.includes('payée le 12/11/2026'), 'date du paiement');
+  assert.ok(paid.includes('state ok'));
+  const unpaid = publicDocHtml(JSON.stringify({ ...base, kind: 'FAC', paid: false }));
+  assert.ok(unpaid.includes('Non payée'), 'badge non payée');
+  assert.ok(unpaid.includes('state warn'));
+  const quote = publicDocHtml(JSON.stringify({ ...base, title: 'Devis', number: 'DEV-2026-002', kind: 'DEV' }));
+  assert.ok(!quote.includes('state warn'), 'un devis n’est ni payé ni impayé');
+  const trap = publicDocHtml(JSON.stringify({ ...base, kind: 'FAC', paid: true, paidOn: '<b>x</b>' }));
+  assert.ok(!trap.includes('<b>x</b>'), 'date de paiement échappée');
+});
+
 test('cleanSrc ne garde qu’un mot de canal', () => {
   assert.equal(cleanSrc(' Marche '), 'marche');
   assert.equal(cleanSrc('a/b?c'), 'abc');

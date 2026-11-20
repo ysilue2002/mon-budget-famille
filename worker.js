@@ -388,6 +388,8 @@ async function api(request, env, url) {
     if (src) {
       const day = new Date().toISOString().slice(0, 10);
       await env.DB.prepare('INSERT INTO installs (src, day, hits) VALUES (?, ?, 1) ON CONFLICT(src, day) DO UPDATE SET hits = hits + 1').bind(src, day).run();
+      /* Le compteur ne raconte que six mois : au-delà, il ne dit plus rien. */
+      await env.DB.prepare('DELETE FROM installs WHERE day < ?').bind(new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10)).run();
     }
     const cookie = await createSession(env, id);
     return json({ user: publicUser({ id, email: email || null, phone: phone || null }) }, 200, { 'set-cookie': cookie });
@@ -570,9 +572,14 @@ async function api(request, env, url) {
     if (await blocked(env, 'publish:' + user.id, 120)) return json({ error: 'slow' }, 429);
     await tooMany(env, 'publish:' + user.id, 120, 60 * 60000);
     const token = (await sha256(dataOwner(user) + ':' + number)).slice(0, 24);
-    await env.DB.prepare(
-      'INSERT INTO public_docs (token, user_id, number, json, updated) VALUES (?, ?, ?, ?, ?) ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, number = excluded.number, json = excluded.json, updated = excluded.updated',
-    ).bind(token, dataOwner(user), number, snap, Date.now()).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO public_docs (token, user_id, number, json, updated) VALUES (?, ?, ?, ?, ?) ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, number = excluded.number, json = excluded.json, updated = excluded.updated',
+      ).bind(token, dataOwner(user), number, snap, Date.now()),
+      /* Un lien de facture ne sert qu'au client du moment : on jette les copies
+         que plus personne n'ouvre, sinon la base grossit sans fin. */
+      env.DB.prepare('DELETE FROM public_docs WHERE updated < ?').bind(Date.now() - 400 * 86400000),
+    ]);
     return json({ token, url: `${url.origin}/f/${token}` });
   }
 
@@ -863,6 +870,9 @@ table{width:100%;border-collapse:collapse;margin:10px 0}
 th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #e6ece7;font-size:16px}
 th{font-size:14px;text-transform:uppercase;color:#5b6b60}
 .n{text-align:right;white-space:nowrap}
+.state{display:inline-block;margin:6px 0 2px;padding:6px 12px;border-radius:9px;font-weight:700;font-size:15px}
+.state.ok{background:#e5f5e9;color:#14532d;border:1px solid #14532d}
+.state.warn{background:#fff4d6;color:#7a4a00;border:1px solid #b7791f}
 .notes{color:#5b6b60;font-size:14px;margin-top:14px}
 footer{margin-top:16px;padding-top:12px;border-top:1px solid #e6ece7;font-size:13px;color:#5b6b60;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .print{display:inline-flex;align-items:center;min-height:48px;padding:10px 18px;border-radius:12px;border:2px solid #14532d;background:#fff;color:#14532d;font:inherit;font-weight:700;cursor:pointer;margin-top:14px}
@@ -886,6 +896,7 @@ footer{margin-top:16px;padding-top:12px;border-top:1px solid #e6ece7;font-size:1
 ${vat}
 <tr><th colspan="3">${L('total', 'Total TTC')}</th><td class="n">${escHtml(s.ttc)}</td></tr>
 </tbody></table>
+${s.kind === 'FAC' ? `<div class="state ${s.paid ? 'ok' : 'warn'}">${s.paid ? `✓ ${L('paid', 'Payée')}${s.paidOn ? ' · ' + L('paidOn', 'payée le') + ' ' + escHtml(s.paidOn) : ''}` : L('unpaid', 'Non payée')}</div>` : ''}
 ${notes ? `<div class="notes">${notes}</div>` : ''}
 <button class="print" onclick="window.print()">${L('print', 'Imprimer')}</button>
 <footer><span>Assistant Commercial</span><span>${escHtml(s.number)}</span></footer>

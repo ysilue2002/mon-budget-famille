@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>og</title>
+<style>
+  @font-face { font-family: x; src: local("Segoe UI"); }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    width: 1200px; height: 630px; overflow: hidden;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    background: #0d3b22;
+    color: #fff;
+    position: relative;
+  }
+  .glow {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(circle, rgba(52,211,153,.35), rgba(52,211,153,0) 70%);
+  }
+  .g1 { width: 900px; height: 900px; right: -300px; top: -380px; }
+  .g2 { width: 700px; height: 700px; left: -260px; bottom: -380px; opacity: .7; }
+  .wrap { position: absolute; inset: 0; padding: 64px 72px; display: flex; gap: 40px; align-items: center; }
+  .left { flex: 1 1 auto; min-width: 0; }
+  .pill {
+    display: inline-block; padding: 10px 18px; border-radius: 999px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.28);
+    font-size: 22px; font-weight: 600; letter-spacing: .3px; margin-bottom: 26px;
+  }
+  h1 { font-size: 76px; line-height: 1.02; letter-spacing: -1.5px; font-weight: 800; }
+  h1 span { color: #6ee7a8; }
+  p { margin-top: 22px; font-size: 30px; line-height: 1.3; color: #d7eadc; max-width: 560px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+  .chip {
+    padding: 10px 18px; border-radius: 12px; font-size: 22px; font-weight: 600;
+    background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.18);
+  }
+  .phone {
+    width: 286px; height: 462px; flex: 0 0 auto; border-radius: 40px; padding: 12px;
+    background: #082514; border: 3px solid rgba(255,255,255,.22);
+    box-shadow: 0 40px 80px rgba(0,0,0,.45); transform: rotate(-5deg);
+  }
+  .screen { height: 100%; border-radius: 32px; background: #f7f4ea; padding: 22px 18px; color: #14261b; }
+  .shop { font-size: 15px; font-weight: 700; color: #14532d; text-transform: uppercase; letter-spacing: .6px; }
+  .big { font-size: 34px; font-weight: 800; margin-top: 8px; }
+  .sub { font-size: 14px; color: #5b6b60; margin-top: 2px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+  .tile { background: #fff; border: 1px solid #d9e5db; border-radius: 14px; padding: 12px; }
+  .tile b { display: block; font-size: 19px; color: #14532d; }
+  .tile small { font-size: 12px; color: #5b6b60; }
+  .cta {
+    margin-top: 18px; border-radius: 14px; background: #14532d; color: #fff;
+    text-align: center; padding: 15px; font-size: 19px; font-weight: 700;
+  }
+</style>
+</head>
+<body>
+  <div class="glow g1"></div>
+  <div class="glow g2"></div>
+  <div class="wrap">
+    <div class="left">
+      <div class="pill">Français · English · العربية</div>
+      <h1>Assistant<br><span>Commercial</span></h1>
+      <p>Votre boutique dans votre poche,<br>même sans réseau.</p>
+      <div class="chips">
+        <div class="chip">Vendre</div>
+        <div class="chip">Stock</div>
+        <div class="chip">Crédits</div>
+        <div class="chip">Bénéfice</div>
+      </div>
+    </div>
+    <div class="phone">
+      <div class="screen">
+        <div class="shop">Ma boutique</div>
+        <div class="big">47 500 FCFA</div>
+        <div class="sub">Ventes d'aujourd'hui</div>
+        <div class="tiles">
+          <div class="tile"><b>12</b><small>ventes</small></div>
+          <div class="tile"><b>8 000</b><small>à encaisser</small></div>
+          <div class="tile"><b>3</b><small>en stock bas</small></div>
+          <div class="tile"><b>0</b><small>à livrer</small></div>
+        </div>
+        <div class="cta">＋ Nouvelle vente</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

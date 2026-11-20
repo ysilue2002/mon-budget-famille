@@ -2178,6 +2178,12 @@ function waOpen(phone, text) {
 }
 
 /* ---------------- impression ---------------- */
+/* Une facture imprimée dit tout de suite si elle est réglée : le client n'a
+   pas à demander, et le papier ne ment pas sur l'état du compte. */
+function paidLine(d) {
+  if (d.kind !== 'FAC') return '';
+  return `<div class="docPaid ${d.paidDate ? 'ok' : 'warn'}">${d.paidDate ? `${T('invoicePaid')} · ${T('invoicePaidOn')} ${dayFR(d.paidDate)}` : T('invoiceUnpaid')}</div>`;
+}
 function docHTML(d, format) {
   const s = db.settings || {};
   const place = [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · ');
@@ -2194,6 +2200,7 @@ function docHTML(d, format) {
       <div class="tot"><span>${T('ht')}</span><span>${money(d.total)}</span></div>
       ${rate ? `<div class="tot"><span>${T('vatShort')} ${rate} %</span><span>${money(vatOf(d))}</span></div>` : ''}
       <div class="tot"><span>${T('ttc')}</span><span>${money(amountOf(d))}</span></div>
+      ${paidLine(d)}
       <div class="docQr" data-qr="1"></div>
       <p class="small">${T('thanks')}</p>`;
   }
@@ -2227,6 +2234,7 @@ function docHTML(d, format) {
       ${rate ? `<div>${T('vatShort')} (${rate} %) : ${money(vatOf(d))}</div>` : ''}
       <div>${T('ttc')} : ${money(amountOf(d))}</div>
     </div>
+    ${paidLine(d)}
     <div class="docNotes">
       <div>${T('docNote1')}</div>
       <div>${T('docNote2')}</div>
@@ -2256,14 +2264,20 @@ function docSnapshot(d) {
     contact: [me && me.phone, me && me.email].filter(Boolean).join(' · '),
     title: d.kind === 'DEV' ? T('quote') : T('invoice'),
     number: d.number,
+    kind: d.kind,
     date: dayFR(d.date),
+    paid: !!(d.kind === 'FAC' && d.paidDate),
+    paidOn: d.kind === 'FAC' && d.paidDate ? dayFR(d.paidDate) : '',
     client: { name: d.party || '', phone: d.clientPhone || '', email: d.clientEmail || '', address: d.clientAddress || '' },
     lines: (Array.isArray(d.lines) ? d.lines : []).map((l) => ({ label: l.label, qty: l.qty, price: money(+l.price), amount: money((+l.qty || 1) * +l.price) })),
     ht: money(d.total),
     vat: rate ? { label: `${T('vatShort')} ${rate} %`, value: money(vatOf(d)) } : null,
     ttc: money(amountOf(d)),
     notes: [T('docNote1'), T('docNote2')],
-    labels: { client: T('client'), line: T('line'), qty: T('quantity'), price: T('unitPriceHT'), ht: T('ht'), total: T('ttc') },
+    labels: {
+      client: T('client'), line: T('line'), qty: T('quantity'), price: T('unitPriceHT'), ht: T('ht'), total: T('ttc'),
+      paid: T('invoicePaid'), unpaid: T('invoiceUnpaid'), paidOn: T('invoicePaidOn'),
+    },
   };
 }
 /* Hors ligne, le lien ne peut pas être publié : le QR retombe sur l'adresse de
@@ -2698,6 +2712,8 @@ document.addEventListener('click', async (e) => {
       d.paidDate = d.paidDate ? '' : todayISO();
       d.u = Date.now();
       saveDB(); tab = 'docs'; render();
+      /* Le lien déjà envoyé au client doit dire la même chose que le papier. */
+      docLink(d);
     }
   }
   /* Facture → vente : la vente devient la seule source du chiffre d'affaires,
