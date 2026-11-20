@@ -5,21 +5,24 @@ const DEFAULTS = {
   en: "Hello [Nom du Client], this is [Nom de la Boutique]. Invoice [Numéro Facture] dated [Date Facture] for [Montant] is still unpaid. Thank you.",
   ar: "مرحباً [Nom du Client]، هذه رسالة من [Nom de la Boutique]. الفاتورة [Numéro Facture] بتاريخ [Date Facture] بمبلغ [Montant] لا تزال غير مسددة. شكراً لكم.",
 };
+/* [code, nom, monnaie, indicatif téléphonique] — l'indicatif sert à composer
+   le lien WhatsApp de la boutique sans que le commerçant ait à le connaître. */
 const COUNTRIES = [
-  ['CI', "Côte d'Ivoire", 'FCFA'], ['SN', 'Sénégal', 'FCFA'], ['ML', 'Mali', 'FCFA'], ['BF', 'Burkina Faso', 'FCFA'],
-  ['NE', 'Niger', 'FCFA'], ['TG', 'Togo', 'FCFA'], ['BJ', 'Bénin', 'FCFA'], ['GN', 'Guinée', 'GNF'],
-  ['CM', 'Cameroun', 'FCFA'], ['GA', 'Gabon', 'FCFA'], ['CG', 'Congo', 'FCFA'], ['CD', 'RD Congo', 'FC'],
-  ['TD', 'Tchad', 'FCFA'], ['CF', 'Centrafrique', 'FCFA'], ['MG', 'Madagascar', 'Ar'], ['MR', 'Mauritanie', 'UM'],
-  ['MA', 'Maroc', 'DH'], ['DZ', 'Algérie', 'DA'], ['TN', 'Tunisie', 'DT'], ['FR', 'France', '€'],
-  ['BE', 'Belgique', '€'], ['CH', 'Suisse', 'CHF'], ['CA', 'Canada', '$'], ['US', 'États-Unis', '$'],
-  ['GB', 'Royaume-Uni', '£'], ['NG', 'Nigéria', '₦'], ['GH', 'Ghana', 'GH₵'], ['KE', 'Kenya', 'KSh'],
-  ['ZA', 'Afrique du Sud', 'R'], ['IN', 'Inde', '₹'], ['CN', 'Chine', '¥'], ['AE', 'Émirats arabes unis', 'AED'],
-  ['SA', 'Arabie saoudite', 'SAR'], ['BR', 'Brésil', 'R$'],
+  ['CI', "Côte d'Ivoire", 'FCFA', '225'], ['SN', 'Sénégal', 'FCFA', '221'], ['ML', 'Mali', 'FCFA', '223'], ['BF', 'Burkina Faso', 'FCFA', '226'],
+  ['NE', 'Niger', 'FCFA', '227'], ['TG', 'Togo', 'FCFA', '228'], ['BJ', 'Bénin', 'FCFA', '229'], ['GN', 'Guinée', 'GNF', '224'],
+  ['CM', 'Cameroun', 'FCFA', '237'], ['GA', 'Gabon', 'FCFA', '241'], ['CG', 'Congo', 'FCFA', '242'], ['CD', 'RD Congo', 'FC', '243'],
+  ['TD', 'Tchad', 'FCFA', '235'], ['CF', 'Centrafrique', 'FCFA', '236'], ['MG', 'Madagascar', 'Ar', '261'], ['MR', 'Mauritanie', 'UM', '222'],
+  ['MA', 'Maroc', 'DH', '212'], ['DZ', 'Algérie', 'DA', '213'], ['TN', 'Tunisie', 'DT', '216'], ['FR', 'France', '€', '33'],
+  ['BE', 'Belgique', '€', '32'], ['CH', 'Suisse', 'CHF', '41'], ['CA', 'Canada', '$', '1'], ['US', 'États-Unis', '$', '1'],
+  ['GB', 'Royaume-Uni', '£', '44'], ['NG', 'Nigéria', '₦', '234'], ['GH', 'Ghana', 'GH₵', '233'], ['KE', 'Kenya', 'KSh', '254'],
+  ['ZA', 'Afrique du Sud', 'R', '27'], ['IN', 'Inde', '₹', '91'], ['CN', 'Chine', '¥', '86'], ['AE', 'Émirats arabes unis', 'AED', '971'],
+  ['SA', 'Arabie saoudite', 'SAR', '966'], ['BR', 'Brésil', 'R$', '55'],
 ];
 const COMPANY_FORMS = ['Entreprise individuelle', 'SARL', 'SARLU', 'SA', 'SAS', 'SASU', 'Coopérative', 'Association', 'Auto-entrepreneur', 'Autre'];
 const countryOf = (code) => COUNTRIES.find((c) => c[0] === code) || COUNTRIES[0];
 const countryName = (code) => countryOf(code)[1];
 const currencyFor = (code) => countryOf(code)[2];
+const dialOf = (code) => countryOf(code)[3] || '';
 const countryOptions = (sel) => COUNTRIES.map((c) => `<option value="${c[0]}" ${c[0] === sel ? 'selected' : ''}>${c[1]} — ${c[2]}</option>`).join('');
 const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f === sel ? 'selected' : ''}>${f}</option>`).join('');
 const fresh = () => ({
@@ -3065,7 +3068,7 @@ function settingsModal() {
     <label>${T('city')}</label><input id="setCity" value="${esc(db.settings.city || '')}">
     <label>${T('district')}</label><input id="setDistrict" value="${esc(db.settings.district || '')}">
     <label>${T('address')}</label><input id="setAddress" value="${esc(db.settings.address || '')}">
-    <label>${T('shopWa')}</label><input id="setWa" inputmode="tel" value="${esc(db.settings.wa || '')}" placeholder="+225 07 00 00 00 00">
+    <label>${T('shopWa')}</label><input id="setWa" inputmode="tel" value="${esc(db.settings.wa || '')}" placeholder="+${dialOf(db.settings.country || 'CI')} 00 00 00 00 00">
     <p class="hint">${T('shopWaHint')}</p>
     </details>
     <details><summary>${T('secSales')}</summary>
@@ -3127,6 +3130,7 @@ function settingsModal() {
     <details><summary>${T('secPromo')}</summary>
     <button class="btn" id="setPresent">${T('presentApp')}</button>
     <button class="btn out" id="setShareApp">${T('shareApp')}</button>
+    <button class="btn out" id="setA4">${T('a4Check')}</button>
     <p class="hint">${T('presentHint')}</p>
     <div id="installsBox"></div>
     </details>
@@ -3150,6 +3154,9 @@ function settingsModal() {
   if (presentBtn) presentBtn.onclick = openPresentation;
   const shareBtn = d.querySelector('#setShareApp');
   if (shareBtn) shareBtn.onclick = shareAppLink;
+  /* Feuille A4 de contrôle : à ouvrir avant une impression en série. */
+  const a4Btn = d.querySelector('#setA4');
+  if (a4Btn) a4Btn.onclick = () => window.open('a4', '_blank', 'noopener');
   loadInstalls();
   wireAccount(d);
   /* Un vendeur ne peut pas toucher aux réglages de la boutique : on grise les
@@ -3196,7 +3203,12 @@ function settingsModal() {
   d.querySelector('#setImport').onclick = importDB;
   const setCountry = d.querySelector('#setCountry');
   const setCur = d.querySelector('#setCur');
-  setCountry.onchange = () => { setCur.textContent = currencyFor(setCountry.value); };
+  setCountry.onchange = () => {
+    setCur.textContent = currencyFor(setCountry.value);
+    /* L'exemple de numéro suit le pays choisi. */
+    const wa = d.querySelector('#setWa');
+    if (wa) wa.placeholder = '+' + dialOf(setCountry.value) + ' 00 00 00 00 00';
+  };
   const logoPrev = d.querySelector('#logoPrev');
   d.querySelector('#setLogo').onchange = () => {
     const f = d.querySelector('#setLogo').files[0];
@@ -3246,7 +3258,15 @@ function settingsModal() {
     db.settings.city = d.querySelector('#setCity').value.trim();
     db.settings.district = d.querySelector('#setDistrict').value.trim();
     db.settings.address = d.querySelector('#setAddress').value.trim();
-    db.settings.wa = d.querySelector('#setWa').value.trim().slice(0, 24);
+    /* Un numéro écrit à la manière locale (07 00 00 00 00) reçoit l'indicatif
+       du pays : le lien WhatsApp doit toujours être au format international. */
+    let wa = d.querySelector('#setWa').value.trim().slice(0, 32);
+    const dial = dialOf(db.settings.country || 'CI');
+    if (dial && /^0\d/.test(wa.replace(/[\s.-]/g, ''))) {
+      const local = wa.replace(/[\s.-]/g, '').slice(1);
+      wa = '+' + dial + ' ' + local;
+    }
+    db.settings.wa = wa;
     db.settings.vat = Math.max(0, Math.round(+d.querySelector('#setVat').value || 0));
     db.settings.remindDays = Math.min(365, Math.max(1, Math.round(+d.querySelector('#setRemindDays').value || 30)));
     db.settings.logo = logoDraft;

@@ -359,8 +359,10 @@ async function api(request, env, url) {
 
   if (path === '/api/signup' && request.method === 'POST') {
     const ip = request.headers.get('cf-connecting-ip') || 'local';
-    if (await blocked(env, 'signup:' + ip, 10)) return json({ error: 'slow' }, 429);
-    await tooMany(env, 'signup:' + ip, 10, 60 * 60000);
+    /* 20 par heure : un patron et ses vendeurs partagent souvent le même Wi-Fi,
+       et 10 les bloquait au milieu d'une mise en route. */
+    if (await blocked(env, 'signup:' + ip, 20)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'signup:' + ip, 20, 60 * 60000);
     const body = await readBody(request);
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
