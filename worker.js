@@ -831,7 +831,7 @@ function sameOrigin(request, url) {
 const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => HTML_ESC[c]);
 
-function publicDocHtml(text) {
+function publicDocHtml(text, nonce) {
   let s;
   try { s = JSON.parse(text || '{}'); } catch { return null; }
   if (!s || typeof s !== 'object') return null;
@@ -898,7 +898,8 @@ ${vat}
 </tbody></table>
 ${s.kind === 'FAC' ? `<div class="state ${s.paid ? 'ok' : 'warn'}">${s.paid ? `✓ ${L('paid', 'Payée')}${s.paidOn ? ' · ' + L('paidOn', 'payée le') + ' ' + escHtml(s.paidOn) : ''}` : L('unpaid', 'Non payée')}</div>` : ''}
 ${notes ? `<div class="notes">${notes}</div>` : ''}
-<button class="print" onclick="window.print()">${L('print', 'Imprimer')}</button>
+<button class="print" id="docPrint">${L('print', 'Imprimer')}</button>
+<script nonce="${escHtml(nonce)}">document.getElementById('docPrint').addEventListener('click', function () { window.print(); });</script>
 <footer><span>Assistant Commercial</span><span>${escHtml(s.number)}</span></footer>
 </main>
 </body>
@@ -914,17 +915,27 @@ export default {
     /* Page publique d'une facture, ouverte par le QR du document. */
     const share = url.pathname.match(/^\/f\/([a-f0-9]{24})$/);
     if (share) {
-      const headers = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' };
-      if (!env.DB) return new Response(docMissing, { status: 503, headers });
+      /* Le seul script de la page est celui du bouton Imprimer : il porte un
+         nonce, et rien d'autre ne peut s'exécuter, même si un jour un champ
+         échappé passait entre les mailles. */
+      const nonce = hex(crypto.getRandomValues(new Uint8Array(12)));
+      const base = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' };
+      const headers = {
+        ...base,
+        'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+      };
+      const off = { ...base, 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" };
+      if (!env.DB) return new Response(docMissing, { status: 503, headers: off });
       try {
         await ensureSchema(env);
         const row = await env.DB.prepare('SELECT json FROM public_docs WHERE token = ?').bind(share[1]).first();
-        const html = row ? publicDocHtml(row.json) : null;
-        return new Response(html || docMissing, { status: html ? 200 : 404, headers });
+        const html = row ? publicDocHtml(row.json, nonce) : null;
+        return new Response(html || docMissing, { status: html ? 200 : 404, headers: html ? headers : off });
       } catch {
-        return new Response(docMissing, { status: 503, headers });
+        return new Response(docMissing, { status: 503, headers: off });
       }
     }
+
     if (url.pathname.startsWith('/api/')) {
       if (!env.DB) return json({ error: 'database' }, 500);
       await ensureSchema(env);

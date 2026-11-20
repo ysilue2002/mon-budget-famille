@@ -231,6 +231,12 @@ function show(lang) {
   document.querySelectorAll('[data-set-lang]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.setLang === lang)));
 }
 document.querySelectorAll('[data-set-lang]').forEach((b) => { b.onclick = () => show(b.dataset.setLang); });
+/* Chaque langue a sa page (presentation-en.html, presentation-ar.html) : la
+   page s'ouvre dans la langue écrite dans <html lang>, ou dans celle du lien. */
+const LANGS_OK = ['fr', 'en', 'ar'];
+const asked = new URLSearchParams(location.search).get('lang');
+const page = document.documentElement.lang;
+show(LANGS_OK.includes(asked) ? asked : (LANGS_OK.includes(page) ? page : 'fr'));
 /* Le canal (marche, flyer, radio) est transporté jusqu'à l'application : le
    QR et le bouton le gardent, pour savoir d'où viennent les installations. */
 const src = (new URLSearchParams(location.search).get('src') || '').replace(/[^a-z0-9-]/gi, '').slice(0, 24).toLowerCase();

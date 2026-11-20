@@ -13,6 +13,7 @@ const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
   + '\nexport { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients, publicDocHtml, cleanSrc };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
 const { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients, publicDocHtml, cleanSrc } = mod;
+const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
 const SELLER = 'seller-1';
@@ -220,6 +221,30 @@ test('la page publique dit si la facture est payée', () => {
   assert.ok(!quote.includes('state warn'), 'un devis n’est ni payé ni impayé');
   const trap = publicDocHtml(JSON.stringify({ ...base, kind: 'FAC', paid: true, paidOn: '<b>x</b>' }));
   assert.ok(!trap.includes('<b>x</b>'), 'date de paiement échappée');
+});
+
+test('la page publique ne laisse passer que le script du bouton Imprimer', () => {
+  const html = publicDocHtml(JSON.stringify({ title: 'Facture', number: 'FAC-2026-001', shop: 'B', lines: [], ht: '', ttc: '' }), 'abc123');
+  assert.ok(html.includes('nonce="abc123"'), 'script autorisé par nonce');
+  assert.ok(html.includes('id="docPrint"'));
+  assert.ok(!html.includes('onclick='), 'aucun gestionnaire inline');
+  assert.ok(!html.includes('<script src'), 'aucun script externe');
+});
+
+test('chaque langue a sa page de présentation et sa vignette', () => {
+  const src = fs.readFileSync(path.join(root, 'public', 'presentation.html'), 'utf8');
+  const en = variant(src, 'en');
+  assert.ok(en.includes('<html lang="en"'), 'langue de la page');
+  assert.ok(en.includes('/og-en.png'), 'vignette anglaise');
+  assert.ok(en.includes('content="en_US"'), 'locale anglaise');
+  assert.ok(en.includes('/presentation-en"'), 'adresse propre');
+  assert.ok(!en.includes('/og.png"'), 'aucune vignette française');
+  const ar = variant(src, 'ar');
+  assert.ok(ar.includes('/og-ar.png'));
+  assert.ok(ar.includes('dir="rtl"'), 'arabe de droite à gauche');
+  assert.ok(ar.includes('/presentation-ar"'));
+  assert.ok(variant(src, 'qq').includes('/og.png'), 'langue inconnue : français');
+  assert.ok(variant(variant(src, 'en'), 'ar').includes('/og-ar.png'), 'pas de suffixe empilé');
 });
 
 test('cleanSrc ne garde qu’un mot de canal', () => {

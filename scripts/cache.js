@@ -35,9 +35,13 @@ const NOT_PRECACHED = new Set([
        n'ont rien à faire dans le préchargement de l'application. */
     'presentation.html',
     'flyer.html',
+    'presentation-en.html',
+    'presentation-ar.html',
     /* Vignette d'aperçu des liens (1200 × 630) : lue par WhatsApp et les
        réseaux, jamais affichée dans l'application. */
     'og.png',
+    'og-en.png',
+    'og-ar.png',
 ]);
 
 function walk(dir, base = '') {

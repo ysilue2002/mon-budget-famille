@@ -2280,14 +2280,35 @@ function docSnapshot(d) {
     },
   };
 }
+/* Une facture imprimée deux fois n'a pas besoin d'être republiée : on garde le
+   lien tant que le contenu n'a pas bougé. Le cache est rangé par compte, pour
+   qu'un vendeur qui change de boutique ne voie pas le lien de la précédente. */
+const pubCache = new Map();
+function contentKey(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16) + ':' + s.length;
+}
+const accountKey = () => String((me && (me.ownerId || me.id)) || 'anonyme');
 /* Hors ligne, le lien ne peut pas être publié : le QR retombe sur l'adresse de
    la boutique, comme avant. */
 async function docLink(d) {
+  const snapshot = docSnapshot(d);
+  const json = JSON.stringify(snapshot);
+  const key = accountKey() + '|' + d.number;
+  const hit = pubCache.get(key);
+  const hash = contentKey(json);
+  if (hit && hit.hash === hash) return hit.url;
   try {
-    const r = await api('/api/doc/publish', 'POST', { number: d.number, snapshot: docSnapshot(d) });
-    if (r.ok && r.data && r.data.url) return String(r.data.url);
+    const r = await api('/api/doc/publish', 'POST', { number: d.number, snapshot });
+    if (r.ok && r.data && r.data.url) {
+      const url = String(r.data.url);
+      pubCache.set(key, { hash, url });
+      return url;
+    }
   } catch { /* réseau absent */ }
-  return appUrl();
+  /* Mieux vaut un lien un peu ancien que pas de lien du tout. */
+  return hit ? hit.url : appUrl();
 }
 async function printFormat(id, format) {
   const d = db.docs.find((x) => x.id === id);
@@ -2983,7 +3004,10 @@ function rememberChannel() {
   } catch { /* stockage indisponible : pas de mesure, rien ne casse */ }
 }
 function presentationUrl() {
-  const u = new URL('presentation', location.href);
+  /* Chaque langue a sa page, avec sa vignette : le lien partagé s'ouvre dans la
+     langue de celui qui partage. */
+  const page = lang() === 'fr' ? 'presentation' : 'presentation-' + (lang() === 'en' ? 'en' : 'ar');
+  const u = new URL(page, location.href);
   if (channel()) u.searchParams.set('src', channel());
   return u.href;
 }

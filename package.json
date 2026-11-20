@@ -7,13 +7,14 @@
     "start": "node server.js",
     "build": "node build.js",
     "minify": "node scripts/minify.js",
-    "cache": "node scripts/minify.js && node scripts/cache.js",
+    "cache": "node scripts/minify.js && node scripts/presentation.mjs && node scripts/cache.js",
     "icons": "node scripts/icons.js",
     "check:cache": "node scripts/cache.js --check",
     "deploy:prepare": "node scripts/cache.js && node scripts/cache.js --check && node --test test/cache.test.mjs",
     "dev": "node scripts/minify.js && node scripts/cache.js && wrangler dev",
     "test": "node --test",
-    "dev:reset": "node -e \"require('node:fs').rmSync('.wrangler/state',{recursive:true,force:true})\""
+    "dev:reset": "node -e \"require('node:fs').rmSync('.wrangler/state',{recursive:true,force:true})\"",
+    "og": "node scripts/og.js"
   },
   "engines": {
     "node": ">=20"
