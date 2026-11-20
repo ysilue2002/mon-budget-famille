@@ -3917,7 +3917,8 @@ function showAuthGate() {
          <button class="btn" id="gGo">${T('createAccount')}</button><p class="err" id="gErr"></p>`
       : `<label>${T('loginId')}</label><input id="gLoginId" type="text" autocomplete="username" placeholder="awa@exemple.com / +225 07 00 00 00 00">
          <label>${T('password')}</label><input id="gPass" type="password" autocomplete="current-password">
-         <button class="btn" id="gGo">${T('signIn')}</button><p class="err" id="gErr"></p>`;
+         <button class="btn" id="gGo">${T('signIn')}</button>
+         <p class="hint">${T('loginHint')}</p><p class="err" id="gErr"></p>`;
     const go = form.querySelector('#gGo');
     if (gateMode === 'signup') {
       const csel = form.querySelector('#gCountry');
@@ -3967,7 +3968,14 @@ function showAuthGate() {
         if (!identifier || !pass) { err.textContent = T('badCredentials'); return; }
         go.disabled = true;
         const e = await login(identifier, pass);
-        if (e) { go.disabled = false; err.textContent = e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
+        if (e) {
+          go.disabled = false;
+          /* Trois causes très différentes ne doivent pas donner le même message :
+             un mot de passe faux, une panne de réseau, ou un blocage temporaire
+             après trop d'essais (20 en 15 minutes). */
+          err.textContent = e === 'server' ? T('gateOffline') : e === 'slow' ? T('tooManyTries') : T('badCredentials');
+          return;
+        }
       }
       afterGate();
     };
