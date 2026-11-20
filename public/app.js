@@ -266,6 +266,25 @@ const num = (kind) => {
   return kind + '-' + y + '-' + String(db.seq[kind]).padStart(3, '0');
 };
 const lang = () => db.settings.lang || 'fr';
+/* Le français arrive avec la page ; l'anglais et l'arabe sont chargés à la
+   demande (22 et 21 Ko de moins à télécharger pour qui lit en français).
+   Sans réseau au premier changement : on reste en français, rien ne casse. */
+const i18nLoading = {};
+function ensureLang(id) {
+  const l = ['fr', 'en', 'ar'].includes(id) ? id : 'fr';
+  if (I18N[l]) return Promise.resolve(l);
+  if (!i18nLoading[l]) {
+    i18nLoading[l] = new Promise((resolve) => {
+      const min = document.querySelector('script[src$="i18n.min.js"]');
+      const s = document.createElement('script');
+      s.src = 'i18n-' + l + (min ? '.min.js' : '.js');
+      s.onload = () => resolve(I18N[l] ? l : 'fr');
+      s.onerror = () => { i18nLoading[l] = null; resolve('fr'); };
+      document.head.appendChild(s);
+    });
+  }
+  return i18nLoading[l];
+}
 const vatOf = (d) => Math.round(((Number(d.total) || 0) * (Number(d.vat) || 0)) / 100);
 const ttcOf = (d) => (Number(d.total) || 0) + vatOf(d);
 const amountOf = (d) => (Number(d.vat) ? ttcOf(d) : Number(d.total) || 0);
@@ -3207,9 +3226,11 @@ function settingsModal() {
     try { localStorage.setItem(BIG_KEY, bigCb.checked ? '1' : '0'); } catch {}
     applyBigText();
   };
-  d.querySelector('#setOk').onclick = () => {
+  d.querySelector('#setOk').onclick = async () => {
     db.shop = d.querySelector('#setShop').value.trim();
     const l = d.querySelector('#setLang').value;
+    /* Changer de langue télécharge son fichier avant de redessiner l'écran. */
+    await ensureLang(l);
     db.settings.reminder[db.settings.lang] = d.querySelector('#setRem').value;
     db.settings.invReminder = db.settings.invReminder || {};
     db.settings.invReminder[db.settings.lang] = d.querySelector('#setInvRem').value.trim();
@@ -3866,7 +3887,8 @@ function showLangGate() {
   document.body.appendChild(g);
   setBackgroundInert(true);
   g.querySelectorAll('[data-lang]').forEach((b) => {
-    b.onclick = () => {
+    b.onclick = async () => {
+      await ensureLang(b.dataset.lang);
       db.settings.lang = b.dataset.lang;
       saveDB(false);
       applyLang();
@@ -4063,9 +4085,10 @@ function setupServiceWorker() {
    de réseau, pas de service worker. */
 if (!globalThis.__AC_TEST__) {
   setInterval(syncTick, 20000);
-  render();
   const resetToken = new URLSearchParams(location.search).get('reset');
   (async () => {
+    await ensureLang(lang());
+    render();
     rememberChannel();
     await bootAccount();
     if (resetToken) { resetModal(resetToken); return; }

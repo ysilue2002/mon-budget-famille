@@ -399,8 +399,12 @@ async function api(request, env, url) {
     const body = await readBody(request);
     const identifier = String(body.login || body.email || '').trim();
     const ip = request.headers.get('cf-connecting-ip') || 'local';
-    const ipKey = 'login:' + ip;
-    if (await blocked(env, ipKey, 20)) return json({ error: 'slow' }, 429);
+    const ipKey = 'login-ip:' + ip;
+    /* Deux compteurs, pas un : une boutique, un cybercafé ou un réseau mobile
+       partagent une adresse IP. Une personne qui se trompe de mot de passe ne
+       doit pas bloquer ses vendeurs — seul son propre identifiant se bloque. */
+    const idKey = 'login-id:' + ip + ':' + (identifier.includes('@') ? identifier.toLowerCase() : digitsOf(identifier));
+    if (await blocked(env, idKey, 10) || await blocked(env, ipKey, 100)) return json({ error: 'slow' }, 429);
     const password = String(body.password || '');
     let user = null;
     if (identifier.includes('@')) {
@@ -421,9 +425,9 @@ async function api(request, env, url) {
         }
       }
     }
-    if (!user) { await tooMany(env, ipKey, 20, 15 * 60000); return json({ error: 'credentials' }, 401); }
+    if (!user) { await tooMany(env, idKey, 10, 15 * 60000); await tooMany(env, ipKey, 100, 15 * 60000); return json({ error: 'credentials' }, 401); }
     const hash = await pbkdf2(password, user.salt);
-    if (!same(hash, user.pass)) { await tooMany(env, ipKey, 20, 15 * 60000); return json({ error: 'credentials' }, 401); }
+    if (!same(hash, user.pass)) { await tooMany(env, idKey, 10, 15 * 60000); await tooMany(env, ipKey, 100, 15 * 60000); return json({ error: 'credentials' }, 401); }
     const cookie = await createSession(env, user.id);
     return json({ user: publicUser(user) }, 200, { 'set-cookie': cookie });
   }

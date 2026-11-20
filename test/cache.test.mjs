@@ -79,6 +79,13 @@ test('les scripts servis sont minifiés et à jour', () => {
   assert.match(read('public/index.html'), /src="i18n\.min\.js"/);
 });
 
+test('une seule langue est préchargée', () => {
+  const { urls } = cache.build();
+  assert.ok(urls.includes('./i18n.min.js'), 'le français est préchargé');
+  assert.ok(!urls.includes('./i18n-en.min.js'), 'l’anglais arrive à la demande');
+  assert.ok(!urls.includes('./i18n-ar.min.js'), 'l’arabe arrive à la demande');
+});
+
 test('le préchargement reste sous le budget de 1,2 Mo', () => {
   const { bytes } = cache.build();
   assert.ok(bytes < 1.2 * 1024 * 1024, `préchargement trop lourd : ${Math.round(bytes / 1024)} Ko`);

@@ -11,7 +11,7 @@ const esbuild = require('esbuild');
 
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
-const FILES = ['i18n.js', 'app.js'];
+const FILES = ['i18n.js', 'i18n-en.js', 'i18n-ar.js', 'app.js'];
 /* charset utf8 : les accents, l'arabe et les emojis restent lisibles dans le
    fichier au lieu d'être transformés en séquences \uXXXX. */
 const OPTIONS = { minify: true, target: 'es2020', charset: 'utf8', legalComments: 'none' };

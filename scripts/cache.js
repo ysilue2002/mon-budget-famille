@@ -31,12 +31,20 @@ const NOT_PRECACHED = new Set([
        servent qu'aux tests et à la lecture du code. */
     'app.js',
     'i18n.js',
+    'i18n-en.js',
+    'i18n-ar.js',
+    /* Langues autres que le français : téléchargées seulement si on les
+       choisit. Les précharger annulerait tout le gain. */
+    'i18n-en.min.js',
+    'i18n-ar.min.js',
     /* Pages de promotion (à partager, à imprimer) : ouvertes rarement, elles
        n'ont rien à faire dans le préchargement de l'application. */
     'presentation.html',
     'flyer.html',
     'presentation-en.html',
     'presentation-ar.html',
+    /* Page de contrôle d'impression : ouverte à la main, jamais au démarrage. */
+    'a4.html',
     /* Vignette d'aperçu des liens (1200 × 630) : lue par WhatsApp et les
        réseaux, jamais affichée dans l'application. */
     'og.jpg',

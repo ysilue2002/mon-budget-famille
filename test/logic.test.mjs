@@ -43,6 +43,10 @@ function charger() {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   vm.runInContext(read('public/i18n.js'), ctx, { filename: 'i18n.js' });
+  /* L'application ne charge que le français ; les tests vérifient les trois
+     langues, donc on charge aussi les deux fichiers à la demande. */
+  vm.runInContext(read('public/i18n-en.js'), ctx, { filename: 'i18n-en.js' });
+  vm.runInContext(read('public/i18n-ar.js'), ctx, { filename: 'i18n-ar.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
     'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
