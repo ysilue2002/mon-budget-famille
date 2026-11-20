@@ -97,12 +97,15 @@ html[dir="rtl"] .sheet{direction:rtl}
    QR : sans réseau ni appareil photo, on peut encore recopier le lien. */
 const appUrl = location.origin + '/';
 document.querySelectorAll('.app-url').forEach((el) => { el.textContent = appUrl; });
+/* Le QR porte le canal, l'adresse imprimée reste courte et lisible. */
+const src = ((new URLSearchParams(location.search).get('src') || 'flyer').replace(/[^a-z0-9-]/gi, '').slice(0, 24) || 'flyer').toLowerCase();
+const qrUrl = appUrl + '?src=' + src;
 const script = document.createElement('script');
 script.src = 'qrcode.js';
 script.onload = () => {
   try {
     const qr = window.qrcode(0, 'M');
-    qr.addData(appUrl);
+    qr.addData(qrUrl);
     qr.make();
     const svg = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
     document.querySelectorAll('[data-qr]').forEach((box) => { box.innerHTML = svg; });

@@ -2235,18 +2235,51 @@ function docHTML(d, format) {
     <div class="docBar docBarBottom"></div>
   </div>`;
 }
-/* Le QR de la boutique est dessiné à part : sa génération est asynchrone, et
-   la feuille doit rester utilisable même si le module QR manque (hors ligne). */
-async function withQr(html) {
+/* Le QR est dessiné à part : sa génération est asynchrone, et la feuille doit
+   rester utilisable même si le module QR manque (hors ligne). */
+async function withQr(html, url) {
   if (!html.includes('data-qr="1"')) return html;
-  const qr = await qrCode(appUrl());
+  const qr = await qrCode(url || appUrl());
   if (!qr) return html.replace('<div class="docQr" data-qr="1"></div>', '');
   return html.replace('<div class="docQr" data-qr="1"></div>', `<div class="docQr">${qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true })}</div>`);
+}
+/* Ce que le client verra derrière le QR : la facture telle qu'elle a été
+   imprimée, dans la langue de la boutique. */
+function docSnapshot(d) {
+  const s = db.settings || {};
+  const rate = Math.max(0, Number(d.vat) || 0);
+  return {
+    lang: lang(),
+    rtl: lang() === 'ar',
+    shop: db.shop || T('app'),
+    place: [s.address, s.district, s.city, countryName(s.country || 'CI')].filter(Boolean).join(' · '),
+    contact: [me && me.phone, me && me.email].filter(Boolean).join(' · '),
+    title: d.kind === 'DEV' ? T('quote') : T('invoice'),
+    number: d.number,
+    date: dayFR(d.date),
+    client: { name: d.party || '', phone: d.clientPhone || '', email: d.clientEmail || '', address: d.clientAddress || '' },
+    lines: (Array.isArray(d.lines) ? d.lines : []).map((l) => ({ label: l.label, qty: l.qty, price: money(+l.price), amount: money((+l.qty || 1) * +l.price) })),
+    ht: money(d.total),
+    vat: rate ? { label: `${T('vatShort')} ${rate} %`, value: money(vatOf(d)) } : null,
+    ttc: money(amountOf(d)),
+    notes: [T('docNote1'), T('docNote2')],
+    labels: { client: T('client'), line: T('line'), qty: T('quantity'), price: T('unitPriceHT'), ht: T('ht'), total: T('ttc') },
+  };
+}
+/* Hors ligne, le lien ne peut pas être publié : le QR retombe sur l'adresse de
+   la boutique, comme avant. */
+async function docLink(d) {
+  try {
+    const r = await api('/api/doc/publish', 'POST', { number: d.number, snapshot: docSnapshot(d) });
+    if (r.ok && r.data && r.data.url) return String(r.data.url);
+  } catch { /* réseau absent */ }
+  return appUrl();
 }
 async function printFormat(id, format) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
-  printHtml(await withQr(docHTML(d, format)), format === 'ticket' ? 'ticket' : 'a4');
+  const html = docHTML(d, format);
+  printHtml(await withQr(html, await docLink(d)), format === 'ticket' ? 'ticket' : 'a4');
 }
 /* jsPDF pèse 366 Ko et ne sert qu'aux PDF : on le télécharge au premier usage,
    puis le service worker le garde pour les fois suivantes, même hors ligne. */
@@ -2287,7 +2320,8 @@ function imgSize(src) {
   });
 }
 async function docPdf(d) {
-  if (arabicPdf()) { printHtml(await withQr(docHTML(d))); return null; }
+  const link = await docLink(d);
+  if (arabicPdf()) { printHtml(await withQr(docHTML(d), link)); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -2311,7 +2345,7 @@ async function docPdf(d) {
   pdf.text(`${T('docNo')} : ${d.number}`, 196, 26, { align: 'right' });
   pdf.text(`${T('docDate')} : ${dayFR(d.date)}`, 196, 31, { align: 'right' });
   /* QR de la boutique, sous les références du document. */
-  await addQrPdf(pdf, appUrl(), 174, 35, 20);
+  await addQrPdf(pdf, link, 174, 35, 20);
   const boxTop = 58; const boxH = 34; const boxW = 88;
   pdf.setDrawColor(17, 17, 17); pdf.setLineWidth(0.4);
   pdf.roundedRect(12, boxTop, boxW, boxH, 3, 3);
@@ -2445,8 +2479,9 @@ async function emailDocPDF(id) {
 async function previewDoc(id) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
+  const html = docHTML(d);
   const m = modal(`<h2>${T('preview')}</h2>
-    <div class="docPreview">${await withQr(docHTML(d))}</div>
+    <div class="docPreview">${await withQr(html, await docLink(d))}</div>
     <button class="btn" id="pvA4">${T('printA4')}</button>
     <button class="btn out" id="pvTk">${T('printTicket')}</button>
     <button class="btn out" id="pvNo">${T('close')}</button>`);
@@ -2918,6 +2953,41 @@ async function loadTeam(box) {
   };
 }
 
+/* ---------------- promotion ---------------- */
+/* Le lien de l'application garde le canal d'où vient le visiteur (marché,
+   flyer, radio) : au moment de créer son compte, il est noté une fois. */
+const SRC_KEY = KEY + '.src';
+function channel() {
+  try { return String(localStorage.getItem(SRC_KEY) || '').replace(/[^a-z0-9-]/g, '').slice(0, 24); } catch { return ''; }
+}
+function rememberChannel() {
+  try {
+    const src = new URLSearchParams(location.search).get('src');
+    if (src) localStorage.setItem(SRC_KEY, String(src).toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24));
+  } catch { /* stockage indisponible : pas de mesure, rien ne casse */ }
+}
+function presentationUrl() {
+  const u = new URL('presentation', location.href);
+  if (channel()) u.searchParams.set('src', channel());
+  return u.href;
+}
+function openPresentation() { window.open(presentationUrl(), '_blank', 'noopener'); }
+/* Un seul bouton : le téléphone propose WhatsApp, et le message est déjà écrit. */
+function shareAppLink() {
+  const url = presentationUrl();
+  const text = T('shareAppText');
+  if (navigator.share) { navigator.share({ title: T('app'), text, url }).catch(() => {}); return; }
+  window.open('https://wa.me/?text=' + encodeURIComponent(text + ' ' + url), '_blank');
+}
+function loadInstalls() {
+  if (!me) return;
+  api('/api/installs').then((r) => {
+    const box = document.getElementById('installsBox');
+    if (!box || !r.ok || !r.data || !Array.isArray(r.data.sources) || !r.data.sources.length) return;
+    box.innerHTML = `<p class="hint">${T('installsLabel')} : ${r.data.sources.map((s) => `${esc(s.src)} ${Number(s.n) || 0}`).join(' · ')}</p>`;
+  }).catch(() => {});
+}
+
 function settingsModal() {
   if (mailReady === null) loadMailStatus();
   let logoDraft = db.settings.logo || '';
@@ -2989,6 +3059,12 @@ function settingsModal() {
     <label>${T('legalContact')}</label><input id="lgContact" value="${esc((db.settings.legal || {}).contact || '')}">
     <label>${T('legalPublisher')}</label><input id="lgPublisher" value="${esc((db.settings.legal || {}).publisher || '')}">
     </details>
+    <details><summary>${T('secPromo')}</summary>
+    <button class="btn" id="setPresent">${T('presentApp')}</button>
+    <button class="btn out" id="setShareApp">${T('shareApp')}</button>
+    <p class="hint">${T('presentHint')}</p>
+    <div id="installsBox"></div>
+    </details>
     <details data-owner><summary>${T('secBackup')}</summary>
     <button class="btn out" id="setExport">${T('exportData')}</button>
     <button class="btn out" id="setImport">${T('importData')}</button>
@@ -3005,6 +3081,11 @@ function settingsModal() {
       <button class="btn out" id="setNo">${T('close')}</button>
     </div>`);
   d.querySelector('#setNo').onclick = () => d.remove();
+  const presentBtn = d.querySelector('#setPresent');
+  if (presentBtn) presentBtn.onclick = openPresentation;
+  const shareBtn = d.querySelector('#setShareApp');
+  if (shareBtn) shareBtn.onclick = shareAppLink;
+  loadInstalls();
   wireAccount(d);
   /* Un vendeur ne peut pas toucher aux réglages de la boutique : on grise les
      sections du patron plutôt que de les retirer, pour ne rien casser à
@@ -3561,7 +3642,7 @@ async function syncTick() {
   else await pullNow(false);
 }
 async function signup(mode, identifier, password) {
-  const body = { mode, password };
+  const body = { mode, password, src: channel() };
   if (mode === 'email') body.email = identifier; else body.phone = identifier;
   const r = await api('/api/signup', 'POST', body);
   if (!r.ok) return (r.data && r.data.error) || 'server';
@@ -3930,6 +4011,7 @@ if (!globalThis.__AC_TEST__) {
   render();
   const resetToken = new URLSearchParams(location.search).get('reset');
   (async () => {
+    rememberChannel();
     await bootAccount();
     if (resetToken) { resetModal(resetToken); return; }
     if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }

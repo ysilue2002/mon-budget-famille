@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients, publicDocHtml, cleanSrc };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients, publicDocHtml, cleanSrc } = mod;
 
 const OWNER = 'owner-1';
 const SELLER = 'seller-1';
@@ -187,4 +187,30 @@ test('un rappel ne part que vers une adresse déjà sur une facture', () => {
   assert.equal(allowed.has('inconnu@ailleurs.com'), false, 'adresse inconnue : refusée');
   assert.equal(knownRecipients('').size, 0, 'compte sans état : personne');
   assert.equal(knownRecipients('pas du json').size, 0, 'état illisible : personne');
+});
+
+test('la page publique d’une facture n’exécute rien de ce qu’on lui envoie', () => {
+  const html = publicDocHtml(JSON.stringify({
+    title: 'Facture',
+    number: 'FAC-2026-001',
+    shop: '<script>alert(1)</script>',
+    client: { name: 'Awa & fils' },
+    lines: [{ label: '<img src=x onerror=alert(2)>', qty: 1, price: '1 FCFA', amount: '1 FCFA' }],
+    ht: '1 FCFA',
+    ttc: '1 FCFA',
+  }));
+  assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), 'texte échappé');
+  assert.ok(!html.includes('<script>alert'), 'aucune balise exécutable');
+  assert.ok(!html.includes('<img src=x'), 'attribut d’image neutralisé');
+  assert.ok(html.includes('Awa &amp; fils'));
+  assert.ok(html.includes('noindex'), 'page hors moteurs de recherche');
+  assert.equal(publicDocHtml('pas du json'), null, 'contenu illisible : rien à afficher');
+});
+
+test('cleanSrc ne garde qu’un mot de canal', () => {
+  assert.equal(cleanSrc(' Marche '), 'marche');
+  assert.equal(cleanSrc('a/b?c'), 'abc');
+  assert.equal(cleanSrc('<script>'), 'script');
+  assert.equal(cleanSrc(''), '');
+  assert.equal(cleanSrc(null), '');
 });

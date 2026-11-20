@@ -42,6 +42,9 @@ const validEmail = (v) => typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[a-z]{2,}$
 const validPhone = (v) => typeof v === 'string' && /^\+?[\d ().-]{8,25}$/.test(v.trim());
 const digitsOf = (v) => String(v || '').replace(/\D/g, '').replace(/^00/, '');
 const validPass = (v) => typeof v === 'string' && v.length >= 8 && v.length <= 200;
+/* Canal d'où vient une installation (marche, flyer, radio…). Un mot simple,
+   jamais une adresse : ce qui n'est pas une lettre ou un tiret disparaît. */
+const cleanSrc = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
 
 let schemaReady;
 function ensureSchema(env) {
@@ -55,6 +58,8 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS throttle (key TEXT PRIMARY KEY, hits INTEGER NOT NULL, reset INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS state_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, rev INTEGER NOT NULL, json TEXT NOT NULL, updated INTEGER NOT NULL, saved INTEGER NOT NULL)'),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS state_history_user ON state_history(user_id, id)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS public_docs (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, number TEXT NOT NULL, json TEXT NOT NULL, updated INTEGER NOT NULL)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS installs (src TEXT NOT NULL, day TEXT NOT NULL, hits INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (src, day))'),
   ]).then(async () => {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
     // Comptes par téléphone uniquement : l'e-mail et le téléphone deviennent facultatifs.
@@ -79,6 +84,8 @@ function ensureSchema(env) {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN perms TEXT').run(); } catch {}
     /* Nom affiché dans le journal, à la place de l'e-mail. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN name TEXT').run(); } catch {}
+    /* Canal de provenance, noté une fois à l'inscription. */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN src TEXT').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run(    );
@@ -375,7 +382,13 @@ async function api(request, env, url) {
     const id = crypto.randomUUID();
     const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
     const pass = await pbkdf2(password, salt);
-    await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, email || null, phone || null, phoneDigits, pass, salt, Date.now()).run();
+    const src = cleanSrc(body.src);
+    await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created, src) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, email || null, phone || null, phoneDigits, pass, salt, Date.now(), src || null).run();
+    /* Compteur par canal : aucun nom, aucun compte, juste combien d'installations. */
+    if (src) {
+      const day = new Date().toISOString().slice(0, 10);
+      await env.DB.prepare('INSERT INTO installs (src, day, hits) VALUES (?, ?, 1) ON CONFLICT(src, day) DO UPDATE SET hits = hits + 1').bind(src, day).run();
+    }
     const cookie = await createSession(env, id);
     return json({ user: publicUser({ id, email: email || null, phone: phone || null }) }, 200, { 'set-cookie': cookie });
   }
@@ -535,6 +548,32 @@ async function api(request, env, url) {
     else if (sent.length) await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = excluded.count').bind(user.id, day, count).run();
     await tooMany(env, 'remind:' + user.id, 6, 60 * 60000);
     return json({ ok: true, sent });
+  }
+
+  /* D'où viennent les installations : agregat par canal, sans aucune donnée
+     personnelle. Sert à juger un flyer ou une radio, pas à suivre les gens. */
+  if (path === '/api/installs' && request.method === 'GET') {
+    const rows = await env.DB.prepare('SELECT src, SUM(hits) AS n FROM installs GROUP BY src ORDER BY n DESC LIMIT 20').all();
+    return json({ sources: (rows.results || []).map((r) => ({ src: String(r.src), n: Number(r.n) || 0 })) });
+  }
+
+  /* Le QR d'un document ouvre la facture chez le client. Le serveur garde une
+     copie figée de ce qui a été imprimé, identifiée par un jeton stable par
+     numéro : un lien déjà envoyé montre toujours la même facture. */
+  if (path === '/api/doc/publish' && request.method === 'POST') {
+    const body = await readBody(request);
+    const number = String(body.number || '').trim();
+    if (!DOC_NUMBER.test(number)) return json({ error: 'number' }, 400);
+    if (!body.snapshot || typeof body.snapshot !== 'object') return json({ error: 'snapshot' }, 400);
+    const snap = JSON.stringify(body.snapshot);
+    if (snap.length > 20000) return json({ error: 'snapshot' }, 400);
+    if (await blocked(env, 'publish:' + user.id, 120)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'publish:' + user.id, 120, 60 * 60000);
+    const token = (await sha256(dataOwner(user) + ':' + number)).slice(0, 24);
+    await env.DB.prepare(
+      'INSERT INTO public_docs (token, user_id, number, json, updated) VALUES (?, ?, ?, ?, ?) ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, number = excluded.number, json = excluded.json, updated = excluded.updated',
+    ).bind(token, dataOwner(user), number, snap, Date.now()).run();
+    return json({ token, url: `${url.origin}/f/${token}` });
   }
 
   if (path === '/api/password' && request.method === 'POST') {
@@ -780,9 +819,101 @@ function sameOrigin(request, url) {
   try { return new URL(origin).host === url.host; } catch { return false; }
 }
 
+/* Page publique de la facture : le contenu vient du navigateur, donc tout est
+   échappé et rien n'est exécuté. Aucun script de l'application n'y tourne. */
+const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => HTML_ESC[c]);
+
+function publicDocHtml(text) {
+  let s;
+  try { s = JSON.parse(text || '{}'); } catch { return null; }
+  if (!s || typeof s !== 'object') return null;
+  const labels = s.labels && typeof s.labels === 'object' ? s.labels : {};
+  const L = (k, d) => escHtml(labels[k] || d);
+  const lines = (Array.isArray(s.lines) ? s.lines.slice(0, 80) : [])
+    .map((l) => `<tr><td>${escHtml(l && l.label)}</td><td class="n">${escHtml(l && l.qty)}</td><td class="n">${escHtml(l && l.price)}</td><td class="n">${escHtml(l && l.amount)}</td></tr>`)
+    .join('');
+  const client = s.client && typeof s.client === 'object' ? s.client : {};
+  const clientLines = [client.name, client.phone, client.email, client.address]
+    .filter(Boolean).map((v) => `<div>${escHtml(v)}</div>`).join('');
+  const notes = (Array.isArray(s.notes) ? s.notes.slice(0, 6) : [])
+    .map((n) => `<div>${escHtml(n)}</div>`).join('');
+  const vat = s.vat && typeof s.vat === 'object' && s.vat.value
+    ? `<tr><th colspan="3">${escHtml(s.vat.label)}</th><td class="n">${escHtml(s.vat.value)}</td></tr>` : '';
+  const lang = /^[a-z]{2}$/.test(String(s.lang || '')) ? String(s.lang) : 'fr';
+  return `<!doctype html>
+<html lang="${lang}" dir="${s.rtl ? 'rtl' : 'ltr'}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>${escHtml(s.title)} ${escHtml(s.number)}</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:18px;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Tahoma,sans-serif;color:#14261b;background:#f7f4ea;font-size:17px;line-height:1.5}
+.sheet{max-width:760px;margin:0 auto;background:#fff;border:1px solid #d9e5db;border-radius:14px;padding:22px}
+.bar{height:6px;background:#14532d;border-radius:4px;margin-bottom:16px}
+h1{font-size:24px;margin:0 0 4px;color:#14532d;text-transform:uppercase;letter-spacing:1px}
+.num{font-size:19px;font-weight:700}
+.meta{color:#5b6b60;font-size:15px;margin-bottom:14px}
+.box{border:1px solid #d9e5db;border-radius:10px;padding:12px;margin:14px 0}
+.box>b{display:block;margin-bottom:4px}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #e6ece7;font-size:16px}
+th{font-size:14px;text-transform:uppercase;color:#5b6b60}
+.n{text-align:right;white-space:nowrap}
+.notes{color:#5b6b60;font-size:14px;margin-top:14px}
+footer{margin-top:16px;padding-top:12px;border-top:1px solid #e6ece7;font-size:13px;color:#5b6b60;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.print{display:inline-flex;align-items:center;min-height:48px;padding:10px 18px;border-radius:12px;border:2px solid #14532d;background:#fff;color:#14532d;font:inherit;font-weight:700;cursor:pointer;margin-top:14px}
+@media print{body{background:#fff;padding:0}.sheet{border:0;border-radius:0;padding:0}.print{display:none}}
+</style>
+</head>
+<body>
+<main class="sheet">
+<div class="bar"></div>
+<h1>${escHtml(s.title)}</h1>
+<div class="num">N° ${escHtml(s.number)}</div>
+<div class="meta">${escHtml(s.date || '')}</div>
+<div class="box"><b>${escHtml(s.shop)}</b>${s.place ? `<div>${escHtml(s.place)}</div>` : ''}${s.contact ? `<div>${escHtml(s.contact)}</div>` : ''}</div>
+<div class="box"><b>${L('client', 'Client')}</b>${clientLines || '<div>—</div>'}</div>
+<table>
+<thead><tr><th>${L('line', 'Désignation')}</th><th class="n">${L('qty', 'Qté')}</th><th class="n">${L('price', 'Prix')}</th><th class="n">${L('ht', 'Montant')}</th></tr></thead>
+<tbody>${lines}</tbody>
+</table>
+<table><tbody>
+<tr><th colspan="3">${L('ht', 'Total HT')}</th><td class="n">${escHtml(s.ht)}</td></tr>
+${vat}
+<tr><th colspan="3">${L('total', 'Total TTC')}</th><td class="n">${escHtml(s.ttc)}</td></tr>
+</tbody></table>
+${notes ? `<div class="notes">${notes}</div>` : ''}
+<button class="print" onclick="window.print()">${L('print', 'Imprimer')}</button>
+<footer><span>Assistant Commercial</span><span>${escHtml(s.number)}</span></footer>
+</main>
+</body>
+</html>`;
+}
+
+const DOC_CSS = 'body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Tahoma,sans-serif;background:#f7f4ea;color:#14261b;padding:24px;text-align:center}';
+const docMissing = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Document introuvable</title><style>${DOC_CSS}</style></head><body><h1>Document introuvable</h1><p>Ce lien n'existe plus ou n'a jamais existé.</p><p style="color:#5b6b60">This link is no longer available.</p></body></html>`;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    /* Page publique d'une facture, ouverte par le QR du document. */
+    const share = url.pathname.match(/^\/f\/([a-f0-9]{24})$/);
+    if (share) {
+      const headers = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' };
+      if (!env.DB) return new Response(docMissing, { status: 503, headers });
+      try {
+        await ensureSchema(env);
+        const row = await env.DB.prepare('SELECT json FROM public_docs WHERE token = ?').bind(share[1]).first();
+        const html = row ? publicDocHtml(row.json) : null;
+        return new Response(html || docMissing, { status: html ? 200 : 404, headers });
+      } catch {
+        return new Response(docMissing, { status: 503, headers });
+      }
+    }
     if (url.pathname.startsWith('/api/')) {
       if (!env.DB) return json({ error: 'database' }, 500);
       await ensureSchema(env);

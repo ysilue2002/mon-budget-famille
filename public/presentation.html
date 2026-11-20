@@ -6,6 +6,20 @@
 <title>Assistant Commercial — votre boutique dans votre poche</title>
 <meta name="description" content="Vendez, suivez votre stock, sachez qui vous doit de l'argent et combien vous gagnez. Sans cahier, sans calcul, même sans réseau.">
 <meta name="theme-color" content="#14532d">
+<!-- Aperçu du lien partagé sur WhatsApp et les réseaux : ces adresses doivent
+     être absolues, un robot ne lit pas le JavaScript. Si le domaine change,
+     c'est le seul endroit à corriger. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Assistant Commercial">
+<meta property="og:title" content="Assistant Commercial — votre boutique dans votre poche">
+<meta property="og:description" content="Vendez, suivez votre stock, sachez qui vous doit de l'argent et combien vous gagnez. Sans cahier, sans calcul, même sans réseau.">
+<meta property="og:url" content="https://site-a48ebaa71ce945cc8ab9ac9be7f59aa8.freebuff.page/presentation">
+<meta property="og:image" content="https://site-a48ebaa71ce945cc8ab9ac9be7f59aa8.freebuff.page/icons/icon-512.png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:image:alt" content="Assistant Commercial">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
@@ -217,8 +231,12 @@ function show(lang) {
   document.querySelectorAll('[data-set-lang]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.setLang === lang)));
 }
 document.querySelectorAll('[data-set-lang]').forEach((b) => { b.onclick = () => show(b.dataset.setLang); });
-document.getElementById('siteUrl').textContent = location.origin + '/';
-const appUrl = location.origin + '/';
+/* Le canal (marche, flyer, radio) est transporté jusqu'à l'application : le
+   QR et le bouton le gardent, pour savoir d'où viennent les installations. */
+const src = (new URLSearchParams(location.search).get('src') || '').replace(/[^a-z0-9-]/gi, '').slice(0, 24).toLowerCase();
+const appUrl = location.origin + '/' + (src ? '?src=' + src : '');
+document.getElementById('siteUrl').textContent = appUrl;
+document.querySelectorAll('a.cta').forEach((a) => { a.href = appUrl; });
 
 /* QR de l'application, s'il est disponible (le fichier est déjà dans public/). */
 const script = document.createElement('script');
