@@ -45,7 +45,8 @@ const validPass = (v) => typeof v === 'string' && v.length >= 8 && v.length <= 2
 
 let schemaReady;
 function ensureSchema(env) {
-  schemaReady = schemaReady || env.DB.batch([
+  if (schemaReady) return schemaReady;
+  schemaReady = env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, phone TEXT, phone_digits TEXT, pass TEXT NOT NULL, salt TEXT NOT NULL, created INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS state (user_id TEXT PRIMARY KEY, json TEXT NOT NULL, rev INTEGER NOT NULL DEFAULT 1, updated INTEGER NOT NULL)'),
@@ -80,8 +81,11 @@ function ensureSchema(env) {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN name TEXT').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
-    ).run();
+    ).run(    );
   });
+  /* Une panne passagère de la base ne doit pas condamner l'isolate : on oublie
+     le schéma en échec pour retenter à la requête suivante. */
+  schemaReady.catch(() => { schemaReady = null; });
   return schemaReady;
 }
 
@@ -169,6 +173,10 @@ async function tooMany(env, key, limit, windowMs) {
 }
 
 async function readBody(request) {
+  /* Refuser avant de lire : un corps annoncé trop gros ne doit pas être
+     chargé en mémoire pour être rejeté ensuite. */
+  const declared = Number(request.headers.get('content-length') || 0);
+  if (declared > MAX_BODY) throw new Error('trop volumineux');
   const text = await request.text();
   if (text.length > MAX_BODY) throw new Error('trop volumineux');
   return text ? JSON.parse(text) : {};
@@ -726,13 +734,21 @@ async function api(request, env, url) {
   return json({ error: 'notfound' }, 404);
 }
 
+/* Une origine illisible ("null", valeur bricolée) est refusée, jamais une
+   erreur 500 : le contrôle doit répondre proprement. */
+function sameOrigin(request, url) {
+  const origin = request.headers.get('origin');
+  if (!origin) return true;
+  try { return new URL(origin).host === url.host; } catch { return false; }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
       if (!env.DB) return json({ error: 'database' }, 500);
       await ensureSchema(env);
-      if (request.method !== 'GET' && request.headers.get('origin') && new URL(request.headers.get('origin')).host !== url.host) {
+      if (request.method !== 'GET' && !sameOrigin(request, url)) {
         return json({ error: 'origin' }, 403);
       }
       try {

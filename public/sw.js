@@ -1,10 +1,10 @@
 /* GÉNÉRÉ par scripts/cache.js — ne pas modifier à la main.
    Modèle : scripts/sw.template.js. */
-const CACHE = 'assistant-commercial-c17182c371';
+const CACHE = 'assistant-commercial-c7f9baa229';
 const PRECACHE = [
   "./",
-  "./app.js",
-  "./i18n.js",
+  "./app.min.js",
+  "./i18n.min.js",
   "./icons/apple-touch-icon.png",
   "./icons/icon-192.png",
   "./icons/logo-header.png",

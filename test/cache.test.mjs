@@ -47,14 +47,14 @@ test('un fichier hors ligne reçoit une erreur, jamais du HTML', () => {
 test('la version change dès qu’un fichier change', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-cache-'));
   fs.writeFileSync(path.join(dir, 'index.html'), '<p>a</p>');
-  fs.writeFileSync(path.join(dir, 'app.js'), 'v1');
+  fs.writeFileSync(path.join(dir, 'style.css'), 'v1');
   const first = cache.build(dir);
-  fs.writeFileSync(path.join(dir, 'app.js'), 'v2');
+  fs.writeFileSync(path.join(dir, 'style.css'), 'v2');
   const second = cache.build(dir);
   assert.match(first.version, /^[0-9a-f]{10}$/);
   assert.notEqual(first.version, second.version);
   assert.ok(first.out.includes(first.version), 'la version doit être écrite dans le service worker');
-  assert.ok(first.out.includes('./app.js'), 'les fichiers voisins doivent être préchargés');
+  assert.ok(first.out.includes('./style.css'), 'les fichiers voisins doivent être préchargés');
 });
 
 test('le manifeste de déploiement publie public/ avec le service worker', () => {
@@ -63,6 +63,20 @@ test('le manifeste de déploiement publie public/ avec le service worker', () =>
   assert.ok(manifest.entrypoint === 'worker.js');
   assert.ok(fs.existsSync(path.join(root, 'public/sw.js')), 'sw.js doit exister avant le déploiement');
   assert.ok(fs.existsSync(path.join(root, 'public/version.json')), 'version.json doit exister avant le déploiement');
+});
+
+test('les scripts servis sont minifiés et à jour', () => {
+  const esbuild = require('esbuild');
+  const minify = require(path.join(root, 'scripts/minify.js'));
+  for (const file of minify.FILES) {
+    const source = read('public/' + file);
+    const served = read('public/' + minify.minifiedName(file));
+    const expected = esbuild.transformSync(source, minify.OPTIONS).code;
+    assert.ok(served.includes(expected), `${minify.minifiedName(file)} est périmé : lance \`npm run minify\``);
+    assert.ok(served.length < source.length, `${minify.minifiedName(file)} doit être plus léger que sa source`);
+  }
+  assert.match(read('public/index.html'), /src="app\.min\.js"/);
+  assert.match(read('public/index.html'), /src="i18n\.min\.js"/);
 });
 
 test('le préchargement reste sous le budget de 1,2 Mo', () => {

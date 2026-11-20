@@ -1051,7 +1051,99 @@ function reportModal() {
   m.querySelector('#rpNo').onclick = () => m.remove();
   m.querySelector('#rpOk').onclick = () => { const k = m.querySelector('#rpMonth').value; m.remove(); downloadReport(k); };
 }
+/* jsPDF ne sait pas écrire l'arabe : il n'a ni la police ni la liaison des
+   lettres, et un PDF arabe sortirait en carrés. Plutôt qu'un document
+   illisible, en arabe on imprime la feuille HTML : le téléphone dessine
+   l'arabe correctement, puis on choisit « Enregistrer en PDF » dans la
+   fenêtre d'impression. */
+const arabicPdf = () => lang() === 'ar';
+function printSheetHTML(html, cls) {
+  const area = document.getElementById('printArea');
+  area.className = cls || 'a4';
+  area.innerHTML = html;
+  const m = modal(`<h2>${T('pdfArabicTitle')}</h2><p class="hint">${T('pdfArabic')}</p>
+    <button class="btn" id="psOk">${T('printNow')}</button>
+    <button class="btn out" id="psNo">${T('cancel')}</button>`);
+  m.querySelector('#psNo').onclick = () => m.remove();
+  m.querySelector('#psOk').onclick = () => { m.remove(); window.print(); };
+}
+/* Reçu d'une vente en HTML : même contenu que le PDF, mais écrit par le
+   téléphone pour que l'arabe reste lisible. */
+function receiptHtml(s) {
+  const st = db.settings || {};
+  return `${st.logo ? `<img class="docLogo" src="${esc(st.logo)}" alt="">` : ''}
+    <h2>${esc(db.shop || T('app'))}</h2>
+    <div class="small">${dayFR(s.date)}</div>
+    ${s.party ? `<div class="small">${esc(s.party)}</div>` : ''}
+    <hr>
+    ${s.product ? `<div>${esc(s.product)} × ${esc(s.qty)}</div>` : ''}
+    <div class="tot"><span>${T('total')}</span><span>${money(s.total)}</span></div>
+    ${creditOf(s) > 0 ? `<div class="small">${T('paid')} : ${money(paidOf(s))} · ${T('remains')} : ${money(creditOf(s))}</div>` : ''}
+    <div class="small">${T('method')} : ${esc(s.method || '—')}</div>
+    <hr>
+    <p class="small">${T('thanks')}</p>`;
+}
+/* Rapport mensuel en HTML : les mêmes lignes que le PDF, en tableau lisible
+   dans les deux sens d'écriture. */
+function reportHtml(monthKey) {
+  const f = figures('mois', monthKey);
+  const st = db.settings || {};
+  const place = [st.address, st.district, st.city, countryName(st.country || 'CI')].filter(Boolean).join(' · ');
+  const rows = [];
+  const section = (title) => rows.push(`<tr class="sec"><td colspan="2"><b>${esc(title)}</b></td></tr>`);
+  const row = (label, value, strong) => rows.push(`<tr><td>${strong ? `<b>${esc(label)}</b>` : esc(label)}</td><td class="num">${strong ? `<b>${esc(value)}</b>` : esc(value)}</td></tr>`);
+  section(T('reportActivity'));
+  row(T('revenue'), money(f.ca), true);
+  row(T('saleCount'), String(f.sales.length));
+  row(T('invoicesPaid'), `${f.invoices.length} · ${money(f.inv)}`);
+  row(T('collected'), money(f.cash));
+  row(T('expenses'), money(f.dep));
+  row(T('goodsPurchases'), money(f.purchases));
+  row(f.unknownCost.length ? T('profitEstimated') : T('profit'), money(f.profit), true);
+  const rm = remindStats('mois', monthKey);
+  if (rm.count) {
+    section(T('remindStats'));
+    row(T('remindedCount'), `${rm.count} · ${money(rm.amount)}`);
+    row(T('paidAfterRemind'), `${rm.paid} · ${money(rm.paidAmount)}${rm.amount ? ` (${rm.rate} %)` : ''}`, true);
+    row(T('stillUnpaid'), `${rm.unpaid} · ${money(rm.unpaidAmount)}`);
+  }
+  const journalRows = journalSummary(monthKey);
+  if (journalRows.length) {
+    section(T('journal'));
+    journalRows.forEach((s) => {
+      row(`${s.name} (${s.n} ${s.n === 1 ? T('actionOne') : T('actionMany')})`, `${s.sales} ${T('jSale')} · ${money(s.salesAmount)}`);
+      if (s.expenses) row(T('expenses'), `${s.expenses} · ${money(s.expensesAmount)}`);
+    });
+  }
+  section(T('reportSituation'));
+  row(T('uncollected'), money(f.due));
+  row(T('debts'), money(totalDebt()));
+  row(T('stockValue'), money(stockValue()));
+  row(T('withdrawals'), money(f.wd));
+  const byLabel = {};
+  f.exp.forEach((e) => { byLabel[e.label] = (byLabel[e.label] || 0) + (Number(e.amount) || 0); });
+  const labels = Object.entries(byLabel).sort((a, b) => b[1] - a[1]);
+  if (labels.length) { section(T('reportExpenses')); labels.forEach(([k, v]) => row(k, money(v))); }
+  const monthDocs = (db.docs || []).filter((d) => d.kind === 'FAC' && String(d.date || '').slice(0, 7) === monthKey)
+    .sort((a, b) => (String(a.date) < String(b.date) ? -1 : 1));
+  if (monthDocs.length) {
+    section(T('reportInvoices'));
+    monthDocs.forEach((d) => row(`${d.number || '—'} · ${d.party || '—'}`, `${money(amountOf(d))} · ${d.paidDate ? T('invoicePaid') : T('invoiceUnpaid')}`));
+    row(T('invoicesPaid'), money(monthDocs.filter((d) => d.paidDate).reduce((a, d) => a + amountOf(d), 0)), true);
+    row(T('unpaidInvoices'), money(monthDocs.filter((d) => !d.paidDate).reduce((a, d) => a + amountOf(d), 0)), true);
+  }
+  const byClient = {};
+  f.sales.forEach((s) => { const c = creditOf(s); if (c > 0) { const k = s.party || '—'; byClient[k] = (byClient[k] || 0) + c; } });
+  const tops = Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (tops.length) { section(T('reportLate')); tops.forEach(([k, v]) => row(k, money(v))); }
+  return `<h2>${esc(T('monthlyReport'))}</h2>
+    <div class="small">${esc(monthLabel(monthKey))} · ${esc(db.shop || T('app'))}</div>
+    ${place ? `<div class="small">${esc(place)}</div>` : ''}
+    <table class="rep">${rows.join('')}</table>
+    <p class="small">${T('generatedOn')} ${dayFR(todayISO())}</p>`;
+}
 async function reportPdf(monthKey) {
+  if (arabicPdf()) { printSheetHTML(reportHtml(monthKey)); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -1145,6 +1237,7 @@ async function reportPdf(monthKey) {
 async function downloadReport(monthKey) {
   try {
     const blob = await reportPdf(monthKey);
+    if (!blob) return;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1974,6 +2067,7 @@ function waSale(id) {
   waOpen(phone, receiptText(s));
 }
 async function receiptPdf(s) {
+  if (arabicPdf()) { printSheetHTML(receiptHtml(s), 'ticket'); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -2014,6 +2108,7 @@ async function shareReceiptPDF(id) {
   if (!s) return;
   try {
     const blob = await receiptPdf(s);
+    if (!blob) return;
     const who = (s.party || '').normalize('NFD').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
     const file = new File([blob], `Recu-${s.date || todayISO()}${who ? '-' + who : ''}.pdf`, { type: 'application/pdf' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2149,6 +2244,7 @@ function imgSize(src) {
   });
 }
 async function docPdf(d) {
+  if (arabicPdf()) { printSheetHTML(docHTML(d)); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -2247,6 +2343,7 @@ async function fileToBase64(file) {
 }
 async function docFile(d) {
   const blob = await docPdf(d);
+  if (!blob) return null;
   return new File([blob], d.number + '.pdf', { type: 'application/pdf' });
 }
 async function shareDocPDF(id) {
@@ -2254,6 +2351,7 @@ async function shareDocPDF(id) {
   if (!d) return;
   try {
     const file = await docFile(d);
+    if (!file) return;
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: d.number, text: `${db.shop || ''} · ${d.number} · ${money(amountOf(d))}` });
       return;
@@ -2270,7 +2368,9 @@ async function downloadDocPDF(id) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
   try {
-    const url = URL.createObjectURL(await docPdf(d));
+    const blob = await docPdf(d);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = d.number + '.pdf'; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 6000);
@@ -2285,12 +2385,12 @@ async function emailDocPDF(id) {
   try {
     const file = await docFile(d);
     const to = (d.clientEmail || '').trim();
-    if (isEmail(to)) {
+    if (file && isEmail(to)) {
       const r = await api('/api/send-doc', 'POST', { to, subject, text: body, filename: file.name, pdf: await fileToBase64(file) });
       if (r.ok && r.data && r.data.mail) { alert(T('mailSent')); return; }
       if (r.ok && r.data && r.data.error === 'limit') { alert(T('mailLimit')); return; }
     }
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: d.number, text: body });
       return;
     }

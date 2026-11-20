@@ -27,6 +27,10 @@ const NOT_PRECACHED = new Set([
     'icons/icon-512-maskable.png',
     'jspdf.umd.min.js', // chargés à la demande, puis gardés par le cache de service
     'qrcode.js',
+    /* Sources lisibles : index.html sert les versions .min.js, les sources ne
+       servent qu'aux tests et à la lecture du code. */
+    'app.js',
+    'i18n.js',
 ]);
 
 function walk(dir, base = '') {
