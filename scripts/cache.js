@@ -31,6 +31,10 @@ const NOT_PRECACHED = new Set([
        servent qu'aux tests et à la lecture du code. */
     'app.js',
     'i18n.js',
+    /* Pages de promotion (à partager, à imprimer) : ouvertes rarement, elles
+       n'ont rien à faire dans le préchargement de l'application. */
+    'presentation.html',
+    'flyer.html',
 ]);
 
 function walk(dir, base = '') {

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assistant Commercial — votre boutique dans votre poche</title>
+<meta name="description" content="Vendez, suivez votre stock, sachez qui vous doit de l'argent et combien vous gagnez. Sans cahier, sans calcul, même sans réseau.">
+<meta name="theme-color" content="#14532d">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+:root{--vert:#14532d;--vert2:#1f7a44;--creme:#f7f4ea;--or:#e0a526;--encre:#14261b;--gris:#5b6b60}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--creme);color:var(--encre);font-size:18px;line-height:1.6}
+a{color:var(--vert)}
+.wrap{max-width:860px;margin:0 auto;padding:22px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:var(--vert)}
+.brand img{width:38px;height:38px;border-radius:9px;background:#fff;padding:4px}
+.langs{display:flex;gap:6px}
+.langs button{font:inherit;font-size:15px;font-weight:700;min-height:44px;padding:8px 14px;border-radius:999px;border:2px solid var(--vert);background:#fff;color:var(--vert);cursor:pointer}
+.langs button[aria-pressed="true"]{background:var(--vert);color:#fff}
+.hero{margin:22px 0 8px;display:grid;grid-template-columns:1fr 210px;gap:22px;align-items:center}
+@media (max-width:720px){.hero{grid-template-columns:1fr}}
+h1{font-size:clamp(28px,6vw,42px);line-height:1.15;margin:0 0 10px;color:var(--vert)}
+.lead{font-size:clamp(18px,2.6vw,21px);margin:0 0 18px}
+.cta{display:inline-flex;align-items:center;gap:10px;min-height:56px;padding:12px 22px;border-radius:14px;background:var(--vert);color:#fff;font-weight:800;font-size:20px;text-decoration:none}
+.cta:active{transform:translateY(1px)}
+.qr{background:#fff;border:3px solid var(--vert);border-radius:16px;padding:14px;text-align:center;font-size:14px;color:var(--gris)}
+.qr svg{width:100%;max-width:170px;height:auto;display:block;margin:0 auto 8px}
+section{margin:30px 0}
+h2{font-size:24px;margin:0 0 12px;color:var(--vert)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.card{background:#fff;border:1px solid #d9e5db;border-radius:14px;padding:16px}
+.card b{display:block;font-size:19px;margin-bottom:4px;color:var(--vert)}
+.card .ic{font-size:24px;line-height:1}
+ul.reasons{margin:0;padding:0;list-style:none}
+ul.reasons li{background:#fff;border-left:6px solid var(--or);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;padding:0;margin:0;list-style:none}
+.chips li{background:#fff;border:1px solid #d9e5db;border-radius:999px;padding:8px 14px;font-size:16px}
+.steps{counter-reset:s;margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.steps li{background:#fff;border-radius:14px;padding:16px 16px 16px 58px;position:relative}
+.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:14px;width:32px;height:32px;border-radius:50%;background:var(--vert);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+.band{background:var(--vert);color:#fff;border-radius:16px;padding:18px 20px;display:flex;gap:18px;flex-wrap:wrap;justify-content:space-around;font-weight:700}
+footer{margin:34px 0 10px;padding-top:16px;border-top:1px solid #d9e5db;color:var(--gris);font-size:14px;text-align:center;word-break:break-all}
+.lang{display:none}
+.lang.on{display:block}
+html[dir="rtl"] body{font-family:"Noto Naskh Arabic","Segoe UI",Tahoma,system-ui,sans-serif}
+html[dir="rtl"] ul.reasons li{border-left:0;border-right:6px solid var(--or)}
+html[dir="rtl"] .steps li{padding:16px 58px 16px 16px}
+html[dir="rtl"] .steps li:before{left:auto;right:14px}
+@media print{.langs,.cta{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><img src="icons/logo-header.png" alt="">Assistant Commercial</div>
+    <div class="langs" role="group" aria-label="Langue / Language / اللغة">
+      <button type="button" data-set-lang="fr" aria-pressed="true">Français</button>
+      <button type="button" data-set-lang="en" aria-pressed="false">English</button>
+      <button type="button" data-set-lang="ar" aria-pressed="false">العربية</button>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div>
+      <h1 data-i18n="title">Votre boutique dans votre poche</h1>
+      <p class="lead" data-i18n="lead">Vendez, suivez votre stock, sachez qui vous doit de l'argent et combien vous gagnez. Sans cahier, sans calcul, même sans réseau.</p>
+      <a class="cta" href="./"><span aria-hidden="true">▶</span><span data-i18n="cta">Ouvrir l'application</span></a>
+      <p style="color:var(--gris);font-size:15px;margin:10px 0 0" data-i18n="free">Elle s'installe sur le téléphone comme une vraie application.</p>
+    </div>
+    <div class="qr">
+      <div data-qr="1"></div>
+      <div data-i18n="scan">Scannez pour installer</div>
+    </div>
+  </div>
+
+  <!-- FRANÇAIS -->
+  <div class="lang on" data-lang="fr">
+    <section>
+      <h2>Ce que vous pouvez faire</h2>
+      <div class="grid">
+        <div class="card"><span class="ic" aria-hidden="true">＋</span><b>Vendre en deux touches</b>L'article, la quantité, le prix. La vente est notée et le stock diminue tout seul.</div>
+        <div class="card"><span class="ic" aria-hidden="true">🧾</span><b>Donner un reçu</b>Un reçu part sur WhatsApp ou s'enregistre en PDF. Un QR dessus ramène à votre boutique.</div>
+        <div class="card"><span class="ic" aria-hidden="true">▦</span><b>Suivre le stock</b>Ce qui reste, ce qui va manquer, et la valeur de la marchandise aujourd'hui.</div>
+        <div class="card"><span class="ic" aria-hidden="true">☎</span><b>Savoir qui doit quoi</b>Le crédit client, les paiements partiels, et un rappel prêt à envoyer.</div>
+        <div class="card"><span class="ic" aria-hidden="true">▤</span><b>Devis et factures</b>Numérotés seuls, avec la TVA, payés ou non, en PDF, et transformables en vente.</div>
+        <div class="card"><span class="ic" aria-hidden="true">💰</span><b>Connaître son argent</b>Total des ventes, argent reçu, ce que les articles ont coûté, bénéfice, ce qu'on vous doit.</div>
+      </div>
+    </section>
+    <section>
+      <h2>Pourquoi l'utiliser</h2>
+      <ul class="reasons">
+        <li><b>Le cahier se perd, s'oublie, se mouille.</b> L'application garde tout et se souvient à votre place.</li>
+        <li><b>« Est-ce que je gagne de l'argent ? »</b> Le bénéfice se calcule tout seul : ventes − coût des articles − dépenses.</li>
+        <li><b>« Qui me doit encore ? »</b> Le crédit client est la première cause d'argent perdu. Ici, il se voit client par client.</li>
+        <li><b>Avec un vendeur.</b> Chacun a son compte et ses droits, et le journal dit qui a fait quoi. Le vendeur ne voit jamais vos prix d'achat.</li>
+        <li><b>Au marché, sans réseau.</b> L'application travaille hors ligne et se synchronise quand le réseau revient.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Pour qui</h2>
+      <ul class="chips"><li>Boutiques de quartier</li><li>Alimentations</li><li>Quincailleries</li><li>Tissus</li><li>Ateliers</li><li>Coiffure et beauté</li><li>Petits restaurants</li><li>Revendeurs au marché</li><li>Coopératives</li></ul>
+    </section>
+    <section>
+      <h2>Installer, en trois étapes</h2>
+      <ol class="steps">
+        <li><b>Ouvrez le lien</b> sur le téléphone.</li>
+        <li><b>Ajoutez à l'écran d'accueil</b> : menu du navigateur, « Ajouter à l'écran d'accueil ».</li>
+        <li><b>Saisissez votre boutique</b> : nom, articles, prix. C'est prêt.</li>
+      </ol>
+    </section>
+    <div class="band"><span>✔ Hors ligne</span><span>✔ Français · English · العربية</span><span>✔ Gros boutons, grand texte</span></div>
+  </div>
+
+  <!-- ENGLISH -->
+  <div class="lang" data-lang="en">
+    <section>
+      <h2>What you can do</h2>
+      <div class="grid">
+        <div class="card"><span class="ic" aria-hidden="true">＋</span><b>Sell in two taps</b>The item, the quantity, the price. The sale is recorded and the stock goes down by itself.</div>
+        <div class="card"><span class="ic" aria-hidden="true">🧾</span><b>Give a receipt</b>A receipt goes out on WhatsApp or is saved as PDF. A QR code on it leads back to your shop.</div>
+        <div class="card"><span class="ic" aria-hidden="true">▦</span><b>Track your stock</b>What is left, what is about to run out, and what your goods are worth today.</div>
+        <div class="card"><span class="ic" aria-hidden="true">☎</span><b>Know who owes you</b>Customer credit, part payments, and a reminder ready to send.</div>
+        <div class="card"><span class="ic" aria-hidden="true">▤</span><b>Quotes and invoices</b>Numbered automatically, with VAT, paid or not, as PDF, and turned into a sale.</div>
+        <div class="card"><span class="ic" aria-hidden="true">💰</span><b>Know your money</b>Total sales, money received, what the items cost, profit, what you are owed.</div>
+      </div>
+    </section>
+    <section>
+      <h2>Why use it</h2>
+      <ul class="reasons">
+        <li><b>The notebook gets lost, forgotten, soaked.</b> The app keeps everything and remembers for you.</li>
+        <li><b>“Am I making money?”</b> Profit is calculated for you: sales − cost of the items − expenses.</li>
+        <li><b>“Who still owes me?”</b> Customer credit is the first cause of lost money. Here it is visible, customer by customer.</li>
+        <li><b>With a seller.</b> Each person has an account and rights, and the journal says who did what. The seller never sees your purchase prices.</li>
+        <li><b>At the market, without network.</b> The app works offline and syncs when the network comes back.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Who it is for</h2>
+      <ul class="chips"><li>Neighbourhood shops</li><li>Groceries</li><li>Hardware</li><li>Fabrics</li><li>Workshops</li><li>Hair and beauty</li><li>Small restaurants</li><li>Market resellers</li><li>Cooperatives</li></ul>
+    </section>
+    <section>
+      <h2>Install in three steps</h2>
+      <ol class="steps">
+        <li><b>Open the link</b> on your phone.</li>
+        <li><b>Add to home screen</b>: browser menu, “Add to Home screen”.</li>
+        <li><b>Enter your shop</b>: name, items, prices. Done.</li>
+      </ol>
+    </section>
+    <div class="band"><span>✔ Offline</span><span>✔ Français · English · العربية</span><span>✔ Big buttons, big text</span></div>
+  </div>
+
+  <!-- العربية -->
+  <div class="lang" data-lang="ar" dir="rtl">
+    <section>
+      <h2>ماذا يمكنك أن تفعل</h2>
+      <div class="grid">
+        <div class="card"><span class="ic" aria-hidden="true">＋</span><b>أن تبيع بلمستين</b>المادة والكمية والسعر. تُسجل البيعة وينقص المخزون وحده.</div>
+        <div class="card"><span class="ic" aria-hidden="true">🧾</span><b>أن تعطي إيصالاً</b>إيصال يُرسل على واتساب أو يُحفظ بصيغة PDF، وعليه رمز QR يعود بك إلى متجرك.</div>
+        <div class="card"><span class="ic" aria-hidden="true">▦</span><b>أن تتابع المخزون</b>ما بقي، وما سيوشك على النفاد، وقيمة البضاعة اليوم.</div>
+        <div class="card"><span class="ic" aria-hidden="true">☎</span><b>أن تعرف من يدين لك</b>البير بالأجل، والدفعات الجزئية، وتذكير جاهز للإرسال.</div>
+        <div class="card"><span class="ic" aria-hidden="true">▤</span><b>عروض سعر وفواتير</b>بترقيم تلقائي، مع الضريبة، مدفوعة أو لا، بصيغة PDF، وتصبح عملية بيع.</div>
+        <div class="card"><span class="ic" aria-hidden="true">💰</span><b>أن تعرف أموالك</b>مجموع المبيعات، المال المستلم، تكلفة المواد، الربح، وما يدين لك به الناس.</div>
+      </div>
+    </section>
+    <section>
+      <h2>لماذا تستعمله</h2>
+      <ul class="reasons">
+        <li><b>الكراس يضيع ويُنسى ويبتل.</b> التطبيق يحفظ كل شيء ويتذكر عنك.</li>
+        <li><b>«هل أنا أربح؟»</b> يُحسب الربح وحده: المبيعات − تكلفة المواد − المصاريف.</li>
+        <li><b>«من ما زال يدين لي؟»</b> البيع بالأجل أول سبب لضياع المال. هنا يظهر عميلاً بعميل.</li>
+        <li><b>مع بائع.</b> لكل واحد حساب وحقوق، والسجل يقول من فعل ماذا. والبائع لا يرى أسعار شرائك.</li>
+        <li><b>في السوق، بلا شبكة.</b> التطبيق يعمل دون إنترنت ويتزامن عند عودة الشبكة.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>لمن هذا التطبيق</h2>
+      <ul class="chips"><li>متاجر الأحياء</li><li>بقالات</li><li>محلات الأدوات</li><li>الأقمشة</li><li>الورشات</li><li>الحلاقة والتجميل</li><li>المطاعم الصغيرة</li><li>إعادة البيع في السوق</li><li>التعاونيات</li></ul>
+    </section>
+    <section>
+      <h2>التثبيت في ثلاث خطوات</h2>
+      <ol class="steps">
+        <li><b>افتح الرابط</b> على الهاتف.</li>
+        <li><b>أضف إلى الشاشة الرئيسية</b>: قائمة المتصفح، «إضافة إلى الشاشة الرئيسية».</li>
+        <li><b>أدخل متجرك</b>: الاسم والمواد والأسعار. انتهى.</li>
+      </ol>
+    </section>
+    <div class="band"><span>✔ بدون إنترنت</span><span>✔ Français · English · العربية</span><span>✔ أزرار كبيرة ونص كبير</span></div>
+  </div>
+
+  <footer>
+    Assistant Commercial · <span id="siteUrl"></span>
+  </footer>
+</div>
+
+<script>
+/* Trois versions dans une seule page : le bouton change le texte affiché, la
+   langue du document (donc le sens d'écriture) et le titre de l'onglet. */
+const TITLES = {
+  fr: 'Assistant Commercial — votre boutique dans votre poche',
+  en: 'Assistant Commercial — your shop in your pocket',
+  ar: 'المساعد التجاري — متجرك في جيبك',
+};
+const TEXTS = {
+  fr: { title: 'Votre boutique dans votre poche', lead: "Vendez, suivez votre stock, sachez qui vous doit de l'argent et combien vous gagnez. Sans cahier, sans calcul, même sans réseau.", cta: "Ouvrir l'application", free: "Elle s'installe sur le téléphone comme une vraie application.", scan: 'Scannez pour installer' },
+  en: { title: 'Your shop in your pocket', lead: 'Sell, track your stock, know who owes you money and how much you earn. No notebook, no maths, even without network.', cta: 'Open the app', free: 'It installs on the phone like a real app.', scan: 'Scan to install' },
+  ar: { title: 'متجرك في جيبك', lead: 'بِع، تابع مخزونك، اعرف من يدين لك وبكم تربح. بلا كراس، بلا حساب، وحتى بلا إنترنت.', cta: 'افتح التطبيق', free: 'يُثبَّت على الهاتف مثل تطبيق حقيقي.', scan: 'امسح الرمز للتثبيت' },
+};
+function show(lang) {
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  document.title = TITLES[lang] || TITLES.fr;
+  document.querySelectorAll('[data-lang]').forEach((el) => el.classList.toggle('on', el.dataset.lang === lang));
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = (TEXTS[lang] || TEXTS.fr)[el.dataset.i18n]; });
+  document.querySelectorAll('[data-set-lang]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.setLang === lang)));
+}
+document.querySelectorAll('[data-set-lang]').forEach((b) => { b.onclick = () => show(b.dataset.setLang); });
+document.getElementById('siteUrl').textContent = location.origin + '/';
+const appUrl = location.origin + '/';
+
+/* QR de l'application, s'il est disponible (le fichier est déjà dans public/). */
+const script = document.createElement('script');
+script.src = 'qrcode.js';
+script.onload = () => {
+  try {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(appUrl);
+    qr.make();
+    document.querySelectorAll('[data-qr]').forEach((box) => { box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true }); });
+  } catch (e) { /* sans QR, le lien reste écrit en bas de page */ }
+};
+document.head.appendChild(script);
+</script>
+</body>
+</html>

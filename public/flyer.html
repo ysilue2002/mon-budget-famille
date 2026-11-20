@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flyer Assistant Commercial — à imprimer</title>
+<meta name="theme-color" content="#14532d">
+<style>
+:root{--vert:#14532d;--or:#e0a526;--creme:#f7f4ea;--encre:#14261b;--gris:#5b6b60}
+*{box-sizing:border-box}
+body{margin:0;background:#e7e3d6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--encre);font-size:16px;line-height:1.5}
+.hint{max-width:190mm;margin:14px auto 6px;padding:0 8mm;color:#3d4a41;font-size:14px}
+.sheet{background:var(--creme);width:210mm;min-height:297mm;margin:8mm auto;padding:14mm;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 4px 18px rgba(0,0,0,.18)}
+.top{display:flex;align-items:center;gap:8mm;border-bottom:4px solid var(--vert);padding-bottom:5mm}
+.top img{width:18mm;height:18mm;border-radius:4mm;background:#fff;padding:2mm}
+.brand{font-weight:900;font-size:10.5mm;color:var(--vert);line-height:1.05}
+.brand small{display:block;font-size:4.4mm;font-weight:600;color:var(--gris);letter-spacing:.3mm;margin-top:1.5mm}
+h1{font-size:13mm;line-height:1.1;margin:6mm 0 3mm;color:var(--vert)}
+.lead{font-size:5.6mm;margin:0 0 6mm;color:#22352a}
+ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:3mm 6mm}
+li{background:#fff;border:1px solid #d5e2d7;border-radius:4mm;padding:3mm;font-size:4.6mm}
+li b{display:block;color:var(--vert);font-size:5mm;margin-bottom:.8mm}
+.foot{display:flex;align-items:center;gap:7mm;border-top:4px solid var(--vert);padding-top:5mm;margin-top:6mm}
+.qr{background:#fff;border:3px solid var(--vert);border-radius:4mm;padding:3mm;flex:0 0 auto;text-align:center}
+.qr svg{width:38mm;height:38mm;display:block}
+.qr div:last-child{font-size:3.6mm;color:var(--gris);margin-top:1mm}
+.url{font-weight:800;font-size:5.2mm;color:var(--vert);word-break:break-all}
+.url small{display:block;font-weight:500;color:var(--gris);font-size:4.2mm;margin-top:2mm}
+.badge{display:inline-block;background:var(--or);color:#2a1d00;font-weight:800;border-radius:999px;padding:1.5mm 4mm;font-size:4.2mm;margin-bottom:3mm}
+html[dir="rtl"] body{font-family:"Noto Naskh Arabic","Segoe UI",Tahoma,system-ui,sans-serif}
+html[dir="rtl"] .sheet{direction:rtl}
+@page{size:A4;margin:0}
+@media print{
+  body{background:#fff}
+  .hint{display:none}
+  .sheet{margin:0;box-shadow:none;page-break-after:always;break-after:page}
+  .sheet:last-of-type{page-break-after:auto;break-after:auto}
+}
+@media (max-width:230mm){.sheet{width:auto;min-height:auto;padding:8mm}h1{font-size:10mm}ul{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<p class="hint">Flyer prêt à imprimer : <b>Ctrl+P</b> (ou « Imprimer »), format A4, marges « aucune » (elles sont déjà dans la page). Page 1 en français, page 2 en arabe.</p>
+
+<!-- PAGE 1 — FRANÇAIS -->
+<section class="sheet" lang="fr" dir="ltr">
+  <div>
+    <div class="top">
+      <img src="icons/logo-header.png" alt="">
+      <div class="brand">Assistant Commercial<small>VOTRE BOUTIQUE DANS VOTRE POCHE</small></div>
+    </div>
+    <span class="badge">Installation gratuite sur le téléphone</span>
+    <h1>Vendez, comptez, sachez qui vous doit.</h1>
+    <p class="lead">Le cahier de la boutique qui calcule tout seul — même sans réseau.</p>
+    <ul>
+      <li><b>＋ Vendre en 2 touches</b>La vente est notée, le stock diminue seul.</li>
+      <li><b>🧾 Reçu sur WhatsApp</b>Ou en PDF, prêt à envoyer au client.</li>
+      <li><b>▦ Stock et alertes</b>Ce qui reste et ce qui va manquer.</li>
+      <li><b>☎ Crédit client</b>Qui doit combien, avec le rappel prêt.</li>
+      <li><b>▤ Devis et factures</b>Numérotés seuls, avec la TVA, en PDF.</li>
+      <li><b>💰 Bénéfice du jour</b>Ventes − coût des articles − dépenses.</li>
+    </ul>
+  </div>
+  <div class="foot">
+    <div class="qr"><div data-qr="1"></div><div>Scannez pour installer</div></div>
+    <div class="url"><span class="app-url">l'application</span><small>Français · English · العربية<br>Hors ligne · Gros boutons · Grand texte</small></div>
+  </div>
+</section>
+
+<!-- PAGE 2 — العربية -->
+<section class="sheet" lang="ar" dir="rtl">
+  <div>
+    <div class="top">
+      <img src="icons/logo-header.png" alt="">
+      <div class="brand">المساعد التجاري<small>متجرك في جيبك</small></div>
+    </div>
+    <span class="badge">تثبيت مجاني على الهاتف</span>
+    <h1>بِع، احسب، واعرف من يدين لك.</h1>
+    <p class="lead">كراس المتجر الذي يحسب وحده — حتى بدون إنترنت.</p>
+    <ul>
+      <li><b>＋ البيع بلمستين</b>تُسجل البيعة وينقص المخزون وحده.</li>
+      <li><b>🧾 إيصال على واتساب</b>أو بصيغة PDF جاهز للإرسال.</li>
+      <li><b>▦ المخزون والتنبيهات</b>ما بقي وما سيوشك على النفاد.</li>
+      <li><b>☎ ديون العملاء</b>من يدين وبكم، مع تذكير جاهز.</li>
+      <li><b>▤ عروض سعر وفواتير</b>بترقيم تلقائي، مع الضريبة، بصيغة PDF.</li>
+      <li><b>💰 ربح اليوم</b>المبيعات − تكلفة المواد − المصاريف.</li>
+    </ul>
+  </div>
+  <div class="foot">
+    <div class="qr"><div data-qr="1"></div><div>امسح الرمز للتثبيت</div></div>
+    <div class="url"><span class="app-url">l'application</span><small>Français · English · العربية<br>بدون إنترنت · أزرار كبيرة · نص كبير</small></div>
+  </div>
+</section>
+
+<script>
+/* Le flyer porte l'adresse réelle de l'application, écrite en clair à côté du
+   QR : sans réseau ni appareil photo, on peut encore recopier le lien. */
+const appUrl = location.origin + '/';
+document.querySelectorAll('.app-url').forEach((el) => { el.textContent = appUrl; });
+const script = document.createElement('script');
+script.src = 'qrcode.js';
+script.onload = () => {
+  try {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(appUrl);
+    qr.make();
+    const svg = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+    document.querySelectorAll('[data-qr]').forEach((box) => { box.innerHTML = svg; });
+  } catch (e) { /* le lien écrit reste suffisant */ }
+};
+document.head.appendChild(script);
+</script>
+</body>
+</html>

@@ -187,6 +187,8 @@ body.adsOn{padding-bottom:196px}
 .docPreview .docNotes{display:flex;justify-content:space-between;gap:10px;font-size:8px;margin-top:14px;color:#333}
 .docPreview .docNotes>div{flex:1}
 .docPreview .docNotes>div:last-child{text-align:end}
+.docPreview .docQr{display:flex;justify-content:center;margin-top:10px}
+.docPreview .docQr svg{width:70px;height:70px}
 
 @media print{
   #printArea .docBar{background:#111;height:4mm;margin:0 0 9mm}
@@ -207,6 +209,10 @@ body.adsOn{padding-bottom:196px}
   #printArea .docNotes{display:flex;justify-content:space-between;gap:10mm;font-size:8pt;margin-top:16mm}
   #printArea .docNotes>div{flex:1}
   #printArea .docNotes>div:last-child{text-align:end}
+  #printArea .docQr{display:flex;justify-content:center;margin-top:10mm}
+  #printArea .docQr svg{width:24mm;height:24mm}
+  #printArea.ticket .docQr{margin-top:3mm}
+  #printArea.ticket .docQr svg{width:18mm;height:18mm}
 }
 
 /* Pages légales */

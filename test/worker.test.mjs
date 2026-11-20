@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, docExists };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, docExists } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients } = mod;
 
 const OWNER = 'owner-1';
 const SELLER = 'seller-1';
@@ -175,4 +175,16 @@ test('un document doit exister dans l’état du compte pour partir', () => {
   assert.equal(docExists(etatDocs, ''), false);
   assert.equal(docExists('', 'FAC-2026-001'), false, 'compte sans état : refusé');
   assert.equal(docExists('pas du json', 'FAC-2026-001'), false, 'état illisible : refusé');
+});
+
+test('un rappel ne part que vers une adresse déjà sur une facture', () => {
+  const state = JSON.stringify({ docs: [
+    { id: 'f1', kind: 'FAC', number: 'FAC-2026-001', clientEmail: 'Awa@Exemple.ci' },
+    { id: 'f2', kind: 'FAC', number: 'FAC-2026-002' },
+  ] });
+  const allowed = knownRecipients(state);
+  assert.equal(allowed.has('awa@exemple.ci'), true, 'casse et espaces ignorés');
+  assert.equal(allowed.has('inconnu@ailleurs.com'), false, 'adresse inconnue : refusée');
+  assert.equal(knownRecipients('').size, 0, 'compte sans état : personne');
+  assert.equal(knownRecipients('pas du json').size, 0, 'état illisible : personne');
 });

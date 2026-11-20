@@ -2194,6 +2194,7 @@ function docHTML(d, format) {
       <div class="tot"><span>${T('ht')}</span><span>${money(d.total)}</span></div>
       ${rate ? `<div class="tot"><span>${T('vatShort')} ${rate} %</span><span>${money(vatOf(d))}</span></div>` : ''}
       <div class="tot"><span>${T('ttc')}</span><span>${money(amountOf(d))}</span></div>
+      <div class="docQr" data-qr="1"></div>
       <p class="small">${T('thanks')}</p>`;
   }
   return `<div class="docSheet">
@@ -2230,16 +2231,22 @@ function docHTML(d, format) {
       <div>${T('docNote1')}</div>
       <div>${T('docNote2')}</div>
     </div>
+    <div class="docQr" data-qr="1"></div>
     <div class="docBar docBarBottom"></div>
   </div>`;
 }
-function printFormat(id, format) {
+/* Le QR de la boutique est dessiné à part : sa génération est asynchrone, et
+   la feuille doit rester utilisable même si le module QR manque (hors ligne). */
+async function withQr(html) {
+  if (!html.includes('data-qr="1"')) return html;
+  const qr = await qrCode(appUrl());
+  if (!qr) return html.replace('<div class="docQr" data-qr="1"></div>', '');
+  return html.replace('<div class="docQr" data-qr="1"></div>', `<div class="docQr">${qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true })}</div>`);
+}
+async function printFormat(id, format) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
-  const area = document.getElementById('printArea');
-  area.className = format === 'ticket' ? 'ticket' : 'a4';
-  area.innerHTML = docHTML(d, format);
-  printAreaNow();
+  printHtml(await withQr(docHTML(d, format)), format === 'ticket' ? 'ticket' : 'a4');
 }
 /* jsPDF pèse 366 Ko et ne sert qu'aux PDF : on le télécharge au premier usage,
    puis le service worker le garde pour les fois suivantes, même hors ligne. */
@@ -2280,7 +2287,7 @@ function imgSize(src) {
   });
 }
 async function docPdf(d) {
-  if (arabicPdf()) { printHtml(docHTML(d)); return null; }
+  if (arabicPdf()) { printHtml(await withQr(docHTML(d))); return null; }
   const lib = await loadJsPDF();
   if (!lib) return alert(T('pdfNeedsNet'));
   const { jsPDF } = lib;
@@ -2303,6 +2310,8 @@ async function docPdf(d) {
   pdf.setFontSize(9);
   pdf.text(`${T('docNo')} : ${d.number}`, 196, 26, { align: 'right' });
   pdf.text(`${T('docDate')} : ${dayFR(d.date)}`, 196, 31, { align: 'right' });
+  /* QR de la boutique, sous les références du document. */
+  await addQrPdf(pdf, appUrl(), 174, 35, 20);
   const boxTop = 58; const boxH = 34; const boxW = 88;
   pdf.setDrawColor(17, 17, 17); pdf.setLineWidth(0.4);
   pdf.roundedRect(12, boxTop, boxW, boxH, 3, 3);
@@ -2433,11 +2442,11 @@ async function emailDocPDF(id) {
     location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   } catch {}
 }
-function previewDoc(id) {
+async function previewDoc(id) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
   const m = modal(`<h2>${T('preview')}</h2>
-    <div class="docPreview">${docHTML(d)}</div>
+    <div class="docPreview">${await withQr(docHTML(d))}</div>
     <button class="btn" id="pvA4">${T('printA4')}</button>
     <button class="btn out" id="pvTk">${T('printTicket')}</button>
     <button class="btn out" id="pvNo">${T('close')}</button>`);

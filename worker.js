@@ -507,6 +507,11 @@ async function api(request, env, url) {
     const body = await readBody(request);
     const list = Array.isArray(body.list) ? body.list.slice(0, 10) : [];
     if (!list.length) return json({ error: 'empty' }, 400);
+    /* Un rappel ne part que vers une adresse déjà enregistrée sur une facture
+       du compte : l'application ne peut pas servir à envoyer du courrier vers
+       n'importe qui. */
+    const stateRow = await env.DB.prepare('SELECT json FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
+    const allowed = knownRecipients(stateRow ? stateRow.json : '');
     const day = new Date().toISOString().slice(0, 10);
     const row = await env.DB.prepare('SELECT day, count FROM mail_log WHERE user_id = ?').bind(user.id).first();
     const sameDay = !!row && row.day === day;
@@ -515,7 +520,7 @@ async function api(request, env, url) {
     for (const item of list) {
       if (count >= 20) break;
       const to = String(item && item.to || '').trim().toLowerCase();
-      if (!validEmail(to)) continue;
+      if (!validEmail(to) || !allowed.has(to)) continue;
       /* La facture voyage avec le rappel quand elle est fournie et lisible. */
       const pdf = String(item && item.pdf || '').replace(/\s/g, '');
       const hasPdf = pdf.length >= 100 && pdf.length <= 1600000 && /^[A-Za-z0-9+/=]+$/.test(pdf);
@@ -751,6 +756,20 @@ function docExists(stateText, number) {
     const state = JSON.parse(stateText || '{}');
     return (Array.isArray(state.docs) ? state.docs : []).some((d) => d && String(d.number) === wanted);
   } catch { return false; }
+}
+
+/* Adresses auxquelles un rappel peut partir : celles déjà notées sur une
+   facture du compte. Un état illisible n'autorise personne. */
+function knownRecipients(stateText) {
+  const set = new Set();
+  try {
+    const state = JSON.parse(stateText || '{}');
+    for (const d of (Array.isArray(state.docs) ? state.docs : [])) {
+      const email = String((d && d.clientEmail) || '').trim().toLowerCase();
+      if (email) set.add(email);
+    }
+  } catch { /* état illisible : aucun destinataire */ }
+  return set;
 }
 
 /* Une origine illisible ("null", valeur bricolée) est refusée, jamais une
