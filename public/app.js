@@ -729,12 +729,15 @@ function logRemind(entry) {
   if (db.mailLog.length > MAIL_LOG_MAX) db.mailLog = db.mailLog.slice(-MAIL_LOG_MAX);
 }
 /* Ce que la programmation a fait aujourd'hui, en une ligne : pas de promesse
-   d'envoi, puisque WhatsApp demande toujours une touche du commerce. */
+   d'envoi, puisque WhatsApp demande toujours une touche du commerce. La liste
+   reste joignable jusqu'à minuit, même si la fenêtre a été fermée trop tôt. */
 function autoWaNote() {
   const s = db.settings || {};
   if (!s.autoRemind && !s.autoSupRemind) return '';
   if (s.autoRemindDay !== todayISO()) return '';
-  return `<p class="hint">${T('autoWaReady')}</p>`;
+  const n = waRemindTargets().length;
+  return `<p class="hint">${T('autoWaReady')}</p>`
+    + (n ? `<button class="btn out" data-act="autoWaAgain">${T('autoWaOpen')} (${n})</button>` : '');
 }
 /* Filtres du journal : canal, résultat, période. Ils s'appliquent aussi à
    l'export et au renvoi groupé, pour rester cohérents avec ce qu'on voit. */
@@ -792,7 +795,7 @@ function remindJournal() {
       const when = e.at ? `${dayFR(isoOf(new Date(e.at)))} ${clock(e.at)}` : '';
       return `<div class="row"><div><div class="t">${esc(e.number || '—')} · ${esc(e.party || '—')}</div>
         <div class="s">${when} · ${e.channel === 'email' ? T('channelEmail') : T('channelWhatsapp')}${e.to ? ' · ' + esc(e.to) : ''}</div></div>
-        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span>`}<br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button></div></div>`;
+        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span>`}${e.docId ? `<br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button>` : ''}</div></div>`;
     }).join('')}
     ${log.length ? `<button class="btn out" data-act="exportLog">${T('exportLog')}</button>` : ''}
   </div>`;
@@ -2046,17 +2049,10 @@ function remindQueue() {
 /* Factures oubliées : impayées depuis plus d'une semaine et sans relance
    récente. L'alerte tombe dès qu'elles sont relancées, payées ou converties. */
 const forgottenInvoices = () => remindQueue();
-/* Factures qui partent par e-mail à l'ouverture : en retard selon le délai
-   choisi, pas relancées récemment, et dont le client a une adresse e-mail. */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
 /* Même règle que le serveur : une adresse qu'il refuserait ne doit pas être
-   comptée dans la file automatique. */
+   acceptée par l'application. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
 const isEmail = (v) => { const t = String(v || '').trim(); return t.length <= 190 && EMAIL_RE.test(t); };
-function autoRemindList() {
-  const delay = remindDelay();
-  return unpaidInvoices().filter((d) => isEmail(d.clientEmail)
-    && daysSince(d.date) >= delay && (!d.remindedAt || daysSince(d.remindedAt) >= delay));
-}
 /* Relance programmée : le commerce choisit la fréquence, le jour et l'heure.
    WhatsApp ne part jamais seul (il faut une touche), donc à l'heure dite
    l'application prépare la liste et ouvre un message prêt par destinataire. */
@@ -2130,20 +2126,6 @@ function waRemindTargets() {
   }));
   return out;
 }
-/* L'envoi d'e-mails dépend d'une clé secrète du serveur : le client ne peut pas
-   la voir, il demande donc au serveur s'il sait envoyer. null = pas encore su. */
-let mailReady = null;
-const mailFlagHTML = () => (mailReady === false
-  ? `<p class="hint"><span class="tag bad">${T('mailMissing')}</span> ${T('mailMissingHint')}</p>` : '');
-async function loadMailStatus() {
-  const r = await api('/api/mail');
-  mailReady = r.ok && r.data ? !!r.data.mail : null;
-  /* Les réglages ouverts se mettent à jour sur place : rouvrir la fenêtre
-     effacerait ce que le commerce est en train de saisir. */
-  const box = document.getElementById('acMailFlag');
-  if (box) box.innerHTML = mailFlagHTML();
-  render();
-}
 /* Déclenchement à l'ouverture : on note le jour tout de suite (une seule
    préparation par jour), puis on montre la liste si elle n'est pas vide. */
 function autoRemind() {
@@ -2160,7 +2142,7 @@ function autoRemind() {
 function autoWaModal(list) {
   const m = modal(`<h2>${T('autoWaTitle')}</h2>
     <p class="hint">${T('autoWaHint')}</p>
-    ${list.map((x) => `<div class="row" data-aw="${esc(x.kind)}|${esc(x.id)}"><div>
+    ${list.map((x) => `<div class="row"><div>
       <div class="t">${esc(x.name)} · ${money(x.amount)}</div>
       <div class="s">${esc(x.phone)}</div></div>
       <div class="right"><button class="btn small whats" data-awgo="${esc(x.kind)}|${esc(x.id)}">${T('remind')}</button></div></div>`).join('')
@@ -2179,7 +2161,7 @@ function autoWaModal(list) {
       } else {
         logRemind({ docId: '', number: '', party: item.name, amount: item.amount, channel: 'wa', to: item.phone, ok: true });
       }
-      const row = m.querySelector(`[data-aw="${item.kind}|${item.id}"]`);
+      const row = btn.closest('.row');
       if (row) row.innerHTML = `<div><div class="t">${esc(item.name)} · ${money(item.amount)}</div>
         <div class="s">${esc(item.phone)}</div></div><div class="right"><span class="tag ok">✓</span></div>`;
       saveDB(); render();
@@ -2935,6 +2917,10 @@ document.addEventListener('click', async (e) => {
   }
   /* Relance d'une facture impayée : message courtois qui rappelle la facture. */
   if (act === 'bulkRemind') bulkRemindModal();
+  if (act === 'autoWaAgain') {
+    const list = waRemindTargets();
+    if (list.length) autoWaModal(list);
+  }
   if (act === 'exportLog') downloadMailLog();
   if (act === 'resendRemind') resendReminder(b.dataset.log);
   if (act === 'retryFailed') retryFailedReminders();
@@ -3177,7 +3163,6 @@ function loadInstalls() {
 }
 
 function settingsModal() {
-  if (mailReady === null) loadMailStatus();
   let logoDraft = db.settings.logo || '';
   const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
     <label>${T('language')}</label>
@@ -3221,9 +3206,6 @@ function settingsModal() {
     <label>${T('autoRemindEvery')}</label><select id="setArEvery"><option value="jour" ${(db.settings.autoRemindEvery || 'jour') === 'jour' ? 'selected' : ''}>${T('everyDay')}</option><option value="semaine" ${db.settings.autoRemindEvery === 'semaine' ? 'selected' : ''}>${T('everyWeek')}</option></select>
     <label>${T('autoRemindWeekday')}</label><select id="setArWeekday">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === (Math.round(Number(db.settings.autoRemindWeekday)) || 1) ? 'selected' : ''}>${weekdayName(n)}</option>`).join('')}</select>
     <label>${T('autoRemindHour')}</label><select id="setArHour">${hoursList().map((h) => `<option value="${h}" ${h === autoHourOf(db.settings) ? 'selected' : ''}>${h}:00</option>`).join('')}</select>
-    <div id="acMailFlag">${mailFlagHTML()}</div>
-    <button class="btn out" id="setMailTest">${T('testMail')}</button>
-    <p class="hint" id="mailTestMsg"></p>
     <p class="hint">${T('smsUnavailable')}</p>
     ${ADS.client ? `<label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAds" ${db.settings.ads ? 'checked' : ''} style="width:auto"><span>${T('ads')}</span></label>` : ''}
     </details>
@@ -3344,21 +3326,6 @@ function settingsModal() {
   };
   d.querySelector('#logoDel').onclick = () => { logoDraft = ''; logoPrev.innerHTML = ''; };
   d.querySelector('#setInvRemReset').onclick = () => { d.querySelector('#setInvRem').value = INV_REMIND[lang()] || INV_REMIND.fr; };
-  /* Preuve immédiate que la clé fonctionne, sans attendre une facture en retard. */
-  d.querySelector('#setMailTest').onclick = async () => {
-    const btn = d.querySelector('#setMailTest');
-    const msg = d.querySelector('#mailTestMsg');
-    btn.disabled = true; msg.textContent = T('mailTestWait');
-    const r = await api('/api/test-mail', 'POST', {});
-    btn.disabled = false;
-    const ok = r.ok && r.data && r.data.mail;
-    msg.textContent = ok ? T('mailTestOk') : T('mailTestFail');
-    if (ok) {
-      mailReady = true;
-      const box = d.querySelector('#acMailFlag');
-      if (box) box.innerHTML = mailFlagHTML();
-    }
-  };
   /* Taille de texte : réglage de l'appareil, ouvert aussi aux vendeurs. */
   const bigCb = d.querySelector('#setBigText');
   if (bigCb) bigCb.onchange = () => {
@@ -4013,7 +3980,7 @@ function askShop() {
   };
 }
 function closeGate() { const g = document.getElementById('gate'); if (g) g.remove(); setBackgroundInert(false); }
-function afterGate() { closeGate(); askShop(); render(); loadMailStatus(); autoRemind(); }
+function afterGate() { closeGate(); askShop(); render(); autoRemind(); }
 function showLangGate() {
   closeGate();
   applyBigText();
@@ -4246,7 +4213,6 @@ if (!globalThis.__AC_TEST__) {
     if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
     if (!me) { gateMode = db.shop ? 'login' : 'signup'; showAuthGate(); return; }
     askShop();
-    loadMailStatus();
     autoRemind();
   })();
   fetch('version.json', { cache: 'no-store' })

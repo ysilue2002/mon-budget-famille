@@ -49,7 +49,7 @@ function charger() {
   vm.runInContext(read('public/i18n-ar.js'), ctx, { filename: 'i18n-ar.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, pastSaleRecord, autoDue, supplierDueItems, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, pastSaleRecord, autoDue, supplierDueItems, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -409,7 +409,7 @@ test('le bilan des relances dit ce qui a été payé après un rappel', () => {
   assert.equal(dansVm('remindStats("jour").count'), 0, 'rien de relancé aujourd’hui');
 });
 
-/* --- délai de relance réglable et relance électronique --- */
+/* --- délai de relance réglable --- */
 
 test('le délai de relance se règle et décide de la file', () => {
   viderPeriode(`db.sales = []; db.settings.invRemindDays = 7; db.docs = [
@@ -418,8 +418,6 @@ test('le délai de relance se règle et décide de la file', () => {
     { id: 'v3', kind: 'FAC', number: 'V3', date: isoOf(new Date(Date.now() - 10 * 86400000)), total: 1000, vat: 0, lines: [], party: 'C' }];`);
   assert.equal(dansVm('remindDelay()'), 7, '7 jours par défaut');
   assert.equal(dansVm('remindQueue().map((d) => d.id).join(",")'), 'v2,v3', 'la plus ancienne d’abord');
-  assert.equal(dansVm('autoRemindList().map((d) => d.id).join(",")'), 'v2',
-    'par e-mail : seulement les clients qui ont une adresse');
   dansVm('db.settings.invRemindDays = 3');
   assert.equal(dansVm('remindDelay()'), 3);
   assert.equal(dansVm('remindQueue().map((d) => d.id).join(",")'), 'v2,v3,v1',

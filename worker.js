@@ -503,24 +503,6 @@ async function api(request, env, url) {
     return json({ ok: true, mail: sent });
   }
 
-  /* L'application ne peut pas savoir seule si le serveur sait envoyer un e-mail
-     (la clé est un secret) : elle le demande, et l'affiche clairement. */
-  if (path === '/api/mail' && request.method === 'GET') {
-    return json({ mail: !!env.RESEND_API_KEY });
-  }
-
-  /* Preuve que la clé fonctionne, sans attendre qu'une facture soit en retard. */
-  if (path === '/api/test-mail' && request.method === 'POST') {
-    if (await blocked(env, 'testmail:' + user.id, 3)) return json({ error: 'slow' }, 429);
-    await tooMany(env, 'testmail:' + user.id, 3, 60 * 60000);
-    if (!user.email) return json({ error: 'email' }, 400);
-    const mail = await sendTextMail(
-      env, user.email, 'Assistant Commercial : e-mail de test',
-      'Bonjour,\n\nCeci est un e-mail de test envoyé depuis votre application Assistant Commercial. Si vous le recevez, les relances par e-mail fonctionnent.\n\nBonne journée.',
-    );
-    return json({ ok: true, mail });
-  }
-
   /* Relances par e-mail : le client envoie la liste, le serveur seul peut
      écrire. Les limites protègent contre un envoi en boucle. */
   if (path === '/api/remind' && request.method === 'POST') {
