@@ -252,5 +252,14 @@ const I18N = { fr: {
     profitEstimated: 'Bénéfice estimé', profitUnknownHint: "Le coût d'achat manque ou vaut 0 sur",
     salesNoCost: 'vente(s) : le bénéfice est surestimé.', fixSalesCost: 'Renseigner les coûts',
     pdfDesktopHint: "Sur ordinateur, le PDF est téléchargé puis WhatsApp s'ouvre sans pièce jointe : joignez le fichier vous-même. Sur téléphone, le PDF part directement.",
+    guideOpen: 'Comment utiliser', guideTitle: 'Comment utiliser l’application',
+    guideIntro: 'Six gestes suffisent pour tenir votre boutique. Vous pouvez revenir ici quand vous voulez.',
+    guide1: '1. Vendre', guide1h: 'Touchez ＋ Vente. Écrivez le montant, puis choisissez l’article si vous suivez le stock.',
+    guide2: '2. Vendre à crédit', guide2h: 'Cochez « À crédit » et écrivez le nom du client. Ce qu’il doit apparaît dans Clients.',
+    guide3: '3. Ajouter vos articles', guide3h: 'Dans Stock, ajoutez le nom, le prix d’achat et le prix de vente. Le stock baisse à chaque vente.',
+    guide4: '4. Faire un devis ou une facture', guide4h: 'Dans Papiers, créez le document puis envoyez-le par WhatsApp. Une facture impayée peut devenir une vente à crédit.',
+    guide5: '5. Relancer qui vous doit', guide5h: 'Clients, puis Détail, puis Relancer. L’application peut aussi préparer les relances du jour sur WhatsApp.',
+    guide6: '6. Voir votre argent', guide6h: 'Argent montre les ventes, les dépenses, le bénéfice et ce qu’on vous doit.',
+    guideDone: 'J’ai compris',
   } };
 const LANGS = [{ id: 'fr', label: 'FR' }, { id: 'en', label: 'EN' }, { id: 'ar', label: 'ع' }];

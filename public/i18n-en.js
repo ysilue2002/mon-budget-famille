@@ -249,4 +249,13 @@ I18N.en = {
     profitEstimated: 'Estimated profit', profitUnknownHint: 'Purchase cost is missing or 0 for',
     salesNoCost: 'sale(s): profit is overstated.', fixSalesCost: 'Enter the costs',
     pdfDesktopHint: 'On a computer the PDF is downloaded and WhatsApp opens without it: attach the file yourself. On a phone the PDF is sent directly.',
+    guideOpen: 'How to use', guideTitle: 'How to use the app',
+    guideIntro: 'Six gestures are enough to run your shop. You can come back here whenever you like.',
+    guide1: '1. Sell', guide1h: 'Tap ＋ Sale. Enter the amount, then pick the item if you track stock.',
+    guide2: '2. Sell on credit', guide2h: 'Tick “On credit” and type the customer’s name. What they owe appears in Customers.',
+    guide3: '3. Add your items', guide3h: 'In Stock, add the name, the buying price and the selling price. Stock goes down with every sale.',
+    guide4: '4. Make a quote or an invoice', guide4h: 'In Papers, create the document then send it on WhatsApp. An unpaid invoice can become a credit sale.',
+    guide5: '5. Remind those who owe you', guide5h: 'Customers, then Details, then Remind. The app can also prepare the day’s reminders on WhatsApp.',
+    guide6: '6. See your money', guide6h: 'Money shows sales, expenses, profit and what you are owed.',
+    guideDone: 'I understand',
   };

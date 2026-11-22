@@ -412,6 +412,7 @@ function vendre() {
     </div>
     ${isStaff() ? '' : `<button class="btn out" data-act="withdraw">${T('withdraw')}</button>`}
     <button class="btn out" data-act="pastSale">📅 ${T('pastSale')}</button>
+    <button class="btn out" data-act="guide">❓ ${T('guideOpen')}</button>
     <div class="card" style="margin-top:16px"><h3 style="display:flex;justify-content:space-between;align-items:center;gap:8px">${T('today')}<button class="btn small out" data-act="hist">${T('history')}</button></h3>${list || `<p class="empty">${T('nothing')}</p>`}</div>`;
 }
 
@@ -2582,6 +2583,7 @@ document.addEventListener('click', async (e) => {
   const act = b.dataset.act;
   if (act === 'sale') saleModal();
   if (act === 'pastSale') pastSaleModal();
+  if (act === 'guide') guideModal();
   if (act === 'editSale') saleModal(b.dataset.id);
   if (act === 'editExpense') expenseModal(b.dataset.id);
   if (act === 'hist') { tab = 'hist'; histShown = HIST_PAGE; render(); }
@@ -3880,6 +3882,24 @@ function resetModal(token) {
   };
 }
 
+/* Mode d'emploi : six gestes, une phrase chacun. Il s'ouvre une fois quand la
+   boutique reçoit son nom, puis reste joignable depuis l'accueil. */
+const GUIDE_KEY = KEY + '.guideSeen';
+function guideSeen() {
+  try { return localStorage.getItem(GUIDE_KEY) === '1'; } catch { return true; }
+}
+function guideModal() {
+  const steps = [1, 2, 3, 4, 5, 6].map((n) => `<div class="t" style="margin-top:14px">${T('guide' + n)}</div>
+    <p class="hint" style="margin:2px 0 0">${T('guide' + n + 'h')}</p>`).join('');
+  const m = modal(`<h2>${T('guideTitle')}</h2>
+    <p class="hint">${T('guideIntro')}</p>${steps}
+    <div class="sheetFoot"><button class="btn" id="gdOk">${T('guideDone')}</button></div>`);
+  m.querySelector('#gdOk').onclick = () => {
+    try { localStorage.setItem(GUIDE_KEY, '1'); } catch {}
+    m.remove();
+  };
+}
+
 /* ---------------- démarrage ---------------- */
 const LANG_KEY = 'assistant-commercial.langChosen';
 let gateMode = 'signup';
@@ -3891,6 +3911,7 @@ function askShop() {
     const v = d.querySelector('#wShop').value.trim();
     if (!v) return;
     db.shop = v; saveDB(); d.remove(); render();
+    if (!guideSeen()) guideModal();
   };
 }
 function closeGate() { const g = document.getElementById('gate'); if (g) g.remove(); setBackgroundInert(false); }
