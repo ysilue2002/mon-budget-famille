@@ -411,6 +411,7 @@ function vendre() {
       ${isStaff() ? '' : `<button class="btn out" data-act="expense">− ${T('expense')}</button>`}
     </div>
     ${isStaff() ? '' : `<button class="btn out" data-act="withdraw">${T('withdraw')}</button>`}
+    <button class="btn out" data-act="pastSale">📅 ${T('pastSale')}</button>
     <div class="card" style="margin-top:16px"><h3 style="display:flex;justify-content:space-between;align-items:center;gap:8px">${T('today')}<button class="btn small out" data-act="hist">${T('history')}</button></h3>${list || `<p class="empty">${T('nothing')}</p>`}</div>`;
 }
 
@@ -1609,6 +1610,60 @@ const METHOD_NAME = { 'Espèces': 'methodCash', 'Banque': 'methodBank' };
 const methodLabel = (m) => (m && METHOD_NAME[m] ? T(METHOD_NAME[m]) : m || '');
 const methodOptions = (sel) => [...new Set([...METHODS, ...(sel ? [sel] : [])])]
   .map((m) => `<option value="${esc(m)}" ${m === sel ? 'selected' : ''}>${esc(methodLabel(m))}</option>`).join('');
+/* Vente faite avant l'application. Elle compte à sa vraie date, ne touche pas
+   au stock (les articles sont déjà sortis) et n'ouvre pas de dette : on ne sait
+   pas si l'argent est rentré, donc elle est réputée encaissée. */
+function pastSaleRecord(input) {
+  const src = input || {};
+  const total = Math.max(0, Math.round(Number(src.total) || 0));
+  const date = String(src.date || '');
+  const today = String(src.today || todayISO());
+  if (total <= 0) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) return null;
+  const product = String(src.product || '').trim().slice(0, 60);
+  return {
+    id: src.id || uid(),
+    date,
+    total,
+    paid: total,
+    method: src.method || 'Espèces',
+    product,
+    qty: product ? Math.max(1, Math.round(Number(src.qty) || 1)) : 0,
+    pid: '',
+    cost: 0,
+    costKnown: false,
+    delivered: true,
+    past: true,
+    party: String(src.party || '').trim().slice(0, 60),
+    by: String(src.by || '').trim().slice(0, 40),
+    u: Date.now(),
+  };
+}
+function pastSaleModal() {
+  const today = todayISO();
+  const d = modal(`<div class="sheetHead"><h2>${T('pastSale')}</h2><button type="button" class="sheetClose" id="pClose" aria-label="${T('close')}">✕</button></div>
+    <p class="hint">${T('pastSaleHint')}</p>
+    <label>${T('pastSaleDate')}</label><input id="pDate" type="date" value="${today}" max="${today}">
+    <label>${T('product')}</label><input id="pProduct" maxlength="60" placeholder="Savon">
+    <label>${T('amount')}</label><input id="pAmount" inputmode="numeric" placeholder="0">
+    <div class="sheetFoot"><p class="err" id="pErr"></p>
+      <button class="btn" id="pOk">${T('pastSaleSave')}</button>
+      <button class="btn out" id="pNo">${T('cancel')}</button></div>`);
+  const err = (m) => { d.querySelector('#pErr').textContent = m; };
+  d.querySelector('#pNo').onclick = () => d.remove();
+  d.querySelector('#pClose').onclick = () => d.remove();
+  d.querySelector('#pOk').onclick = () => {
+    const date = d.querySelector('#pDate').value;
+    if (!date) { err(T('pastSaleDate')); return; }
+    if (date > todayISO()) { err(T('pastSaleFuture')); return; }
+    const sale = pastSaleRecord({ date, product: d.querySelector('#pProduct').value, total: d.querySelector('#pAmount').value });
+    if (!sale) { err(T('errorAmount')); return; }
+    db.sales.push(sale);
+    logAct('sale', sale.product || T('sale'), sale.total);
+    saveDB(); d.remove(); render();
+    alert(`${T('pastSaleDone')} ${dayFR(sale.date)} · ${money(sale.total)}`);
+  };
+}
 function saleModal(saleId) {
   const src = saleId ? db.sales.find((x) => x.id === saleId) : null;
   const known = src ? db.parties.find((p) => p.name === src.party) || {} : {};
@@ -2562,6 +2617,7 @@ document.addEventListener('click', async (e) => {
   if (!b) return;
   const act = b.dataset.act;
   if (act === 'sale') saleModal();
+  if (act === 'pastSale') pastSaleModal();
   if (act === 'editSale') saleModal(b.dataset.id);
   if (act === 'editExpense') expenseModal(b.dataset.id);
   if (act === 'hist') { tab = 'hist'; histShown = HIST_PAGE; render(); }

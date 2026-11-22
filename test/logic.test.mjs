@@ -49,7 +49,7 @@ function charger() {
   vm.runInContext(read('public/i18n-ar.js'), ctx, { filename: 'i18n-ar.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, pastSaleRecord, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -513,3 +513,22 @@ test('le nom de l’export dit ce que le fichier contient', () => {
   assert.equal(dansVm('logExportName()'), 'relances-tout.csv');
 });
 
+
+test('une vente passée garde sa date et ne crée ni stock ni dette', () => {
+  const s = ac.pastSaleRecord({ date: '2026-03-04', product: ' Savon ', total: 5000, today: '2026-11-22' });
+  assert.equal(s.date, '2026-03-04');
+  assert.equal(s.total, 5000);
+  assert.equal(s.paid, 5000);
+  assert.equal(ac.creditOf(s), 0);
+  assert.equal(s.product, 'Savon');
+  assert.equal(s.qty, 1);
+  assert.equal(s.pid, '');
+  assert.equal(s.past, true);
+});
+
+test('une vente passée refuse un montant vide, une date vide ou une date future', () => {
+  assert.equal(ac.pastSaleRecord({ date: '2026-03-04', total: 0, today: '2026-11-22' }), null);
+  assert.equal(ac.pastSaleRecord({ date: '', total: 1000, today: '2026-11-22' }), null);
+  assert.equal(ac.pastSaleRecord({ date: '2026-12-01', total: 1000, today: '2026-11-22' }), null);
+  assert.equal(ac.pastSaleRecord({ date: '2026-03-04', total: -50, today: '2026-11-22' }), null);
+});
