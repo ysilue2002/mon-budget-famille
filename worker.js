@@ -132,36 +132,6 @@ async function sendResetMail(env, to, link) {
   } catch { return false; }
 }
 
-async function sendDocMail(env, to, subject, text, filename, content) {
-  if (!env.RESEND_API_KEY) return false;
-  const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
-  try {
-    const r = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from, to: [to], subject: String(subject).slice(0, 180), text: String(text).slice(0, 4000), attachments: [{ filename, content }] }),
-    });
-    return r.ok;
-  } catch { return false; }
-}
-
-/* Rappel de facture envoyé par le serveur, en texte seul (pas de pièce jointe
-   à générer : la facture est décrite dans le message). */
-async function sendTextMail(env, to, subject, text, filename, content) {
-  if (!env.RESEND_API_KEY) return false;
-  const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
-  const body = { from, to: [to], subject: String(subject || 'Rappel').slice(0, 180), text: String(text || '').slice(0, 4000) };
-  if (filename && content) body.attachments = [{ filename, content }];
-  try {
-    const r = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return r.ok;
-  } catch { return false; }
-}
-
 async function blocked(env, key, limit) {
   const row = await env.DB.prepare('SELECT hits, reset FROM throttle WHERE key = ?').bind(key).first();
   return !!row && row.reset > Date.now() && row.hits >= limit;
@@ -349,6 +319,18 @@ function restoreMasked(storedText, incomingText) {
   return JSON.stringify(incoming);
 }
 
+/* 20 inscriptions par heure et par adresse IP : un patron et ses vendeurs
+   partagent souvent le même Wi-Fi, et 10 les bloquait au milieu d'une mise en
+   route. Renvoie vrai quand l'adresse doit attendre. */
+const SIGNUP_LIMIT = 20;
+const SIGNUP_WINDOW_MS = 60 * 60000;
+async function signupGuard(env, ip) {
+  const key = 'signup:' + (ip || 'local');
+  if (await blocked(env, key, SIGNUP_LIMIT)) return true;
+  await tooMany(env, key, SIGNUP_LIMIT, SIGNUP_WINDOW_MS);
+  return false;
+}
+
 async function api(request, env, url) {
   const path = url.pathname.replace(/\/+$/, '');
 
@@ -359,10 +341,7 @@ async function api(request, env, url) {
 
   if (path === '/api/signup' && request.method === 'POST') {
     const ip = request.headers.get('cf-connecting-ip') || 'local';
-    /* 20 par heure : un patron et ses vendeurs partagent souvent le même Wi-Fi,
-       et 10 les bloquait au milieu d'une mise en route. */
-    if (await blocked(env, 'signup:' + ip, 20)) return json({ error: 'slow' }, 429);
-    await tooMany(env, 'signup:' + ip, 20, 60 * 60000);
+    if (await signupGuard(env, ip)) return json({ error: 'slow' }, 429);
     const body = await readBody(request);
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
@@ -479,66 +458,6 @@ async function api(request, env, url) {
 
   const user = await currentUser(request, env);
   if (!user) return json({ error: 'auth' }, 401);
-
-  if (path === '/api/send-doc' && request.method === 'POST') {
-    /* Seul le patron envoie un document : un vendeur n'a pas à faire partir
-       un PDF vers une adresse choisie. */
-    if (user.ownerId) return json({ error: 'owner' }, 403);
-    const body = await readBody(request);
-    const to = String(body.to || '').trim().toLowerCase();
-    if (!validEmail(to)) return json({ error: 'email' }, 400);
-    const filename = String(body.filename || 'document.pdf').replace(/[^\w.-]+/g, '-').slice(0, 80) || 'document.pdf';
-    const pdf = String(body.pdf || '').replace(/\s/g, '');
-    if (pdf.length < 100 || pdf.length > 1600000 || !/^[A-Za-z0-9+/=]+$/.test(pdf)) return json({ error: 'pdf' }, 400);
-    /* Seule une facture ou un devis déjà enregistré part : le numéro est
-       vérifié dans l'état du compte, pas cru sur parole. */
-    const stateRow = await env.DB.prepare('SELECT json FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
-    if (!stateRow || !docExists(stateRow.json, body.number)) return json({ error: 'doc' }, 400);
-    const day = new Date().toISOString().slice(0, 10);
-    const row = await env.DB.prepare('SELECT day, count FROM mail_log WHERE user_id = ?').bind(user.id).first();
-    const count = row && row.day === day ? row.count : 0;
-    if (count >= 20) return json({ ok: true, mail: false, error: 'limit' });
-    await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = CASE WHEN mail_log.day = excluded.day THEN mail_log.count + 1 ELSE 1 END').bind(user.id, day).run();
-    const sent = await sendDocMail(env, to, String(body.subject || 'Document'), String(body.text || ''), filename, pdf);
-    return json({ ok: true, mail: sent });
-  }
-
-  /* Relances par e-mail : le client envoie la liste, le serveur seul peut
-     écrire. Les limites protègent contre un envoi en boucle. */
-  if (path === '/api/remind' && request.method === 'POST') {
-    if (await blocked(env, 'remind:' + user.id, 6)) return json({ error: 'slow' }, 429);
-    const body = await readBody(request);
-    const list = Array.isArray(body.list) ? body.list.slice(0, 10) : [];
-    if (!list.length) return json({ error: 'empty' }, 400);
-    /* Un rappel ne part que vers une adresse déjà enregistrée sur une facture
-       du compte : l'application ne peut pas servir à envoyer du courrier vers
-       n'importe qui. */
-    const stateRow = await env.DB.prepare('SELECT json FROM state WHERE user_id = ?').bind(dataOwner(user)).first();
-    const allowed = knownRecipients(stateRow ? stateRow.json : '');
-    const day = new Date().toISOString().slice(0, 10);
-    const row = await env.DB.prepare('SELECT day, count FROM mail_log WHERE user_id = ?').bind(user.id).first();
-    const sameDay = !!row && row.day === day;
-    let count = sameDay ? row.count : 0;
-    const sent = [];
-    for (const item of list) {
-      if (count >= 20) break;
-      const to = String(item && item.to || '').trim().toLowerCase();
-      if (!validEmail(to) || !allowed.has(to)) continue;
-      /* La facture voyage avec le rappel quand elle est fournie et lisible. */
-      const pdf = String(item && item.pdf || '').replace(/\s/g, '');
-      const hasPdf = pdf.length >= 100 && pdf.length <= 1600000 && /^[A-Za-z0-9+/=]+$/.test(pdf);
-      const filename = String(item && item.filename || 'facture.pdf').replace(/[^\w.-]+/g, '-').slice(0, 80) || 'facture.pdf';
-      /* Seul un envoi réussi est compté : une clé absente ne doit pas
-         consommer le quota de la journée. */
-      if (!await sendTextMail(env, to, item.subject, item.text, hasPdf && filename, hasPdf ? pdf : '')) continue;
-      count += 1;
-      if (item.id) sent.push(String(item.id));
-    }
-    if (sent.length && sameDay) await env.DB.prepare('UPDATE mail_log SET count = ? WHERE user_id = ?').bind(count, user.id).run();
-    else if (sent.length) await env.DB.prepare('INSERT INTO mail_log (user_id, day, count) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET day = excluded.day, count = excluded.count').bind(user.id, day, count).run();
-    await tooMany(env, 'remind:' + user.id, 6, 60 * 60000);
-    return json({ ok: true, sent });
-  }
 
   /* D'où viennent les installations : agregat par canal, sans aucune donnée
      personnelle. Sert à juger un flyer ou une radio, pas à suivre les gens. */
@@ -782,30 +701,6 @@ async function api(request, env, url) {
 
 /* Numéro de document produit par l'application : DEV-2026-001, FAC-2026-012. */
 const DOC_NUMBER = /^[A-Z]{3}-\d{4}-\d{3}$/;
-/* Le document doit exister dans l'état du compte pour partir par e-mail. */
-function docExists(stateText, number) {
-  const wanted = String(number || '').trim();
-  if (!DOC_NUMBER.test(wanted)) return false;
-  try {
-    const state = JSON.parse(stateText || '{}');
-    return (Array.isArray(state.docs) ? state.docs : []).some((d) => d && String(d.number) === wanted);
-  } catch { return false; }
-}
-
-/* Adresses auxquelles un rappel peut partir : celles déjà notées sur une
-   facture du compte. Un état illisible n'autorise personne. */
-function knownRecipients(stateText) {
-  const set = new Set();
-  try {
-    const state = JSON.parse(stateText || '{}');
-    for (const d of (Array.isArray(state.docs) ? state.docs : [])) {
-      const email = String((d && d.clientEmail) || '').trim().toLowerCase();
-      if (email) set.add(email);
-    }
-  } catch { /* état illisible : aucun destinataire */ }
-  return set;
-}
-
 /* Une origine illisible ("null", valeur bricolée) est refusée, jamais une
    erreur 500 : le contrôle doit répondre proprement. */
 function sameOrigin(request, url) {

@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients, publicDocHtml, cleanSrc };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, docExists, knownRecipients, publicDocHtml, cleanSrc } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -161,34 +161,7 @@ test('parsePerms lit le JSON, l’objet, et retombe sur tout permis', () => {
   assert.deepEqual(parsePerms('{"del":false,"price":false}'), { del: false, price: false });
 });
 
-/* --- envoi d'un document par e-mail --- */
-
-const etatDocs = JSON.stringify({ docs: [
-  { id: 'f1', kind: 'FAC', number: 'FAC-2026-001' },
-  { id: 'd1', kind: 'DEV', number: 'DEV-2026-002' },
-] });
-
-test('un document doit exister dans l’état du compte pour partir', () => {
-  assert.equal(docExists(etatDocs, 'FAC-2026-001'), true);
-  assert.equal(docExists(etatDocs, 'DEV-2026-002'), true);
-  assert.equal(docExists(etatDocs, 'FAC-2026-999'), false, 'numéro inventé : refusé');
-  assert.equal(docExists(etatDocs, 'FAC-1'), false, 'numéro hors format : refusé');
-  assert.equal(docExists(etatDocs, ''), false);
-  assert.equal(docExists('', 'FAC-2026-001'), false, 'compte sans état : refusé');
-  assert.equal(docExists('pas du json', 'FAC-2026-001'), false, 'état illisible : refusé');
-});
-
-test('un rappel ne part que vers une adresse déjà sur une facture', () => {
-  const state = JSON.stringify({ docs: [
-    { id: 'f1', kind: 'FAC', number: 'FAC-2026-001', clientEmail: 'Awa@Exemple.ci' },
-    { id: 'f2', kind: 'FAC', number: 'FAC-2026-002' },
-  ] });
-  const allowed = knownRecipients(state);
-  assert.equal(allowed.has('awa@exemple.ci'), true, 'casse et espaces ignorés');
-  assert.equal(allowed.has('inconnu@ailleurs.com'), false, 'adresse inconnue : refusée');
-  assert.equal(knownRecipients('').size, 0, 'compte sans état : personne');
-  assert.equal(knownRecipients('pas du json').size, 0, 'état illisible : personne');
-});
+/* --- page publique d’une facture --- */
 
 test('la page publique d’une facture n’exécute rien de ce qu’on lui envoie', () => {
   const html = publicDocHtml(JSON.stringify({
@@ -265,4 +238,39 @@ test('cleanSrc ne garde qu’un mot de canal', () => {
   assert.equal(cleanSrc('<script>'), 'script');
   assert.equal(cleanSrc(''), '');
   assert.equal(cleanSrc(null), '');
+});
+
+/* --- limitation des inscriptions --- */
+
+function fakeThrottle() {
+  const rows = new Map();
+  return {
+    prepare(sql) {
+      let args = [];
+      const stmt = {
+        bind(...a) { args = a; return stmt; },
+        async first() {
+          const r = rows.get(args[0]);
+          return r ? { hits: r.hits, reset: r.reset } : null;
+        },
+        async run() {
+          if (sql.startsWith('INSERT INTO throttle')) rows.set(args[0], { hits: 1, reset: args[1] });
+          else if (sql.startsWith('UPDATE throttle')) { const r = rows.get(args[0]); if (r) r.hits += 1; }
+          else throw new Error('requête inattendue : ' + sql);
+          return {};
+        },
+      };
+      return stmt;
+    },
+  };
+}
+
+test('l’inscription est limitée à 20 par heure et par adresse', async () => {
+  const env = { DB: fakeThrottle() };
+  for (let i = 0; i < SIGNUP_LIMIT; i += 1) {
+    assert.equal(await signupGuard(env, '1.2.3.4'), false, `inscription ${i + 1} autorisée`);
+  }
+  assert.equal(await signupGuard(env, '1.2.3.4'), true, 'la 21e est refusée');
+  assert.equal(await signupGuard(env, '5.6.7.8'), false, 'une autre adresse reste libre');
+  assert.equal(SIGNUP_WINDOW_MS, 60 * 60000);
 });

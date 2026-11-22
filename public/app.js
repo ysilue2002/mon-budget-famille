@@ -768,13 +768,6 @@ function filteredLog() {
     return true;
   });
 }
-/* Une facture ne compte qu'une fois, même si elle a échoué plusieurs fois, et
-   une facture réglée entre-temps n'a plus rien à réclamer. */
-function failedLogList() {
-  const seen = new Set();
-  return filteredLog().filter((e) => !e.ok && e.docId && !seen.has(e.docId) && seen.add(e.docId)
-    && db.docs.some((x) => x.id === e.docId && !x.paidDate));
-}
 function logFilterBar() {
   const seg = (arr, cur, k) => `<div class="seg">${arr.map(([v, label]) => `<button class="${cur === v ? 'on' : ''}" data-act="logFilter" data-k="${k}" data-v="${v}">${label}</button>`).join('')}</div>`;
   return seg([['all', T('all')], ['email', T('channelEmail')], ['wa', T('channelWhatsapp')]], logChannel, 'channel')
@@ -786,56 +779,17 @@ function logFilterBar() {
 function remindJournal() {
   if (!(db.mailLog || []).length) return '';
   const log = filteredLog().slice(-15).reverse();
-  const fails = failedLogList().length;
   return `<div class="card"><h3>${T('remindLog')}</h3>
     ${logFilterBar()}
-    ${fails ? `<button class="btn" data-act="retryFailed">${T('retryFailed')} (${fails})</button>` : ''}
     ${log.length ? '' : `<p class="empty">${T('logEmpty')}</p>`}
     ${log.map((e) => {
       const when = e.at ? `${dayFR(isoOf(new Date(e.at)))} ${clock(e.at)}` : '';
       return `<div class="row"><div><div class="t">${esc(e.number || '—')} · ${esc(e.party || '—')}</div>
         <div class="s">${when} · ${e.channel === 'email' ? T('channelEmail') : T('channelWhatsapp')}${e.to ? ' · ' + esc(e.to) : ''}</div></div>
-        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span>`}${e.docId ? `<br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button>` : ''}</div></div>`;
+        <div class="right">${e.ok ? `<span class="tag ok">${money(e.amount || 0)}</span>` : `<span class="tag bad">${T('sendFailed')}</span>`}${e.channel === 'wa' && e.docId ? `<br><button class="btn small out" data-act="resendRemind" data-log="${e.id}">${T('resend')}</button>` : ''}</div></div>`;
     }).join('')}
     ${log.length ? `<button class="btn out" data-act="exportLog">${T('exportLog')}</button>` : ''}
   </div>`;
-}
-/* Renvoi groupé des échecs affichés, une fois par facture. Seuls les e-mails
-   peuvent échouer : une relance WhatsApp n'est journalisée que si elle part. */
-async function retryFailedReminders() {
-  const items = failedLogList().map((e) => ({ e, d: db.docs.find((x) => x.id === e.docId) })).filter((x) => x.d);
-  if (!items.length) { alert(T('retryNone')); return; }
-  let ok = 0, fail = 0;
-  const mails = items.filter((x) => x.e.channel === 'email');
-  const payload = [];
-  for (const { d } of mails) {
-    const to = String(d.clientEmail || '').trim();
-    if (!isEmail(to)) {
-      fail += 1;
-      logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to, ok: false });
-      continue;
-    }
-    const item = { id: d.id, to, subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d) };
-    try {
-      const file = await docFile(d);
-      item.pdf = await fileToBase64(file);
-      item.filename = file.name;
-    } catch {}
-    payload.push(item);
-  }
-  if (payload.length) {
-    const r = await api('/api/remind', 'POST', { list: payload });
-    const sent = new Set((r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent : []).map(String));
-    payload.forEach((item) => {
-      const d = db.docs.find((x) => x.id === item.id);
-      if (!d) return;
-      const done = sent.has(String(item.id));
-      if (done) { d.remindedAt = todayISO(); d.u = Date.now(); ok += 1; } else fail += 1;
-      logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to: item.to, ok: done });
-    });
-  }
-  saveDB(); render();
-  alert(T('retrySummary').replace('[ok]', ok).replace('[fail]', fail));
 }
 /* Export du journal en CSV : séparateur point-virgule et BOM, pour qu'Excel en
    français ouvre le fichier sans déformer les accents. */
@@ -874,6 +828,8 @@ function downloadMailLog() {
 /* Renvoyer une relance du journal, réussie ou non : la facture est retrouvée
    par son identifiant, le message et la pièce jointe sont reconstruits, puis
    une trace est ajoutée. */
+/* Renvoyer une relance WhatsApp du journal : la facture est retrouvée par son
+   identifiant, le message est reconstruit, puis une trace est ajoutée. */
 async function resendReminder(logId) {
   const e = (db.mailLog || []).find((x) => x.id === logId);
   if (!e) return;
@@ -881,30 +837,12 @@ async function resendReminder(logId) {
   if (!d) { alert(T('resendDocGone')); return; }
   /* Une facture réglée entre-temps ne doit plus être réclamée. */
   if (d.paidDate) { alert(T('resendPaid')); return; }
-  if (e.channel !== 'email') {
-    const phone = d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone || '';
-    if (!waOpen(phone, invoiceReminderText(d))) return;
-    d.remindedAt = todayISO();
-    d.u = Date.now();
-    logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
-    saveDB(); render();
-    return;
-  }
-  const to = String(d.clientEmail || '').trim();
-  if (!isEmail(to)) { alert(T('resendNoEmail')); return; }
-  const item = { id: d.id, to, subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d) };
-  try {
-    const file = await docFile(d);
-    item.pdf = await fileToBase64(file);
-    item.filename = file.name;
-  } catch {}
-  const r = await api('/api/remind', 'POST', { list: [item] });
-  const sent = r.ok && r.data && Array.isArray(r.data.sent) ? r.data.sent.map(String) : [];
-  const ok = sent.includes(String(d.id));
-  logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'email', to, ok });
-  if (ok) { d.remindedAt = todayISO(); d.u = Date.now(); }
+  const phone = d.clientPhone || (db.parties.find((p) => p.name === d.party) || {}).phone || '';
+  if (!waOpen(phone, invoiceReminderText(d))) return;
+  d.remindedAt = todayISO();
+  d.u = Date.now();
+  logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
   saveDB(); render();
-  alert(ok ? T('resendDone') : T('resendFail'));
 }
 function bilans() {
   const { ca, cash, dep, purchases, cogs, profit, unknownCost, invoices, inv, invDue, due, wd } = figures(period);
@@ -2049,10 +1987,6 @@ function remindQueue() {
 /* Factures oubliées : impayées depuis plus d'une semaine et sans relance
    récente. L'alerte tombe dès qu'elles sont relancées, payées ou converties. */
 const forgottenInvoices = () => remindQueue();
-/* Même règle que le serveur : une adresse qu'il refuserait ne doit pas être
-   acceptée par l'application. */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
-const isEmail = (v) => { const t = String(v || '').trim(); return t.length <= 190 && EMAIL_RE.test(t); };
 /* Relance programmée : le commerce choisit la fréquence, le jour et l'heure.
    WhatsApp ne part jamais seul (il faut une touche), donc à l'heure dite
    l'application prépare la liste et ouvre un message prêt par destinataire. */
@@ -2134,8 +2068,10 @@ function autoRemind() {
   s.autoRemindDay = todayISO();
   const list = waRemindTargets();
   saveDB(false);
+  /* L’accueil est redessiné avant la fenêtre : la liste du jour reste ainsi
+     joignable d’un bouton, même après l’avoir fermée. */
+  render();
   if (list.length) autoWaModal(list);
-  else render();
 }
 /* Les relances du jour, une ligne par destinataire : le numéro est rappelé pour
    qu'on sache à qui on écrit, et la ligne se coche dès que WhatsApp s'ouvre. */
@@ -2620,26 +2556,6 @@ async function downloadDocPDF(id) {
     alert(T('pdfSaved'));
   } catch { alert(T('pdfFail')); }
 }
-async function emailDocPDF(id) {
-  const d = db.docs.find((x) => x.id === id);
-  if (!d) return;
-  const subject = `${d.kind === 'DEV' ? T('quote') : T('invoice')} ${d.number}`;
-  const body = `${db.shop || ''}\n${subject} · ${dayFR(d.date)}\n${T('client')} : ${d.party || '—'}\n${T('ttc')} : ${money(amountOf(d))}`;
-  try {
-    const file = await docFile(d);
-    const to = (d.clientEmail || '').trim();
-    if (file && isEmail(to)) {
-      const r = await api('/api/send-doc', 'POST', { to, subject, text: body, number: d.number, filename: file.name, pdf: await fileToBase64(file) });
-      if (r.ok && r.data && r.data.mail) { alert(T('mailSent')); return; }
-      if (r.ok && r.data && r.data.error === 'limit') { alert(T('mailLimit')); return; }
-    }
-    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: d.number, text: body });
-      return;
-    }
-    location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  } catch {}
-}
 async function previewDoc(id) {
   const d = db.docs.find((x) => x.id === id);
   if (!d) return;
@@ -2923,7 +2839,6 @@ document.addEventListener('click', async (e) => {
   }
   if (act === 'exportLog') downloadMailLog();
   if (act === 'resendRemind') resendReminder(b.dataset.log);
-  if (act === 'retryFailed') retryFailedReminders();
   if (act === 'logFilter') {
     const v = b.dataset.v;
     if (b.dataset.k === 'channel') logChannel = v;
@@ -2945,7 +2860,6 @@ document.addEventListener('click', async (e) => {
     logRemind({ docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d), channel: 'wa', to: phone, ok: true });
     saveDB(); tab = 'docs'; render();
   }
-  if (act === 'mailDoc') emailDocPDF(b.dataset.id);
   if (act === 'dlPdf') downloadDocPDF(b.dataset.id);
   if (act === 'openSettings') settingsModal();
   if (act === 'addEmail') {

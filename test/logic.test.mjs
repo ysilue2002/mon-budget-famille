@@ -49,7 +49,7 @@ function charger() {
   vm.runInContext(read('public/i18n-ar.js'), ctx, { filename: 'i18n-ar.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, pastSaleRecord, autoDue, supplierDueItems, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, pastSaleRecord, autoDue, supplierDueItems, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, logExportName, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -481,21 +481,11 @@ test('le journal se filtre par canal, résultat et période', () => {
   assert.equal(dansVm('filteredLog().length'), 2, 'canal e-mail');
   dansVm('logResult = "fail"');
   assert.equal(dansVm('filteredLog().length'), 1, 'e-mail en échec');
-  assert.equal(dansVm('failedLogList().length'), 1, 'une facture comptée une seule fois');
   dansVm('logChannel = "all"; logResult = "all"; logPeriod = "jour"');
   assert.equal(dansVm('filteredLog().length'), 3, 'tout est du jour');
   dansVm('logPeriod = "tout"; logChannel = "wa"; logResult = "fail"');
   assert.equal(dansVm('filteredLog().length'), 0, 'combinaison vide');
   dansVm('db.mailLog = []; db.docs = db.docs.filter((d) => d.id !== "z1"); logChannel = "all"; logResult = "all"; logPeriod = "tout"');
-});
-
-test('une facture réglée n’est plus proposée au renvoi groupé', () => {
-  dansVm(`db.docs = [{ id: 'pd', kind: 'FAC', number: 'PD', date: todayISO(), total: 1000, vat: 0, party: 'A', paidDate: todayISO(), lines: [] }];
-    db.mailLog = [{ id: 'pm', at: Date.now(), docId: 'pd', number: 'PD', party: 'A', amount: 1000, channel: 'email', to: 'a@x.ci', ok: false }];
-    logChannel = 'all'; logResult = 'all'; logPeriod = 'tout';`);
-  assert.equal(dansVm('filteredLog().length'), 1, 'la trace reste dans le journal');
-  assert.equal(dansVm('failedLogList().length'), 0, 'mais plus rien à réclamer');
-  dansVm('db.mailLog = []; db.docs = db.docs.filter((d) => d.id !== "pd")');
 });
 
 /* --- nom d'export et logo de l'en-tête --- */
