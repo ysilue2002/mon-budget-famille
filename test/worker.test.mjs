@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -261,6 +261,24 @@ test('seuls les comptes listés entrent dans l’administration', () => {
   assert.equal(isAdmin({ email: 'autre@boutique.ci' }, list), false, 'e-mail inconnu');
   assert.equal(isAdmin({ email: 'patron@boutique.ci' }, []), false, 'sans liste : personne');
   assert.equal(isAdmin(null, list), false, 'sans compte : personne');
+});
+
+test('un mois de Premium s’ajoute sans écraser une date encore à venir', () => {
+  const day = 86400000;
+  const future = Date.now() + 10 * day;
+  assert.ok(extendPremium(future, 1) >= future + 29 * day, 'la date future est prolongée');
+  assert.ok(extendPremium(0, 1) >= Date.now() + 29 * day, 'un compte gratuit part de maintenant');
+  assert.equal(extendPremium(future, 0), 0, 'zéro mois retire le Premium');
+  assert.equal(isPremiumUntil(Date.now() + day), true);
+  assert.equal(isPremiumUntil(Date.now() - day), false);
+  assert.equal(isPremiumUntil(0), false);
+});
+
+test('la version gratuite accepte un seul vendeur', () => {
+  assert.equal(canAddStaff(0, false), true, 'premier vendeur accepté');
+  assert.equal(canAddStaff(1, false), false, 'deuxième vendeur refusé');
+  assert.equal(canAddStaff(1, true), true, 'Premium : vendeurs illimités');
+  assert.equal(canAddStaff(8, true), true);
 });
 
 /* --- limitation des inscriptions --- */

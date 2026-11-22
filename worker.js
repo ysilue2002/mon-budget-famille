@@ -101,6 +101,10 @@ function ensureSchema(env) {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN ref_code TEXT').run(); } catch {}
     /* Abonnement Premium : date de fin, 0 ou vide = gratuit. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN premium_until INTEGER').run(); } catch {}
+    /* Parrain d'une boutique et récompense déjà versée : un mois offert à
+       chacun après la première vente du filleul, jamais à l'inscription. */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN ref_by TEXT').run(); } catch {}
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN referral_rewarded INTEGER NOT NULL DEFAULT 0').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run(    );
@@ -115,15 +119,19 @@ async function currentUser(request, env) {
   const token = cookieOf(request, 'ac_session');
   if (!token) return null;
   const hash = await sha256(token);
+  /* Le vendeur hérite du Premium de la boutique, pas du sien. */
   const row = await env.DB.prepare(
-    'SELECT s.user_id AS id, u.email, u.phone, u.name, u.owner_id, u.role, u.perms, s.expires FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
+    `SELECT s.user_id AS id, u.email, u.phone, u.name, u.owner_id, u.role, u.perms, s.expires,
+       CASE WHEN u.owner_id IS NULL THEN COALESCE(u.premium_until, 0)
+            ELSE COALESCE((SELECT o.premium_until FROM users o WHERE o.id = u.owner_id), 0) END AS premium_until
+     FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`,
   ).bind(hash).first();
   if (!row) return null;
   if (row.expires < Date.now()) {
     await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(hash).run();
     return null;
   }
-  return { id: row.id, email: row.email, phone: row.phone, name: row.name || null, ownerId: row.owner_id || null, role: row.role || 'owner', perms: parsePerms(row.perms) };
+  return { id: row.id, email: row.email, phone: row.phone, name: row.name || null, ownerId: row.owner_id || null, role: row.role || 'owner', perms: parsePerms(row.perms), premiumUntil: Number(row.premium_until) || 0 };
 }
 
 async function createSession(env, userId) {
@@ -214,8 +222,19 @@ function publicUser(u) {
     ownerId: u.ownerId || u.owner_id || null,
     role: u.role || 'owner',
     perms: parsePerms(u.perms),
+    premiumUntil: Number(u.premiumUntil || u.premium_until) || 0,
   };
 }
+
+/* Premium : un mois s'ajoute à la date de fin si elle est encore à venir. */
+const PREMIUM_MONTH_MS = 30 * 86400000;
+function extendPremium(current, months) {
+  const base = Math.max(Date.now(), Number(current) || 0);
+  return months > 0 ? base + months * PREMIUM_MONTH_MS : 0;
+}
+const isPremiumUntil = (until) => Number(until) > Date.now();
+/* Gratuit : un seul vendeur. Premium : autant que la boutique en veut. */
+const canAddStaff = (count, premium) => !!premium || Number(count) < 1;
 
 /* Ce qu'un vendeur ne doit jamais recevoir : prix d'achat, marges, dépenses
    et montants fournisseurs. On les vide à la lecture et on les rétablit
@@ -421,7 +440,14 @@ async function api(request, env, url) {
     const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
     const pass = await pbkdf2(password, salt);
     const src = cleanSrc(body.src);
-    await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created, src) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, email || null, phone || null, phoneDigits, pass, salt, Date.now(), src || null).run();
+    /* Un lien de parrainage porte le code du parrain : la récompense attend la
+       première vraie vente du filleul, pas la simple inscription. */
+    let refBy = null;
+    if (src.startsWith('p-')) {
+      const inviter = await env.DB.prepare('SELECT id FROM users WHERE ref_code = ?').bind(src.slice(2).toUpperCase()).first();
+      if (inviter) refBy = inviter.id;
+    }
+    await env.DB.prepare('INSERT INTO users (id, email, phone, phone_digits, pass, salt, created, src, ref_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, email || null, phone || null, phoneDigits, pass, salt, Date.now(), src || null, refBy).run();
     /* Compteur par canal : aucun nom, aucun compte, juste combien d'installations. */
     if (src) {
       const day = new Date().toISOString().slice(0, 10);
@@ -430,7 +456,7 @@ async function api(request, env, url) {
       await env.DB.prepare('DELETE FROM installs WHERE day < ?').bind(new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10)).run();
     }
     const cookie = await createSession(env, id);
-    return json({ user: publicUser({ id, email: email || null, phone: phone || null }) }, 200, { 'set-cookie': cookie });
+    return json({ user: publicUser({ id, email: email || null, phone: phone || null, premiumUntil: 0 }) }, 200, { 'set-cookie': cookie });
   }
 
   if (path === '/api/login' && request.method === 'POST') {
@@ -724,6 +750,10 @@ async function api(request, env, url) {
     const user = await currentUser(request, env);
     if (!user) return json({ error: 'auth' }, 401);
     if (user.ownerId) return json({ error: 'owner' }, 403);
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM users WHERE owner_id = ?').bind(user.id).first();
+    if (!canAddStaff(count && count.n, isPremiumUntil(user.premiumUntil))) {
+      return json({ error: 'premium', what: 'staff' }, 403);
+    }
     await tooMany(env, 'invite:' + user.id, 20, 60 * 60000);
     const code = hex(crypto.getRandomValues(new Uint8Array(3))).toUpperCase();
     const expires = Date.now() + 7 * 86400000;
@@ -751,6 +781,13 @@ async function api(request, env, url) {
     const invite = await env.DB.prepare('SELECT owner_id, expires, used_by FROM invites WHERE code = ?').bind(code).first();
     if (!invite || invite.used_by || invite.expires < Date.now()) return json({ error: 'code' }, 400);
     if (invite.owner_id === user.id) return json({ error: 'self' }, 400);
+    /* Le plafond est vérifié aussi à l'entrée : un code créé avant le premier
+       vendeur ne doit pas permettre d'en ajouter un deuxième en gratuit. */
+    const owner = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(invite.owner_id).first();
+    const team = await env.DB.prepare('SELECT COUNT(*) AS n FROM users WHERE owner_id = ?').bind(invite.owner_id).first();
+    if (!canAddStaff(team && team.n, isPremiumUntil(owner && owner.premium_until))) {
+      return json({ error: 'premium', what: 'staff' }, 403);
+    }
     await env.DB.prepare('UPDATE users SET owner_id = ?, role = ?, perms = NULL WHERE id = ?').bind(invite.owner_id, 'staff', user.id).run();
     await env.DB.prepare('UPDATE invites SET used_by = ? WHERE code = ?').bind(user.id, code).run();
     return json({ ok: true, ownerId: invite.owner_id });
@@ -795,6 +832,7 @@ async function api(request, env, url) {
   }
 
   if (path === '/api/data/history' && request.method === 'GET') {
+    if (!isPremiumUntil(user.premiumUntil)) return json({ error: 'premium', what: 'history' }, 403);
     const rows = await env.DB.prepare(
       'SELECT id, rev, updated, saved, length(json) AS bytes FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT 20',
     ).bind(dataOwner(user)).all();
@@ -803,6 +841,7 @@ async function api(request, env, url) {
 
   if (path === '/api/data/restore' && request.method === 'POST') {
     if (user.ownerId) return json({ error: 'owner' }, 403);
+    if (!isPremiumUntil(user.premiumUntil)) return json({ error: 'premium', what: 'history' }, 403);
     const body = await readBody(request);
     const id = Number(body.id) || 0;
     const version = await env.DB.prepare('SELECT json, rev, updated FROM state_history WHERE user_id = ? AND id = ?').bind(dataOwner(user), id).first();
@@ -863,6 +902,24 @@ async function api(request, env, url) {
     await env.DB.prepare(
       'INSERT INTO state (user_id, json, rev, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, rev = excluded.rev, updated = excluded.updated',
     ).bind(dataOwner(user), payload, rev, incoming).run();
+    /* Parrainage : la première vente du filleul offrit un mois à lui et à son
+       parrain. Un échec ici ne doit jamais empêcher la vente d'être gardée. */
+    if (!user.ownerId) {
+      try {
+        const mine = await env.DB.prepare('SELECT ref_by, referral_rewarded, premium_until FROM users WHERE id = ?').bind(user.id).first();
+        if (mine && mine.ref_by && !Number(mine.referral_rewarded)) {
+          const sent = JSON.parse(rawPayload || '{}');
+          if (Array.isArray(sent.sales) && sent.sales.length) {
+            const parrain = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(mine.ref_by).first();
+            const untilMine = extendPremium(mine.premium_until, 1);
+            const untilParrain = parrain ? extendPremium(parrain.premium_until, 1) : 0;
+            const jobs = [env.DB.prepare('UPDATE users SET premium_until = ?, referral_rewarded = 1 WHERE id = ?').bind(untilMine, user.id)];
+            if (parrain) jobs.push(env.DB.prepare('UPDATE users SET premium_until = ? WHERE id = ?').bind(untilParrain, mine.ref_by));
+            await env.DB.batch(jobs);
+          }
+        }
+      } catch { /* le parrainage reste un bonus, jamais une condition */ }
+    }
     return json({ saved: true, rev, updated: incoming });
   }
 

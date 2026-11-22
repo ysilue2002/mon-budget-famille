@@ -345,7 +345,8 @@ function render() {
    annonce, ni espace réservé. Les deux emplacements n'existent que lorsque de
    vraies annonces sont configurées ET activées dans les réglages. */
 function adsHTML() {
-  if (!ADS.client || !db.settings.ads || !navigator.onLine) return { top: '', bottom: '' };
+  /* La publicité finance la version gratuite : un compte Premium n'en voit pas. */
+  if (!ADS.client || !db.settings.ads || !navigator.onLine || isPremium()) return { top: '', bottom: '' };
   /* Pas d'annonce sans consentement explicite. */
   if (consentChoice() !== 'yes') return { top: '', bottom: '' };
   const unit = (slot) =>
@@ -2066,7 +2067,8 @@ function waRemindTargets() {
    préparation par jour), puis on montre la liste si elle n'est pas vide. */
 function autoRemind() {
   const s = db.settings || {};
-  if (!me || !autoDue()) return;
+  /* Les relances programmées sont une fonction Premium. */
+  if (!me || !isPremium() || !autoDue()) return;
   s.autoRemindDay = todayISO();
   const list = waRemindTargets();
   saveDB(false);
@@ -2815,7 +2817,7 @@ document.addEventListener('click', async (e) => {
      payée produit une vente soldée à sa date de règlement ; sinon la vente part
      en crédit client à la date du jour. */
   if (act === 'factureToSale') factureSaleModal(b.dataset.id);
-  if (act === 'report') reportModal();
+  if (act === 'report') { if (!isPremium()) { alert(T('premiumReport')); return; } reportModal(); }
   if (act === 'journal') journalModal();
   if (act === 'print') previewDoc(b.dataset.id);
   if (act === 'waPdf') shareDocPDF(b.dataset.id);
@@ -3020,7 +3022,8 @@ async function loadTeam(box) {
   const staff = data.staff || [];
   const invites = data.invites || [];
   box.innerHTML = `<p class="hint">${T('teamHint')}</p>
-    <button class="btn" id="teamNew">${T('teamInvite')}</button>
+    <button class="btn" id="teamNew" ${isPremium() || staff.length < 1 ? '' : 'disabled'}>${T('teamInvite')}</button>
+    ${isPremium() || staff.length < 1 ? '' : `<p class="hint">${T('premiumStaff')}</p>`}
     <div id="teamCode"></div>
     ${staff.length ? `<h3 style="margin-top:14px">${T('teamSellers')}</h3><p class="hint">${T('permHint')}</p>${staff.map((s) => `<div class="row"><div><div class="t">${esc(s.name || s.email || s.phone || '—')}</div>${s.name && (s.email || s.phone) ? `<div class="s">${esc(s.email || s.phone)}</div>` : ''}
       <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-perm="del" data-id="${esc(s.id)}" ${!s.perms || s.perms.del ? 'checked' : ''} style="width:auto"><span>${T('permDelete')}</span></label>
@@ -3033,7 +3036,7 @@ async function loadTeam(box) {
     <button class="btn out" id="teamJoinBtn">${T('teamJoinBtn')}</button>`;
   box.querySelector('#teamNew').onclick = async () => {
     const res = await api('/api/staff/invite', 'POST', {});
-    if (!res.ok) { alert(T('syncPending')); return; }
+    if (!res.ok) { alert(res.status === 403 && res.data && res.data.error === 'premium' ? T('premiumStaff') : T('syncPending')); return; }
     box.querySelector('#teamCode').innerHTML = `<p class="tag ok" style="font-size:18px;letter-spacing:.15em">${esc(res.data.code)}</p>
       <p class="hint">${T('teamCodeHint')}</p>`;
   };
@@ -3129,7 +3132,8 @@ function paintReferral(ref) {
     <div class="refCount"><b>${Number(ref.count) || 0}</b><span>${T('inviteCountLabel')}</span></div>
     <button class="btn whats" id="refInvite">${T('inviteBtn')}</button>
     <div class="refQr" id="refQr"></div>
-    <p class="hint" style="text-align:center">${T('inviteQrHint')}</p>`;
+    <p class="hint" style="text-align:center">${T('inviteQrHint')}</p>
+    <p class="hint" style="text-align:center">${T('inviteReward')}</p>`;
   box.querySelector('#refInvite').onclick = () => inviteShare(ref.code);
   /* Le même lien, en QR : le voisin scanne et arrive sur la présentation. */
   const qrBox = box.querySelector('#refQr');
@@ -3152,6 +3156,10 @@ function loadReferral() {
 function settingsModal() {
   let logoDraft = db.settings.logo || '';
   const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
+    <div class="row"><div><div class="t">${isPremium() ? T('premiumActive') : T('premiumFreeTag')}</div>
+      <div class="s">${isPremium() ? `${T('premiumUntilOn')} ${dayFR(premiumDate())}` : T('premiumPrice')}</div></div>
+      <div class="right">${isPremium() ? '<span class="tag ok">Premium</span>' : `<span class="tag warn">${T('premium')}</span>`}</div></div>
+    ${isPremium() ? '' : `<p class="hint">${T('premiumAsk')}</p>`}
     <label>${T('language')}</label>
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.id === 'en' ? 'English' : 'Français'}</option>`).join('')}</select>
     <details data-owner><summary>${T('secShop')}</summary>
@@ -3180,6 +3188,7 @@ function settingsModal() {
     <div id="logoPrev" style="margin-top:8px">${logoDraft ? `<img src="${esc(logoDraft)}" class="logoPrev" alt="">` : ''}</div>
     <button class="btn out" id="logoDel">${T('logoRemove')}</button>
     <p class="hint">${T('logoHint')}</p>
+    ${isPremium() ? '' : `<p class="hint">${T('premiumLogo')}</p>`}
     <label>${T('reminderText')}</label><textarea id="setRem" rows="4">${esc((db.settings.reminder || DEFAULTS)[lang()])}</textarea>
     <label>${T('invReminderText')}</label><textarea id="setInvRem" rows="6">${esc(invReminderTpl())}</textarea>
     <p class="hint">${T('invReminderHint')}</p>
@@ -3190,6 +3199,7 @@ function settingsModal() {
     <p class="hint">${T('autoRemindHint')}</p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoSupRemind" ${db.settings.autoSupRemind ? 'checked' : ''} style="width:auto"><span>${T('autoSupRemind')}</span></label>
     <p class="hint">${T('autoSupRemindHint')}</p>
+    ${isPremium() ? '' : `<p class="hint">${T('premiumAuto')}</p>`}
     <label>${T('autoRemindEvery')}</label><select id="setArEvery"><option value="jour" ${(db.settings.autoRemindEvery || 'jour') === 'jour' ? 'selected' : ''}>${T('everyDay')}</option><option value="semaine" ${db.settings.autoRemindEvery === 'semaine' ? 'selected' : ''}>${T('everyWeek')}</option></select>
     <label>${T('autoRemindWeekday')}</label><select id="setArWeekday">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === (Math.round(Number(db.settings.autoRemindWeekday)) || 1) ? 'selected' : ''}>${weekdayName(n)}</option>`).join('')}</select>
     <label>${T('autoRemindHour')}</label><select id="setArHour">${hoursList().map((h) => `<option value="${h}" ${h === autoHourOf(db.settings) ? 'selected' : ''}>${h}:00</option>`).join('')}</select>
@@ -3281,7 +3291,18 @@ function settingsModal() {
   const ckNo = d.querySelector('#ckNo');
   if (ckYes) ckYes.onclick = () => { setConsent('yes'); d.remove(); settingsModal(); };
   if (ckNo) ckNo.onclick = () => { setConsent('no'); d.remove(); settingsModal(); };
-  d.querySelector('#setHistory').onclick = () => { d.remove(); versionsModal(); };
+  d.querySelector('#setHistory').onclick = () => {
+    if (!isPremium()) { alert(T('premiumHistory')); return; }
+    d.remove(); versionsModal();
+  };
+  /* Les cases du Premium restent visibles, mais grisées en gratuit : on voit
+     ce qui existe sans pouvoir le changer. */
+  if (!isPremium()) {
+    ['#setAutoRemind', '#setAutoSupRemind', '#setArEvery', '#setArWeekday', '#setArHour', '#setLogo', '#logoDel'].forEach((sel) => {
+      const el = d.querySelector(sel);
+      if (el) el.disabled = true;
+    });
+  }
   d.querySelector('#setShare').onclick = () => { d.remove(); shareModal(); };
   d.querySelector('#setInstall').onclick = () => { d.remove(); installModal(); };
   d.querySelector('#setLegal').onclick = () => { d.remove(); legalModal('legal'); };
@@ -3332,8 +3353,8 @@ function settingsModal() {
     db.settings.invReminder = db.settings.invReminder || {};
     db.settings.invReminder[db.settings.lang] = d.querySelector('#setInvRem').value.trim();
     db.settings.invRemindDays = Math.max(1, Math.round(+d.querySelector('#setRemDays').value || 7));
-    db.settings.autoRemind = d.querySelector('#setAutoRemind').checked;
-    db.settings.autoSupRemind = d.querySelector('#setAutoSupRemind').checked;
+    db.settings.autoRemind = isPremium() && d.querySelector('#setAutoRemind').checked;
+    db.settings.autoSupRemind = isPremium() && d.querySelector('#setAutoSupRemind').checked;
     db.settings.autoRemindEvery = d.querySelector('#setArEvery').value;
     db.settings.autoRemindWeekday = Math.min(7, Math.max(1, Math.round(+d.querySelector('#setArWeekday').value || 1)));
     db.settings.autoRemindHour = autoHourOf({ autoRemindHour: d.querySelector('#setArHour').value });
@@ -3599,6 +3620,10 @@ let me = null;
 function isStaff() {
   return Boolean(me && me.id && me.ownerId);
 }
+/* Premium : la date de fin vient du serveur. Un vendeur hérite de celle de la
+   boutique ; sans date, le compte est gratuit. */
+const isPremium = () => Boolean(me && Number(me.premiumUntil) > Date.now());
+const premiumDate = () => (me && Number(me.premiumUntil) ? new Date(Number(me.premiumUntil)).toISOString().slice(0, 10) : '');
 /* Rien de sensible ne reste dans le stockage local d'un vendeur : un appareil
    qui a synchronisé avant le masquage serveur garderait sinon les prix d'achat
    et les montants. On les vide à chaque écriture locale ; le serveur les
