@@ -192,6 +192,12 @@ body.adsOn{padding-bottom:196px}
 .docPreview .docPaid.warn{background:#fff4d6;color:#7a4a00}
 .docPreview .docQr{display:flex;justify-content:center;margin-top:10px}
 .docPreview .docQr svg{width:70px;height:70px}
+.docPreview .docMade{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:8px;color:#333}
+.docPreview .docMade svg{width:34px;height:34px}
+.refCode{font-size:28px;font-weight:800;letter-spacing:3px;text-align:center;background:#fff;border:2px dashed #14532d;border-radius:12px;padding:10px;margin:6px 0;color:#14532d}
+.refCount{display:flex;align-items:center;gap:10px;margin:8px 0}
+.refCount b{font-size:30px;color:#14532d;line-height:1}
+.refCount span{font-size:16px}
 
 @media print{
   #printArea .docBar{background:#111;height:4mm;margin:0 0 9mm}
@@ -219,6 +225,10 @@ body.adsOn{padding-bottom:196px}
   #printArea .docQr svg{width:24mm;height:24mm}
   #printArea.ticket .docQr{margin-top:3mm}
   #printArea.ticket .docQr svg{width:18mm;height:18mm}
+  #printArea .docMade{display:flex;align-items:center;gap:3mm;margin-top:8mm;font-size:8pt;color:#333}
+  #printArea .docMade svg{width:11mm;height:11mm}
+  #printArea.ticket .docMade{margin-top:2mm;font-size:8pt}
+  #printArea.ticket .docMade svg{width:9mm;height:9mm}
 }
 
 /* Pages légales */

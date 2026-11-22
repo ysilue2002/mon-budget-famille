@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -230,6 +230,19 @@ test('la facture publique permet d’écrire à la boutique, sans lien cassé', 
   assert.ok(!none.includes('wa.me/'), 'sans numéro : aucun bouton');
   const dirty = publicDocHtml(JSON.stringify({ ...base, wa: 'abc"><script>', waText: 'x' }));
   assert.ok(!dirty.includes('wa.me/'), 'numéro invalide : aucun bouton');
+});
+
+test('le code de parrainage est court, lisible et devient un canal', () => {
+  for (let i = 0; i < 50; i += 1) {
+    const code = newRefCode();
+    assert.equal(code.length, 6);
+    /* Ni I, ni O, ni 0, ni 1 : un code se dicte au téléphone sans erreur. */
+    assert.match(code, /^[A-HJ-NP-Z2-9]{6}$/);
+  }
+  assert.equal(refSrc('AWA7'), 'p-awa7');
+  assert.equal(cleanSrc(refSrc('AWA7')), 'p-awa7', 'le canal parrain reste valide');
+  assert.equal(refSrc(''), '', 'sans code : aucun canal');
+  assert.equal(refSrc('<b>'), 'p-b');
 });
 
 test('cleanSrc ne garde qu’un mot de canal', () => {

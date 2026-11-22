@@ -49,7 +49,7 @@ function charger() {
   vm.runInContext(read('public/i18n-ar.js'), ctx, { filename: 'i18n-ar.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, pastSaleRecord, autoDue, supplierDueItems, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, logExportName, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, pastSaleRecord, autoDue, supplierDueItems, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, logExportName, MAX_STATE, refSrc, inviteUrl, presentationUrl, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -501,6 +501,13 @@ test('le nom de l’export dit ce que le fichier contient', () => {
   assert.equal(dansVm('logExportName()'), 'relances-tout.csv');
 });
 
+
+test('le lien d’invitation garde le code du parrain', () => {
+  assert.equal(ac.refSrc('AWA7'), 'p-awa7');
+  assert.equal(ac.inviteUrl('AWA7'), 'http://localhost/presentation?src=p-awa7');
+  assert.ok(ac.inviteUrl('').endsWith('/presentation'), 'sans code : pas de canal');
+  assert.ok(!ac.presentationUrl('doc').includes('p-'), 'la marque des documents n’est pas un parrainage');
+});
 
 test('une vente passée garde sa date et ne crée ni stock ni dette', () => {
   const s = ac.pastSaleRecord({ date: '2026-03-04', product: ' Savon ', total: 5000, today: '2026-11-22' });

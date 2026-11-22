@@ -45,6 +45,16 @@ const validPass = (v) => typeof v === 'string' && v.length >= 8 && v.length <= 2
 /* Canal d'où vient une installation (marche, flyer, radio…). Un mot simple,
    jamais une adresse : ce qui n'est pas une lettre ou un tiret disparaît. */
 const cleanSrc = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
+/* Code de parrainage : six signes sans I, O, 0 ni 1, faciles à lire et à
+   dicter au téléphone. Un par boutique, créé au premier affichage. */
+const REF_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newRefCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  return [...bytes].map((b) => REF_ALPHABET[b % REF_ALPHABET.length]).join('');
+}
+/* Le canal d'une installation parrainée : p- suivi du code, en minuscules,
+   comme tous les canaux. */
+const refSrc = (code) => (code ? 'p-' + String(code).toLowerCase().replace(/[^a-z0-9]/g, '') : '');
 
 let schemaReady;
 function ensureSchema(env) {
@@ -86,6 +96,8 @@ function ensureSchema(env) {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN name TEXT').run(); } catch {}
     /* Canal de provenance, noté une fois à l'inscription. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN src TEXT').run(); } catch {}
+    /* Code de parrainage de la boutique, stable une fois créé. */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN ref_code TEXT').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run(    );
@@ -464,6 +476,25 @@ async function api(request, env, url) {
   if (path === '/api/installs' && request.method === 'GET') {
     const rows = await env.DB.prepare('SELECT src, SUM(hits) AS n FROM installs GROUP BY src ORDER BY n DESC LIMIT 20').all();
     return json({ sources: (rows.results || []).map((r) => ({ src: String(r.src), n: Number(r.n) || 0 })) });
+  }
+
+  /* Parrainage : un code court par boutique, créé ici la première fois, et le
+     nombre de commerçants installés par son lien. Aucun nom, aucun compte
+     n'est renvoyé : le parrain voit seulement combien sont venus. */
+  if (path === '/api/referral' && request.method === 'GET') {
+    const owner = dataOwner(user);
+    const row = await env.DB.prepare('SELECT ref_code FROM users WHERE id = ?').bind(owner).first();
+    let code = row ? String(row.ref_code || '') : '';
+    for (let i = 0; i < 6 && !code; i += 1) {
+      const tryCode = newRefCode();
+      const taken = await env.DB.prepare('SELECT id FROM users WHERE ref_code = ?').bind(tryCode).first();
+      if (taken) continue;
+      await env.DB.prepare('UPDATE users SET ref_code = ? WHERE id = ?').bind(tryCode, owner).run();
+      code = tryCode;
+    }
+    if (!code) return json({ error: 'server' }, 500);
+    const n = await env.DB.prepare('SELECT COALESCE(SUM(hits), 0) AS n FROM installs WHERE src = ?').bind(refSrc(code)).first();
+    return json({ code, count: Number(n && n.n) || 0 });
   }
 
   /* Le QR d'un document ouvre la facture chez le client. Le serveur garde une

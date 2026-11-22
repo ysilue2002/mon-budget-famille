@@ -1059,7 +1059,7 @@ async function addQrPdf(pdf, text, x, y, size) {
    téléphone pour que l'arabe reste lisible. */
 async function receiptHtml(s) {
   const st = db.settings || {};
-  const qr = await qrCode(appUrl());
+  const qr = await qrCode(presentationUrl('doc'));
   const qrTag = qr ? `<div class="qrbox">${qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true })}</div>` : '';
   return `${st.logo ? `<img class="docLogo" src="${esc(st.logo)}" alt="">` : ''}
     <h2>${esc(db.shop || T('app'))}</h2>
@@ -1072,7 +1072,8 @@ async function receiptHtml(s) {
     <div class="small">${T('method')} : ${esc(s.method || '—')}</div>
     <hr>
     ${qrTag}
-    <p class="small">${T('thanks')}</p>`;
+    <p class="small">${T('thanks')}</p>
+    <p class="small">${T('madeWith')}</p>`;
 }
 /* Rapport mensuel en HTML : les mêmes lignes que le PDF, en tableau lisible
    dans les deux sens d'écriture. */
@@ -2150,6 +2151,9 @@ function receiptText(s) {
   if (creditOf(s) > 0) lines.push(`${T('paid')} : ${money(paidOf(s))} · ${T('remains')} : ${money(creditOf(s))}`);
   lines.push(`${T('method')} : ${s.method}`);
   lines.push(T('thanks'));
+  /* Le reçu circule de téléphone en téléphone : un lien vers la présentation
+     fait connaître l'application au commerçant voisin, sans rien demander. */
+  lines.push(`${T('madeWith')} · ${presentationUrl('doc')}`);
   return lines.filter(Boolean).join('\n');
 }
 function waSale(id) {
@@ -2193,12 +2197,14 @@ async function receiptPdf(s) {
   pdf.line(7, y, 73, y); y += 6;
   /* QR de la boutique s'il tient sur la page : au premier usage hors ligne,
      le module QR peut manquer, le reçu part simplement sans lui. */
-  if (y + 24 < 128) {
+  if (y + 30 < 140) {
     const qrSize = 22;
-    if (await addQrPdf(pdf, appUrl(), (80 - qrSize) / 2, y, qrSize)) y += qrSize + 4;
+    if (await addQrPdf(pdf, presentationUrl('doc'), (80 - qrSize) / 2, y, qrSize)) y += qrSize + 3;
   }
-  pdf.setFontSize(8); pdf.setTextColor(90, 90, 90);
-  pdf.text(T('thanks'), 40, Math.min(y, 136), { align: 'center' });
+  pdf.setFontSize(7.5); pdf.setTextColor(90, 90, 90);
+  pdf.text(T('madeWith'), 40, Math.min(y + 2, 133), { align: 'center' });
+  pdf.setFontSize(8);
+  pdf.text(T('thanks'), 40, Math.min(y + 7, 137.5), { align: 'center' });
   return pdf.output('blob');
 }
 async function shareReceiptPDF(id) {
@@ -2264,7 +2270,8 @@ function docHTML(d, format) {
       <div class="tot"><span>${T('ttc')}</span><span>${money(amountOf(d))}</span></div>
       ${paidLine(d)}
       <div class="docQr" data-qr="1"></div>
-      <p class="small">${T('thanks')}</p>`;
+      <p class="small">${T('thanks')}</p>
+      <p class="small madeWith">${T('madeWith')}</p>`;
   }
   return `<div class="docSheet">
     <div class="docBar"></div>
@@ -2302,16 +2309,29 @@ function docHTML(d, format) {
       <div>${T('docNote2')}</div>
     </div>
     <div class="docQr" data-qr="1"></div>
+    <div class="docMade"><span class="docQrShare" data-qr-share="1"></span><span>${T('madeWith')}</span></div>
     <div class="docBar docBarBottom"></div>
   </div>`;
 }
 /* Le QR est dessiné à part : sa génération est asynchrone, et la feuille doit
    rester utilisable même si le module QR manque (hors ligne). */
 async function withQr(html, url) {
-  if (!html.includes('data-qr="1"')) return html;
-  const qr = await qrCode(url || appUrl());
-  if (!qr) return html.replace('<div class="docQr" data-qr="1"></div>', '');
-  return html.replace('<div class="docQr" data-qr="1"></div>', `<div class="docQr">${qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true })}</div>`);
+  let out = html;
+  if (out.includes('data-qr="1"')) {
+    const qr = await qrCode(url || appUrl());
+    out = qr
+      ? out.replace('<div class="docQr" data-qr="1"></div>', `<div class="docQr">${qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true })}</div>`)
+      : out.replace('<div class="docQr" data-qr="1"></div>', '');
+  }
+  /* Petit QR de la marque : il ne remplace pas celui de la facture, il fait
+     seulement connaître l'application au commerçant qui reçoit le papier. */
+  if (out.includes('data-qr-share="1"')) {
+    const qr = await qrCode(presentationUrl('doc'));
+    out = qr
+      ? out.replace('<span class="docQrShare" data-qr-share="1"></span>', `<span class="docQrShare">${qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true })}</span>`)
+      : out.replace('<span class="docQrShare" data-qr-share="1"></span>', '');
+  }
+  return out;
 }
 /* Ce que le client verra derrière le QR : la facture telle qu'elle a été
    imprimée, dans la langue de la boutique. */
@@ -2512,6 +2532,11 @@ async function docPdf(d) {
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(90, 90, 90);
   pdf.text(pdf.splitTextToSize(T('docNote1'), 80), 14, 272);
   pdf.text(pdf.splitTextToSize(T('docNote2'), 80), 196, 272, { align: 'right' });
+  /* Le document est montré à d'autres commerçants : une ligne discrète et un
+     petit QR vers la présentation suffisent à faire venir un voisin. */
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(90, 90, 90);
+  pdf.text(T('madeWith'), 14, 284);
+  await addQrPdf(pdf, presentationUrl('doc'), 180, 275, 10);
   bar(288);
   return pdf.output('blob');
 }
@@ -3053,14 +3078,18 @@ function rememberChannel() {
     if (src) localStorage.setItem(SRC_KEY, String(src).toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24));
   } catch { /* stockage indisponible : pas de mesure, rien ne casse */ }
 }
-function presentationUrl() {
+function presentationUrl(src) {
   /* Chaque langue a sa page, avec sa vignette : le lien partagé s'ouvre dans la
      langue de celui qui partage. */
   const page = lang() === 'fr' ? 'presentation' : 'presentation-' + (lang() === 'en' ? 'en' : 'ar');
-  const u = new URL(page, location.href);
-  if (channel()) u.searchParams.set('src', channel());
+  const u = new URL(page, location.href || location.origin + '/');
+  const used = src || channel();
+  if (used) u.searchParams.set('src', used);
   return u.href;
 }
+/* Canal d'un parrain : p- suivi du code, comme le serveur le compte. */
+const refSrc = (code) => (code ? 'p-' + String(code).toLowerCase().replace(/[^a-z0-9]/g, '') : '');
+const inviteUrl = (code) => presentationUrl(refSrc(code));
 function openPresentation() { window.open(presentationUrl(), '_blank', 'noopener'); }
 /* Un seul bouton : le téléphone propose WhatsApp, et le message est déjà écrit. */
 function shareAppLink() {
@@ -3078,6 +3107,39 @@ function loadInstalls() {
   }).catch(() => {});
 }
 
+/* Parrainage : le code de la boutique et le nombre de commerçants venus par
+   son lien. Le dernier résultat est gardé sur l'appareil pour rester lisible
+   hors ligne ; un vendeur voit le code de la boutique, pas le sien. */
+const refKey = () => KEY + '.ref.' + accountKey();
+function cachedRef() {
+  try { return JSON.parse(localStorage.getItem(refKey()) || 'null'); } catch { return null; }
+}
+function inviteShare(code) {
+  const url = inviteUrl(code);
+  const text = T('inviteText').replace('{code}', code);
+  if (navigator.share) { navigator.share({ title: T('inviteTitle'), text, url }).catch(() => {}); return; }
+  window.open('https://wa.me/?text=' + encodeURIComponent(text + ' ' + url), '_blank');
+}
+function paintReferral(ref) {
+  const box = document.getElementById('refBox');
+  if (!box) return;
+  if (!ref || !ref.code) { box.innerHTML = `<p class="hint">${T('inviteOffline')}</p>`; return; }
+  box.innerHTML = `<p class="hint">${T('inviteCode')}</p>
+    <div class="refCode">${esc(ref.code)}</div>
+    <div class="refCount"><b>${Number(ref.count) || 0}</b><span>${T('inviteCountLabel')}</span></div>
+    <button class="btn whats" id="refInvite">${T('inviteBtn')}</button>`;
+  box.querySelector('#refInvite').onclick = () => inviteShare(ref.code);
+}
+function loadReferral() {
+  if (!me) { paintReferral(null); return; }
+  paintReferral(cachedRef());
+  api('/api/referral').then((r) => {
+    if (!r.ok || !r.data || !r.data.code) return;
+    const ref = { code: String(r.data.code), count: Number(r.data.count) || 0 };
+    try { localStorage.setItem(refKey(), JSON.stringify(ref)); } catch {}
+    paintReferral(ref);
+  }).catch(() => {});
+}
 function settingsModal() {
   let logoDraft = db.settings.logo || '';
   const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
@@ -3157,6 +3219,9 @@ function settingsModal() {
     <button class="btn out" id="setShareApp">${T('shareApp')}</button>
     <button class="btn out" id="setA4">${T('a4Check')}</button>
     <p class="hint">${T('presentHint')}</p>
+    <h3 style="margin-top:16px">${T('inviteTitle')}</h3>
+    <p class="hint">${T('inviteHint')}</p>
+    <div id="refBox"><p class="hint">…</p></div>
     <div id="installsBox"></div>
     </details>
     <details data-owner><summary>${T('secBackup')}</summary>
@@ -3182,6 +3247,7 @@ function settingsModal() {
   /* Feuille A4 de contrôle : à ouvrir avant une impression en série. */
   const a4Btn = d.querySelector('#setA4');
   if (a4Btn) a4Btn.onclick = () => window.open('a4', '_blank', 'noopener');
+  loadReferral();
   loadInstalls();
   wireAccount(d);
   /* Un vendeur ne peut pas toucher aux réglages de la boutique : on grise les
