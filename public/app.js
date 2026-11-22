@@ -405,7 +405,7 @@ function vendre() {
       ${forgotten.length > 5 ? `<p class="hint">+ ${forgotten.length - 5}</p>` : ''}
       <button class="btn" data-act="bulkRemind">${T('bulkRemind')} (${forgotten.length})</button>
     </div>` : ''}
-    ${autoMailNote()}
+    ${autoWaNote()}
     <div class="big">
       <button class="btn" data-act="sale">＋ ${T('sell')}</button>
       ${isStaff() ? '' : `<button class="btn out" data-act="expense">− ${T('expense')}</button>`}
@@ -728,17 +728,13 @@ function logRemind(entry) {
   db.mailLog.push({ id: uid(), at: Date.now(), ok: false, ...entry });
   if (db.mailLog.length > MAIL_LOG_MAX) db.mailLog = db.mailLog.slice(-MAIL_LOG_MAX);
 }
-/* Ce que l'envoi automatique a fait aujourd'hui, sans mentir sur un échec. */
-function autoMailNote() {
+/* Ce que la programmation a fait aujourd'hui, en une ligne : pas de promesse
+   d'envoi, puisque WhatsApp demande toujours une touche du commerce. */
+function autoWaNote() {
   const s = db.settings || {};
-  if (!s.autoRemind) return '';
-  if (mailReady === false) return `<p class="hint"><b>${T('mailMissing')}</b> — ${T('autoRemindNoKey')}</p>`;
-  const info = s.autoRemindInfo;
-  if (!info || info.date !== todayISO()) return '';
-  const txt = info.sent
-    ? T('autoRemindDone').replace('[n]', info.sent)
-    : T('autoRemindFail');
-  return `<p class="hint">${txt}</p>`;
+  if (!s.autoRemind && !s.autoSupRemind) return '';
+  if (s.autoRemindDay !== todayISO()) return '';
+  return `<p class="hint">${T('autoWaReady')}</p>`;
 }
 /* Filtres du journal : canal, résultat, période. Ils s'appliquent aussi à
    l'export et au renvoi groupé, pour rester cohérents avec ce qu'on voit. */
@@ -1633,7 +1629,6 @@ function pastSaleRecord(input) {
     cost: 0,
     costKnown: false,
     delivered: true,
-    past: true,
     party: String(src.party || '').trim().slice(0, 60),
     by: String(src.by || '').trim().slice(0, 40),
     u: Date.now(),
@@ -2062,10 +2057,79 @@ function autoRemindList() {
   return unpaidInvoices().filter((d) => isEmail(d.clientEmail)
     && daysSince(d.date) >= delay && (!d.remindedAt || daysSince(d.remindedAt) >= delay));
 }
-/* Relance automatique : une fois par jour, à l'ouverture, et seulement si le
-   commerce l'a activée. Le serveur seul peut envoyer un e-mail ; son refus ou
-   une coupure laissent les factures intactes plutôt que de les marquer à tort. */
-let autoRemindBusy = false;
+/* Relance programmée : le commerce choisit la fréquence, le jour et l'heure.
+   WhatsApp ne part jamais seul (il faut une touche), donc à l'heure dite
+   l'application prépare la liste et ouvre un message prêt par destinataire. */
+function autoHourOf(s) {
+  const h = Number((s || {}).autoRemindHour);
+  return Number.isFinite(h) && h >= 0 && h <= 23 ? Math.round(h) : 9;
+}
+const AUTO_HOURS = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20];
+const hoursList = () => [...new Set([...AUTO_HOURS, autoHourOf(db.settings)])].sort((a, b) => a - b);
+const weekdayName = (n) => new Date(2024, 0, n).toLocaleDateString(lang(), { weekday: 'long' });
+const localDay = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+/* Vrai quand l'heure choisie est passée, le bon jour, et que rien n'est encore
+   parti aujourd'hui : l'ouverture de l'application est le seul déclencheur. */
+function autoDue(now, st) {
+  const s = st || db.settings || {};
+  if (!s.autoRemind && !s.autoSupRemind) return false;
+  const d = now || new Date();
+  if (d.getHours() < autoHourOf(s)) return false;
+  if ((s.autoRemindEvery || 'jour') === 'semaine') {
+    const today = d.getDay() === 0 ? 7 : d.getDay();
+    const wanted = Math.min(7, Math.max(1, Math.round(Number(s.autoRemindWeekday) || 1)));
+    if (today !== wanted) return false;
+  }
+  return s.autoRemindDay !== localDay(d);
+}
+/* Message au fournisseur : WhatsApp est le seul canal, donc son numéro. Les
+   fragments évitent les phrases à trous dans les trois langues. */
+const SUP_REMIND = {
+  fr: 'Bonjour [Nom du Fournisseur],\n\nIl reste [Montant] à payer.\n\n[Nom de la Boutique]',
+  en: 'Hello [Nom du Fournisseur],\n\n[Montant] is still to be paid.\n\n[Nom de la Boutique]',
+  ar: 'مرحبا [Nom du Fournisseur]،\n\nبقي [Montant] للدفع.\n\n[Nom de la Boutique]',
+};
+function supplierReminderText(item) {
+  const tpl = SUP_REMIND[lang()] || SUP_REMIND.fr;
+  return tpl.replaceAll('[Nom du Fournisseur]', item.name)
+    .replaceAll('[Nom de la Boutique]', db.shop || T('shop'))
+    .replaceAll('[Montant]', money(item.rest));
+}
+/* Ce qui reste dû à chaque fournisseur, avec son numéro : sans numéro, pas de
+   relance possible, donc la ligne disparaît de la liste. */
+function supplierDueItems(debts, suppliers) {
+  const list = Array.isArray(debts) ? debts : [];
+  const dir = Array.isArray(suppliers) ? suppliers : [];
+  const by = new Map();
+  list.forEach((x) => {
+    const name = String((x && x.supplier) || '').trim();
+    const rest = debtOf(x);
+    if (!name || rest <= 0) return;
+    by.set(name, (by.get(name) || 0) + rest);
+  });
+  return [...by.entries()].map(([name, rest]) => {
+    const s = dir.find((x) => String((x && x.name) || '').toLowerCase() === name.toLowerCase()) || {};
+    return { name, rest, phone: String(s.phone || '').trim() };
+  }).filter((x) => x.phone);
+}
+/* La liste du jour : les factures en retard avec un numéro, et les fournisseurs
+   à qui il reste quelque chose à payer, chacun avec le canal choisi. */
+function waRemindTargets() {
+  const s = db.settings || {};
+  const out = [];
+  if (s.autoRemind) {
+    remindQueue().forEach((d) => {
+      const p = db.parties.find((x) => x.name === d.party) || {};
+      const phone = String(p.phone || d.clientPhone || '').trim();
+      if (phone) out.push({ kind: 'client', id: d.id, name: d.party || T('client'), phone, text: invoiceReminderText(d), amount: amountOf(d) });
+    });
+  }
+  if (s.autoSupRemind) supplierDueItems(db.debts, db.suppliers).forEach((x) => out.push({
+    kind: 'supplier', id: 'sup:' + x.name, name: x.name, phone: x.phone,
+    text: supplierReminderText(x), amount: x.rest,
+  }));
+  return out;
+}
 /* L'envoi d'e-mails dépend d'une clé secrète du serveur : le client ne peut pas
    la voir, il demande donc au serveur s'il sait envoyer. null = pas encore su. */
 let mailReady = null;
@@ -2080,45 +2144,47 @@ async function loadMailStatus() {
   if (box) box.innerHTML = mailFlagHTML();
   render();
 }
-async function autoRemind() {
+/* Déclenchement à l'ouverture : on note le jour tout de suite (une seule
+   préparation par jour), puis on montre la liste si elle n'est pas vide. */
+function autoRemind() {
   const s = db.settings || {};
-  if (!s.autoRemind || !me || !navigator.onLine || autoRemindBusy) return;
-  if (s.autoRemindDay === todayISO()) return;
-  const list = autoRemindList();
-  if (!list.length) { s.autoRemindDay = todayISO(); saveDB(false); return; }
-  autoRemindBusy = true;
-  /* La facture part en pièce jointe : le client n'a pas à la redemander. Si le
-     PDF ne se génère pas, le rappel part quand même, en texte seul. */
-  const payload = [];
-  for (const d of list) {
-    const item = {
-      id: d.id, to: String(d.clientEmail).trim(),
-      subject: `${T('invoice')} ${d.number}`, text: invoiceReminderText(d),
-    };
-    try {
-      const file = await docFile(d);
-      item.pdf = await fileToBase64(file);
-      item.filename = file.name;
-    } catch {}
-    payload.push(item);
-  }
-  const r = await api('/api/remind', 'POST', { list: payload });
-  autoRemindBusy = false;
-  if (!r.ok) return;
-  const sent = r.data && Array.isArray(r.data.sent) ? r.data.sent : [];
-  const okIds = new Set(sent.map(String));
-  list.forEach((d) => logRemind({
-    docId: d.id, number: d.number, party: d.party || '', amount: amountOf(d),
-    channel: 'email', to: String(d.clientEmail).trim(), ok: okIds.has(d.id),
-  }));
-  sent.forEach((id) => {
-    const d = db.docs.find((x) => x.id === id);
-    if (d) { d.remindedAt = todayISO(); d.u = Date.now(); }
-  });
+  if (!me || !autoDue()) return;
   s.autoRemindDay = todayISO();
-  s.autoRemindInfo = { date: todayISO(), sent: sent.length };
-  saveDB();
-  render();
+  const list = waRemindTargets();
+  saveDB(false);
+  if (list.length) autoWaModal(list);
+  else render();
+}
+/* Les relances du jour, une ligne par destinataire : le numéro est rappelé pour
+   qu'on sache à qui on écrit, et la ligne se coche dès que WhatsApp s'ouvre. */
+function autoWaModal(list) {
+  const m = modal(`<h2>${T('autoWaTitle')}</h2>
+    <p class="hint">${T('autoWaHint')}</p>
+    ${list.map((x) => `<div class="row" data-aw="${esc(x.kind)}|${esc(x.id)}"><div>
+      <div class="t">${esc(x.name)} · ${money(x.amount)}</div>
+      <div class="s">${esc(x.phone)}</div></div>
+      <div class="right"><button class="btn small whats" data-awgo="${esc(x.kind)}|${esc(x.id)}">${T('remind')}</button></div></div>`).join('')
+      || `<p class="empty">${T('autoWaNone')}</p>`}
+    <button class="btn out" id="awClose">${T('close')}</button>`);
+  m.querySelector('#awClose').onclick = () => m.remove();
+  m.querySelectorAll('[data-awgo]').forEach((btn) => {
+    btn.onclick = () => {
+      const item = list.find((x) => `${x.kind}|${x.id}` === btn.dataset.awgo);
+      /* Fenêtre bloquée : rien n'est parti, donc rien ne se coche. */
+      if (!item || !waOpen(item.phone, item.text)) return;
+      if (item.kind === 'client') {
+        const d = db.docs.find((x) => x.id === item.id);
+        if (d) { d.remindedAt = todayISO(); d.u = Date.now(); }
+        logRemind({ docId: item.id, number: (d && d.number) || '', party: item.name, amount: item.amount, channel: 'wa', to: item.phone, ok: true });
+      } else {
+        logRemind({ docId: '', number: '', party: item.name, amount: item.amount, channel: 'wa', to: item.phone, ok: true });
+      }
+      const row = m.querySelector(`[data-aw="${item.kind}|${item.id}"]`);
+      if (row) row.innerHTML = `<div><div class="t">${esc(item.name)} · ${money(item.amount)}</div>
+        <div class="s">${esc(item.phone)}</div></div><div class="right"><span class="tag ok">✓</span></div>`;
+      saveDB(); render();
+    };
+  });
 }
 /* Bilan des relances d'une période. Une facture relancée peut être réglée
    ensuite (paidDate) ou par sa vente quand elle a été convertie. */
@@ -3150,6 +3216,11 @@ function settingsModal() {
     <p class="hint">${T('remindDelayHint')}</p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoRemind" ${db.settings.autoRemind ? 'checked' : ''} style="width:auto"><span>${T('autoRemind')}</span></label>
     <p class="hint">${T('autoRemindHint')}</p>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoSupRemind" ${db.settings.autoSupRemind ? 'checked' : ''} style="width:auto"><span>${T('autoSupRemind')}</span></label>
+    <p class="hint">${T('autoSupRemindHint')}</p>
+    <label>${T('autoRemindEvery')}</label><select id="setArEvery"><option value="jour" ${(db.settings.autoRemindEvery || 'jour') === 'jour' ? 'selected' : ''}>${T('everyDay')}</option><option value="semaine" ${db.settings.autoRemindEvery === 'semaine' ? 'selected' : ''}>${T('everyWeek')}</option></select>
+    <label>${T('autoRemindWeekday')}</label><select id="setArWeekday">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === (Math.round(Number(db.settings.autoRemindWeekday)) || 1) ? 'selected' : ''}>${weekdayName(n)}</option>`).join('')}</select>
+    <label>${T('autoRemindHour')}</label><select id="setArHour">${hoursList().map((h) => `<option value="${h}" ${h === autoHourOf(db.settings) ? 'selected' : ''}>${h}:00</option>`).join('')}</select>
     <div id="acMailFlag">${mailFlagHTML()}</div>
     <button class="btn out" id="setMailTest">${T('testMail')}</button>
     <p class="hint" id="mailTestMsg"></p>
@@ -3304,6 +3375,10 @@ function settingsModal() {
     db.settings.invReminder[db.settings.lang] = d.querySelector('#setInvRem').value.trim();
     db.settings.invRemindDays = Math.max(1, Math.round(+d.querySelector('#setRemDays').value || 7));
     db.settings.autoRemind = d.querySelector('#setAutoRemind').checked;
+    db.settings.autoSupRemind = d.querySelector('#setAutoSupRemind').checked;
+    db.settings.autoRemindEvery = d.querySelector('#setArEvery').value;
+    db.settings.autoRemindWeekday = Math.min(7, Math.max(1, Math.round(+d.querySelector('#setArWeekday').value || 1)));
+    db.settings.autoRemindHour = autoHourOf({ autoRemindHour: d.querySelector('#setArHour').value });
     db.settings.lang = l;
     db.settings.ads = ADS.client ? d.querySelector('#setAds').checked : false;
     db.settings.wave = d.querySelector('#setWave').value.trim();

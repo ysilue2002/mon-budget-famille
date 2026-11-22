@@ -49,7 +49,7 @@ function charger() {
   vm.runInContext(read('public/i18n-ar.js'), ctx, { filename: 'i18n-ar.js' });
   vm.runInContext(read('public/app.js'), ctx, { filename: 'app.js' });
   vm.runInContext(
-    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, pastSaleRecord, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
+    'globalThis.__ac = { creditOf, paidOf, paysOf, debtOf, totalDebt, qtyOf, vatOf, ttcOf, amountOf, money, fr, mergeStates, fresh, loadDB, saveDB, stateBytes, countRecords, methodLabel, methodOptions, figures, isoOf, todayISO, costKnownOf, bilans, invoiceDue, unpaidInvoices, saleFromInvoice, invoiceReminderText, remindLabel, remindQueue, invReminderTpl, remindStats, forgottenInvoices, remindDelay, autoRemindList, pastSaleRecord, autoDue, supplierDueItems, logRemind, MAIL_LOG_MAX, mailLogCSV, filteredLog, failedLogList, logExportName, MAX_STATE, db };',
     ctx,
   );
   return { ac: ctx.__ac, ctx };
@@ -523,7 +523,6 @@ test('une vente passée garde sa date et ne crée ni stock ni dette', () => {
   assert.equal(s.product, 'Savon');
   assert.equal(s.qty, 1);
   assert.equal(s.pid, '');
-  assert.equal(s.past, true);
 });
 
 test('une vente passée refuse un montant vide, une date vide ou une date future', () => {
@@ -531,4 +530,28 @@ test('une vente passée refuse un montant vide, une date vide ou une date future
   assert.equal(ac.pastSaleRecord({ date: '', total: 1000, today: '2026-11-22' }), null);
   assert.equal(ac.pastSaleRecord({ date: '2026-12-01', total: 1000, today: '2026-11-22' }), null);
   assert.equal(ac.pastSaleRecord({ date: '2026-03-04', total: -50, today: '2026-11-22' }), null);
+});
+
+test('la relance programmée attend l’heure, le bon jour et une seule fois par jour', () => {
+  const base = { autoRemind: true, autoRemindHour: 9 };
+  assert.equal(ac.autoDue(new Date(2026, 10, 22, 8, 0), base), false, 'trop tôt');
+  assert.equal(ac.autoDue(new Date(2026, 10, 22, 9, 0), base), true, 'heure atteinte');
+  assert.equal(ac.autoDue(new Date(2026, 10, 22, 18, 0), { ...base, autoRemindDay: '2026-11-22' }), false, 'déjà fait');
+  assert.equal(ac.autoDue(new Date(2026, 10, 22, 9, 0), { autoRemind: false, autoSupRemind: false }), false, 'désactivé');
+  assert.equal(ac.autoDue(new Date(2026, 10, 22, 19, 0), { autoSupRemind: true, autoRemindHour: 18 }), true, 'fournisseur seul');
+  /* 22/11/2026 est un dimanche (7) : une programmation du lundi ne part pas. */
+  assert.equal(ac.autoDue(new Date(2026, 10, 22, 9, 0), { ...base, autoRemindEvery: 'semaine', autoRemindWeekday: 1 }), false);
+  assert.equal(ac.autoDue(new Date(2026, 10, 23, 9, 0), { ...base, autoRemindEvery: 'semaine', autoRemindWeekday: 1 }), true);
+});
+
+test('la relance fournisseur ne garde que les numéros et les restes dus', () => {
+  const items = ac.supplierDueItems([
+    { supplier: 'Grossiste', amount: 30000, paid: 10000 },
+    { supplier: 'Grossiste', amount: 5000, paid: 5000 },
+    { supplier: 'SansNumero', amount: 9000, paid: 0 },
+  ], [{ name: 'Grossiste', phone: '+225 07 00 00 00 00' }, { name: 'SansNumero', phone: '' }]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].name, 'Grossiste');
+  assert.equal(items[0].rest, 20000);
+  assert.equal(items[0].phone, '+225 07 00 00 00 00');
 });
