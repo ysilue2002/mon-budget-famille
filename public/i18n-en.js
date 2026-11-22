@@ -132,6 +132,7 @@ I18N.en = {
     inviteBtn: 'Invite a shopkeeper',
     inviteText: 'My shop uses Assistant Commercial. Install it with my code {code}:',
     inviteOffline: 'Connect to the internet to see your code.',
+    inviteQrHint: 'Or let the shopkeeper scan this code.',
     madeWith: 'Made with Assistant Commercial',
     installsLabel: 'Installs per channel',
     share: 'Share the app', shareHint: 'Send the link by WhatsApp or SMS.', copy: 'Copy link', copied: 'Link copied',

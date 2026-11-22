@@ -136,6 +136,7 @@ const I18N = { fr: {
     inviteBtn: 'Inviter un commerçant',
     inviteText: 'Ma boutique utilise Assistant Commercial. Installe-le avec mon code {code} :',
     inviteOffline: 'Connectez-vous à internet pour voir votre code.',
+    inviteQrHint: 'Ou faites scanner ce code par le commerçant.',
     madeWith: 'Fait avec Assistant Commercial',
     share: "Partager l'application", shareHint: 'Envoyez le lien par WhatsApp ou SMS.', copy: 'Copier le lien', copied: 'Lien copié',
     qrHelp: "Scannez ce code avec l'appareil photo de l'autre téléphone pour installer l'application.",

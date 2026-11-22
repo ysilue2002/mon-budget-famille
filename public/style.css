@@ -198,6 +198,7 @@ body.adsOn{padding-bottom:196px}
 .refCount{display:flex;align-items:center;gap:10px;margin:8px 0}
 .refCount b{font-size:30px;color:#14532d;line-height:1}
 .refCount span{font-size:16px}
+.refQr svg{display:block;width:170px;height:170px;margin:8px auto}
 
 @media print{
   #printArea .docBar{background:#111;height:4mm;margin:0 0 9mm}

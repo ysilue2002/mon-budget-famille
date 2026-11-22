@@ -45,6 +45,8 @@ const NOT_PRECACHED = new Set([
     'presentation-ar.html',
     /* Page de contrôle d'impression : ouverte à la main, jamais au démarrage. */
     'a4.html',
+    /* Administration : privée, toujours fraîche, jamais préchargée. */
+    'admin.html',
     /* Vignette d'aperçu des liens (1200 × 630) : lue par WhatsApp et les
        réseaux, jamais affichée dans l'application. */
     'og.jpg',

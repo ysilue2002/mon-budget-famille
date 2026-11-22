@@ -70,6 +70,7 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE INDEX IF NOT EXISTS state_history_user ON state_history(user_id, id)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS public_docs (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, number TEXT NOT NULL, json TEXT NOT NULL, updated INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS installs (src TEXT NOT NULL, day TEXT NOT NULL, hits INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (src, day))'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
   ]).then(async () => {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
     // Comptes par téléphone uniquement : l'e-mail et le téléphone deviennent facultatifs.
@@ -98,6 +99,8 @@ function ensureSchema(env) {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN src TEXT').run(); } catch {}
     /* Code de parrainage de la boutique, stable une fois créé. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN ref_code TEXT').run(); } catch {}
+    /* Abonnement Premium : date de fin, 0 ou vide = gratuit. */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN premium_until INTEGER').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run(    );
@@ -331,6 +334,42 @@ function restoreMasked(storedText, incomingText) {
   return JSON.stringify(incoming);
 }
 
+/* ---------------- administration ----------------
+   La page /admin n'est pas protégée par un mot de passe séparé : elle exige un
+   compte normal dont l'e-mail (ou le numéro) figure dans le secret
+   ADMIN_EMAILS. Sans ce secret, personne n'entre : pas de compte par défaut. */
+function adminList(env) {
+  return String(env.ADMIN_EMAILS || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+function isAdmin(user, list) {
+  if (!user || !Array.isArray(list) || !list.length) return false;
+  const email = String(user.email || '').trim().toLowerCase();
+  const digits = digitsOf(user.phone || '');
+  return list.some((v) => (v.includes('@') ? v === email : digits.length > 0 && digitsOf(v) === digits));
+}
+/* Réglages communs à toute l'application : publicité et emplacements. */
+const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '' };
+async function readConfig(env) {
+  const rows = await env.DB.prepare('SELECT key, value FROM app_config').all();
+  const map = {};
+  for (const r of rows.results || []) map[r.key] = r.value;
+  return {
+    ads: map.ads === '1',
+    adsClient: map.adsClient || '',
+    adsTop: map.adsTop || '',
+    adsBottom: map.adsBottom || '',
+  };
+}
+async function saveConfig(env, cfg) {
+  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom]];
+  await env.DB.batch(pairs.map(([k, v]) => env.DB.prepare(
+    'INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).bind(k, v)));
+}
+const ADMIN_REF = /^ca-pub-\d{10,20}$/;
+const ADMIN_SLOT = /^\d{6,20}$/;
+
 /* 20 inscriptions par heure et par adresse IP : un patron et ses vendeurs
    partagent souvent le même Wi-Fi, et 10 les bloquait au milieu d'une mise en
    route. Renvoie vrai quand l'adresse doit attendre. */
@@ -349,6 +388,12 @@ async function api(request, env, url) {
   if (path === '/api/me' && request.method === 'GET') {
     const user = await currentUser(request, env);
     return json({ user });
+  }
+
+  /* Réglages communs, lus par tous les appareils, même avant connexion :
+     seulement la publicité, aucun secret. */
+  if (path === '/api/config' && request.method === 'GET') {
+    try { return json(await readConfig(env)); } catch { return json(EMPTY_CONFIG); }
   }
 
   if (path === '/api/signup' && request.method === 'POST') {
@@ -470,6 +515,100 @@ async function api(request, env, url) {
 
   const user = await currentUser(request, env);
   if (!user) return json({ error: 'auth' }, 401);
+
+  /* ---------------- tableau de bord administrateur ---------------- */
+  if (path === '/api/admin/stats' && request.method === 'GET') {
+    const list = adminList(env);
+    if (!list.length) return json({ error: 'notconfigured' }, 503);
+    if (!isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    const now = Date.now();
+    const day = 86400000;
+    const one = async (sql, ...args) => {
+      try {
+        const r = await env.DB.prepare(sql).bind(...args).first();
+        return Number(r && r.n) || 0;
+      } catch { return 0; }
+    };
+    const counts = {
+      owners: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL'),
+      staff: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NOT NULL'),
+      active7: await one('SELECT COUNT(*) AS n FROM state WHERE updated > ?', now - 7 * day),
+      premium: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL AND premium_until > ?', now),
+      newToday: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL AND created > ?', now - day),
+      new7: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL AND created > ?', now - 7 * day),
+      sales: await one("SELECT COALESCE(SUM(json_array_length(json_extract(json,'$.sales'))), 0) AS n FROM state"),
+      docs: await one("SELECT COALESCE(SUM(json_array_length(json_extract(json,'$.docs'))), 0) AS n FROM state"),
+    };
+    /* Inscriptions des quatorze derniers jours : une barre par jour. */
+    const signupRows = await env.DB.prepare('SELECT created FROM users WHERE owner_id IS NULL AND created > ?').bind(now - 13 * day).all();
+    const byDay = new Map();
+    for (let i = 13; i >= 0; i -= 1) byDay.set(new Date(now - i * day).toISOString().slice(0, 10), 0);
+    for (const r of signupRows.results || []) {
+      const key = new Date(Number(r.created) || 0).toISOString().slice(0, 10);
+      if (byDay.has(key)) byDay.set(key, byDay.get(key) + 1);
+    }
+    const signups = [...byDay.entries()].map(([d, n]) => ({ day: d, n }));
+    const countryRows = await env.DB.prepare(
+      "SELECT COALESCE(NULLIF(json_extract(s.json,'$.settings.country'), ''), '—') AS country, COUNT(*) AS n FROM state s GROUP BY country ORDER BY n DESC LIMIT 15",
+    ).all().catch(() => ({ results: [] }));
+    const channelRows = await env.DB.prepare('SELECT src, SUM(hits) AS n FROM installs GROUP BY src ORDER BY n DESC LIMIT 10').all();
+    const shops = await env.DB.prepare(
+      `SELECT u.id, u.email, u.phone, u.name, u.created, u.src, u.premium_until,
+        COALESCE(json_extract(s.json,'$.shop'), '') AS shop,
+        COALESCE(json_extract(s.json,'$.settings.country'), '') AS country,
+        s.updated, COALESCE(json_array_length(json_extract(s.json,'$.sales')), 0) AS sales,
+        COALESCE(json_array_length(json_extract(s.json,'$.docs')), 0) AS docs
+       FROM users u LEFT JOIN state s ON s.user_id = u.id
+       WHERE u.owner_id IS NULL ORDER BY u.created DESC LIMIT 100`,
+    ).all();
+    return json({
+      counts,
+      signups,
+      countries: (countryRows.results || []).map((r) => ({ country: String(r.country || '—'), n: Number(r.n) || 0 })),
+      channels: (channelRows.results || []).map((r) => ({ src: String(r.src || 'direct'), n: Number(r.n) || 0 })),
+      shops: (shops.results || []).map((r) => ({
+        id: String(r.id), shop: String(r.shop || ''), email: r.email || null, phone: r.phone || null,
+        name: r.name || null, country: String(r.country || ''), created: Number(r.created) || 0,
+        updated: Number(r.updated) || 0, sales: Number(r.sales) || 0, docs: Number(r.docs) || 0,
+        premiumUntil: Number(r.premium_until) || 0, src: String(r.src || ''),
+      })),
+      config: await readConfig(env),
+    });
+  }
+
+  /* Premium : le patron offre des mois à une boutique, ou les retire. */
+  if (path === '/api/admin/premium' && request.method === 'POST') {
+    const list = adminList(env);
+    if (!list.length) return json({ error: 'notconfigured' }, 503);
+    if (!isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    const body = await readBody(request);
+    const id = String(body.id || '');
+    const months = Math.max(0, Math.min(24, Math.round(Number(body.months) || 0)));
+    const row = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ? AND owner_id IS NULL').bind(id).first();
+    if (!row) return json({ error: 'notfound' }, 404);
+    const current = Number(row.premium_until) || 0;
+    const until = months ? Math.max(Date.now(), current) + months * 30 * 86400000 : 0;
+    await env.DB.prepare('UPDATE users SET premium_until = ? WHERE id = ?').bind(until, id).run();
+    return json({ premiumUntil: until });
+  }
+
+  /* Publicité commune : activée pour l'application, avec l'identifiant AdSense
+     et les deux emplacements. Une valeur vide désactive tout. */
+  if (path === '/api/admin/config' && request.method === 'POST') {
+    const list = adminList(env);
+    if (!list.length) return json({ error: 'notconfigured' }, 503);
+    if (!isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    const body = await readBody(request);
+    const client = String(body.adsClient || '').trim();
+    const top = String(body.adsTop || '').trim();
+    const bottom = String(body.adsBottom || '').trim();
+    if (client && !ADMIN_REF.test(client)) return json({ error: 'client' }, 400);
+    if (top && !ADMIN_SLOT.test(top)) return json({ error: 'slot' }, 400);
+    if (bottom && !ADMIN_SLOT.test(bottom)) return json({ error: 'slot' }, 400);
+    const cfg = { ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom };
+    await saveConfig(env, cfg);
+    return json({ ok: true, config: cfg });
+  }
 
   /* D'où viennent les installations : agregat par canal, sans aucune donnée
      personnelle. Sert à juger un flyer ou une radio, pas à suivre les gens. */

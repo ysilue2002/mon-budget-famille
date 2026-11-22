@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Administration — Assistant Commercial</title>
+<style>
+  /* Tableau de bord interne : lu sur téléphone comme sur ordinateur. Gros
+     chiffres, une action par bouton, rien à interpréter. */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f2f5ef; color: #14261b; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Tahoma, sans-serif; font-size: 16px; line-height: 1.5; }
+  header { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; background: #14532d; color: #fff; }
+  header b { font-size: 19px; flex: 1 1 auto; }
+  header a, header button { min-height: 44px; display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 12px; border: 2px solid #fff; background: transparent; color: #fff; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 12px 48px; }
+  .msg { background: #fff; border: 2px solid #d9e5db; border-radius: 14px; padding: 18px; margin: 12px 0; }
+  .msg h2 { margin: 0 0 6px; font-size: 20px; color: #14532d; }
+  .msg a.btn, .msg button.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; margin-top: 12px; padding: 10px 18px; border-radius: 12px; border: 2px solid #14532d; background: #14532d; color: #fff; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; margin: 4px 0 18px; }
+  .card { background: #fff; border: 1px solid #d9e5db; border-radius: 14px; padding: 14px; }
+  .card b { display: block; font-size: 30px; line-height: 1.1; color: #14532d; }
+  .card span { display: block; font-size: 15px; color: #4a5a4f; margin-top: 4px; }
+  section { background: #fff; border: 1px solid #d9e5db; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  section h2 { margin: 0 0 10px; font-size: 18px; color: #14532d; }
+  .bar { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin: 8px 0; }
+  .bar .lab { font-size: 15px; }
+  .bar .track { grid-column: 1 / -1; height: 10px; border-radius: 6px; background: #e5ece6; overflow: hidden; }
+  .bar .fill { height: 100%; background: #14532d; border-radius: 6px; }
+  .bar .n { font-weight: 800; font-size: 16px; }
+  .shop { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid #e6ece7; }
+  .shop:first-of-type { border-top: 0; }
+  .shop .t { font-weight: 800; font-size: 17px; }
+  .shop .s { font-size: 14px; color: #4a5a4f; }
+  .shop .acts { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
+  .btn { min-height: 44px; padding: 8px 14px; border-radius: 12px; border: 2px solid #14532d; background: #fff; color: #14532d; font: inherit; font-weight: 700; cursor: pointer; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.solid { background: #14532d; color: #fff; }
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 9px; font-size: 14px; font-weight: 700; }
+  .tag.on { background: #e5f5e9; color: #14532d; border: 1px solid #14532d; }
+  .tag.off { background: #f1f1ee; color: #4a5a4f; border: 1px solid #c9d2cb; }
+  label { display: block; font-weight: 700; margin: 12px 0 4px; font-size: 15px; }
+  input[type="text"] { width: 100%; min-height: 48px; padding: 10px 12px; border: 2px solid #cfdccf; border-radius: 12px; font: inherit; background: #fff; }
+  .check { display: flex; gap: 12px; align-items: center; min-height: 44px; margin-top: 10px; font-weight: 700; }
+  .check input { width: 24px; height: 24px; }
+  .hint { font-size: 14px; color: #4a5a4f; margin: 6px 0 0; }
+  .ok { color: #14532d; font-weight: 700; }
+  .err { color: #b00020; font-weight: 700; }
+  /* Sur téléphone, une boutique tient sur une colonne : le nom et les chiffres
+     respirent, le badge descend d'une ligne, les boutons restent gros. */
+  @media (max-width: 719px) {
+    .shop { grid-template-columns: 1fr; }
+    .shop .acts { grid-column: 1 / -1; }
+  }
+  @media (min-width: 720px) {
+    .shop { grid-template-columns: 1fr auto auto; }
+    .shop .acts { grid-column: auto; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <b>Administration</b>
+  <button id="reload" type="button">Rafraîchir</button>
+  <a href="/">Application</a>
+</header>
+<main>
+  <div id="state" class="msg"><h2>Chargement…</h2></div>
+  <div id="dash" hidden>
+    <div class="cards" id="cards"></div>
+    <section>
+      <h2>Nouvelles boutiques (14 jours)</h2>
+      <div id="signups"></div>
+    </section>
+    <section>
+      <h2>Pays des boutiques</h2>
+      <div id="countries"><p class="hint">—</p></div>
+    </section>
+    <section>
+      <h2>D'où viennent les installations</h2>
+      <div id="channels"><p class="hint">—</p></div>
+    </section>
+    <section>
+      <h2>Boutiques</h2>
+      <p class="hint">Les 100 plus récentes. « +1 mois » offre un mois de Premium, « Retirer » le retire.</p>
+      <div id="shops"><p class="hint">—</p></div>
+      <p class="hint" id="premMsg"></p>
+    </section>
+    <section>
+      <h2>Publicité</h2>
+      <p class="hint">Une seule configuration pour toute l'application. Sans identifiant AdSense valide, aucune annonce ne s'affiche, même si la case est cochée.</p>
+      <label class="check"><input type="checkbox" id="adsOn"> Afficher la publicité</label>
+      <label for="adsClient">Identifiant éditeur AdSense</label>
+      <input id="adsClient" type="text" inputmode="text" placeholder="ca-pub-0000000000000000" autocomplete="off">
+      <label for="adsTop">Emplacement du haut</label>
+      <input id="adsTop" type="text" inputmode="numeric" placeholder="1234567890" autocomplete="off">
+      <label for="adsBottom">Emplacement du bas</label>
+      <input id="adsBottom" type="text" inputmode="numeric" placeholder="0987654321" autocomplete="off">
+      <button class="btn solid" id="adsSave" type="button">Enregistrer la publicité</button>
+      <p class="hint" id="adsMsg"></p>
+    </section>
+  </div>
+</main>
+<script>
+  const stateBox = document.getElementById('state');
+  const dash = document.getElementById('dash');
+  let data = null;
+
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const day = (ms) => (ms ? new Date(Number(ms)).toLocaleDateString('fr-FR') : '—');
+  const num = (n) => Number(n || 0).toLocaleString('fr-FR');
+  const premiumOn = (u) => Number(u) > Date.now();
+  const premiumLabel = (u) => (premiumOn(u) ? 'Premium jusqu’au ' + day(u) : 'Gratuit');
+
+  function message(html, action) {
+    dash.hidden = true;
+    stateBox.hidden = false;
+    stateBox.innerHTML = html;
+    if (action) {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.type = 'button';
+      b.textContent = action.label;
+      b.onclick = action.run;
+      stateBox.appendChild(b);
+    }
+  }
+
+  function bar(label, n, max) {
+    const pct = max ? Math.max(2, Math.round((n / max) * 100)) : 0;
+    return `<div class="bar"><span class="lab">${esc(label)}</span><span class="n">${num(n)}</span>
+      <span class="track"><span class="fill" style="width:${pct}%"></span></span></div>`;
+  }
+
+  function paint() {
+    const c = data.counts || {};
+    document.getElementById('cards').innerHTML = [
+      [c.owners, 'boutiques'],
+      [c.staff, 'vendeurs'],
+      [c.active7, 'actives cette semaine'],
+      [c.premium, 'Premium'],
+      [c.newToday, 'inscrites aujourd’hui'],
+      [c.sales, 'ventes enregistrées'],
+      [c.docs, 'devis et factures'],
+      [c.new7, 'nouvelles en 7 jours'],
+    ].map(([v, l]) => `<div class="card"><b>${num(v)}</b><span>${l}</span></div>`).join('');
+
+    const days = data.signups || [];
+    const maxDay = Math.max(1, ...days.map((d) => d.n));
+    document.getElementById('signups').innerHTML = days.length
+      ? days.map((d) => bar(d.day.slice(8) + '/' + d.day.slice(5, 7), d.n, maxDay)).join('')
+      : '<p class="hint">Aucune inscription récente.</p>';
+
+    const countries = data.countries || [];
+    const maxC = Math.max(1, ...countries.map((x) => x.n));
+    document.getElementById('countries').innerHTML = countries.length
+      ? countries.map((x) => bar(x.country || '—', x.n, maxC)).join('')
+      : '<p class="hint">Aucun pays renseigné.</p>';
+
+    const channels = data.channels || [];
+    const maxCh = Math.max(1, ...channels.map((x) => x.n));
+    document.getElementById('channels').innerHTML = channels.length
+      ? channels.map((x) => bar(x.src || 'direct', x.n, maxCh)).join('')
+      : '<p class="hint">Aucune installation comptée.</p>';
+
+    renderShops();
+    const cfg = data.config || {};
+    document.getElementById('adsOn').checked = !!cfg.ads;
+    document.getElementById('adsClient').value = cfg.adsClient || '';
+    document.getElementById('adsTop').value = cfg.adsTop || '';
+    document.getElementById('adsBottom').value = cfg.adsBottom || '';
+  }
+
+  function renderShops() {
+    const shops = data.shops || [];
+    const box = document.getElementById('shops');
+    if (!shops.length) { box.innerHTML = '<p class="hint">Aucune boutique.</p>'; return; }
+    box.innerHTML = shops.map((s) => `<div class="shop">
+      <div>
+        <div class="t">${esc(s.shop || '(sans nom)')}</div>
+        <div class="s">${esc(s.email || s.phone || s.id)} · ${esc(s.country || 'pays ?')} · ${num(s.sales)} vente${Number(s.sales) === 1 ? '' : 's'} · ${num(s.docs)} doc${Number(s.docs) === 1 ? '' : 's'}</div>
+        <div class="s">Inscrite le ${day(s.created)} · ${Number(s.updated) > 1000000000000 ? 'vue le ' + day(s.updated) : 'jamais ouverte'}${s.src ? ' · ' + esc(s.src) : ''}</div>
+      </div>
+      <div><span class="tag ${premiumOn(s.premiumUntil) ? 'on' : 'off'}">${premiumLabel(s.premiumUntil)}</span></div>
+      <div class="acts">
+        <button class="btn" type="button" data-id="${esc(s.id)}" data-months="1">+1 mois</button>
+        <button class="btn" type="button" data-id="${esc(s.id)}" data-months="0" ${premiumOn(s.premiumUntil) ? '' : 'disabled'}>Retirer</button>
+      </div>
+    </div>`).join('');
+    box.onclick = async (e) => {
+      const b = e.target.closest('button[data-id]');
+      if (!b) return;
+      const msg = document.getElementById('premMsg');
+      b.disabled = true;
+      msg.className = 'hint';
+      msg.textContent = 'Enregistrement…';
+      try {
+        const r = await fetch('/api/admin/premium', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: b.dataset.id, months: Number(b.dataset.months) }),
+        });
+        if (!r.ok) throw new Error();
+        msg.className = 'ok';
+        msg.textContent = Number(b.dataset.months) ? 'Premium offert pour un mois.' : 'Premium retiré.';
+        await load(true);
+      } catch {
+        b.disabled = false;
+        msg.className = 'err';
+        msg.textContent = 'Non enregistré. Réessayez.';
+      }
+    };
+  }
+
+  async function load(keep) {
+    if (!keep) message('<h2>Chargement…</h2>');
+    let r;
+    try {
+      r = await fetch('/api/admin/stats', { cache: 'no-store', credentials: 'same-origin' });
+    } catch {
+      message('<h2>Pas de connexion</h2><p>Vérifiez le réseau, puis réessayez.</p>', { label: 'Réessayer', run: () => load() });
+      return;
+    }
+    if (r.status === 401) {
+      message('<h2>Connectez-vous d’abord</h2><p>L’administration utilise votre compte Assistant Commercial. Connectez-vous dans l’application, puis revenez ici.</p>',
+        { label: 'Ouvrir l’application', run: () => { location.href = '/'; } });
+      const b = stateBox.querySelector('button');
+      if (b) b.onclick = () => { location.href = '/'; };
+      return;
+    }
+    if (r.status === 403) {
+      message('<h2>Compte non administrateur</h2><p>Ce compte n’est pas dans la liste des administrateurs. Ajoutez son e-mail dans le secret <b>ADMIN_EMAILS</b> (Sites → Secrets), séparé par des virgules s’il y en a plusieurs.</p>',
+        { label: 'Réessayer', run: () => load() });
+      return;
+    }
+    if (r.status === 503) {
+      message('<h2>Administration non configurée</h2><p>Ajoutez le secret <b>ADMIN_EMAILS</b> avec l’e-mail de votre compte (Sites → Secrets), puis rechargez cette page. Sans ce secret, personne ne peut entrer.</p>',
+        { label: 'Réessayer', run: () => load() });
+      return;
+    }
+    if (!r.ok) {
+      message('<h2>Erreur du serveur</h2><p>Rien n’a été modifié. Réessayez dans un instant.</p>', { label: 'Réessayer', run: () => load() });
+      return;
+    }
+    data = await r.json();
+    stateBox.hidden = true;
+    dash.hidden = false;
+    paint();
+  }
+
+  document.getElementById('reload').onclick = () => load();
+  document.getElementById('adsSave').onclick = async () => {
+    const msg = document.getElementById('adsMsg');
+    msg.className = 'hint';
+    msg.textContent = 'Enregistrement…';
+    try {
+      const r = await fetch('/api/admin/config', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ads: document.getElementById('adsOn').checked,
+          adsClient: document.getElementById('adsClient').value.trim(),
+          adsTop: document.getElementById('adsTop').value.trim(),
+          adsBottom: document.getElementById('adsBottom').value.trim(),
+        }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        msg.className = 'err';
+        msg.textContent = j.error === 'client' ? 'Identifiant AdSense invalide (ca-pub-…).'
+          : j.error === 'slot' ? 'Emplacement invalide : chiffres seulement.'
+          : 'Non enregistré. Réessayez.';
+        return;
+      }
+      msg.className = 'ok';
+      msg.textContent = 'Publicité enregistrée.';
+      await load(true);
+    } catch {
+      msg.className = 'err';
+      msg.textContent = 'Pas de connexion : rien n’a changé.';
+    }
+  };
+
+  load();
+</script>
+</body>
+</html>

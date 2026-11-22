@@ -3127,8 +3127,17 @@ function paintReferral(ref) {
   box.innerHTML = `<p class="hint">${T('inviteCode')}</p>
     <div class="refCode">${esc(ref.code)}</div>
     <div class="refCount"><b>${Number(ref.count) || 0}</b><span>${T('inviteCountLabel')}</span></div>
-    <button class="btn whats" id="refInvite">${T('inviteBtn')}</button>`;
+    <button class="btn whats" id="refInvite">${T('inviteBtn')}</button>
+    <div class="refQr" id="refQr"></div>
+    <p class="hint" style="text-align:center">${T('inviteQrHint')}</p>`;
   box.querySelector('#refInvite').onclick = () => inviteShare(ref.code);
+  /* Le même lien, en QR : le voisin scanne et arrive sur la présentation. */
+  const qrBox = box.querySelector('#refQr');
+  if (qrBox) {
+    qrCode(inviteUrl(ref.code)).then((qr) => {
+      if (qr) qrBox.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true });
+    }).catch(() => {});
+  }
 }
 function loadReferral() {
   if (!me) { paintReferral(null); return; }
@@ -4200,6 +4209,17 @@ function setupServiceWorker() {
     .catch(() => {});
 }
 
+/* Réglages communs (publicité) : lus une fois au démarrage. Sans identifiant
+   AdSense réel, rien n'est demandé à Google et l'option reste invisible. */
+async function loadAppConfig() {
+  const r = await api('/api/config');
+  if (!r.ok || !r.data || !r.data.ads || !r.data.adsClient) return;
+  ADS.client = String(r.data.adsClient);
+  ADS.top = String(r.data.adsTop || '');
+  ADS.bottom = String(r.data.adsBottom || '');
+  render();
+}
+
 /* Sous test (node --test), seul le code ci-dessus est chargé : pas de rendu, pas
    de réseau, pas de service worker. */
 if (!globalThis.__AC_TEST__) {
@@ -4210,6 +4230,7 @@ if (!globalThis.__AC_TEST__) {
     render();
     rememberChannel();
     await bootAccount();
+    loadAppConfig();
     if (resetToken) { resetModal(resetToken); return; }
     if (!localStorage.getItem(LANG_KEY)) { showLangGate(); return; }
     if (!me) { gateMode = db.shop ? 'login' : 'signup'; showAuthGate(); return; }

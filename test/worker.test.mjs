@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -251,6 +251,16 @@ test('cleanSrc ne garde qu’un mot de canal', () => {
   assert.equal(cleanSrc('<script>'), 'script');
   assert.equal(cleanSrc(''), '');
   assert.equal(cleanSrc(null), '');
+});
+
+test('seuls les comptes listés entrent dans l’administration', () => {
+  const list = ['patron@boutique.ci', '+225 07 00 00 00 00'];
+  assert.equal(isAdmin({ email: 'patron@boutique.ci' }, list), true, 'e-mail listé');
+  assert.equal(isAdmin({ email: 'PATRON@BOUTIQUE.CI' }, list), true, 'casse ignorée');
+  assert.equal(isAdmin({ phone: '+225 07 00 00 00 00' }, list), true, 'numéro listé');
+  assert.equal(isAdmin({ email: 'autre@boutique.ci' }, list), false, 'e-mail inconnu');
+  assert.equal(isAdmin({ email: 'patron@boutique.ci' }, []), false, 'sans liste : personne');
+  assert.equal(isAdmin(null, list), false, 'sans compte : personne');
 });
 
 /* --- limitation des inscriptions --- */
