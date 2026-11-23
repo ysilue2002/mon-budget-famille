@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -471,4 +471,95 @@ test('l’inscription est limitée à 20 par heure et par adresse', async () => 
   assert.equal(await signupGuard(env, '1.2.3.4'), true, 'la 21e est refusée');
   assert.equal(await signupGuard(env, '5.6.7.8'), false, 'une autre adresse reste libre');
   assert.equal(SIGNUP_WINDOW_MS, 60 * 60000);
+});
+
+/* Une demande sans transfert ne doit pas rester « en attente » pour toujours :
+   au bout de trente jours elle expire, sans toucher aux demandes récentes ni
+   à celles déjà traitées. */
+function fakeExpire(changes) {
+  const seen = [];
+  return {
+    seen,
+    prepare(sql) {
+      const stmt = {
+        bind() { return stmt; },
+        async run() {
+          seen.push(sql);
+          if (sql.startsWith('UPDATE payments')) return { meta: { changes } };
+          if (sql.startsWith('DELETE FROM app_config')) return { meta: { changes: 0 } };
+          if (sql.startsWith('INSERT INTO admin_log')) return { meta: { changes: 1 } };
+          throw new Error('requête inattendue : ' + sql);
+        },
+      };
+      return stmt;
+    },
+  };
+}
+
+test('une demande sans transfert expire au bout de trente jours', async () => {
+  const env = { DB: fakeExpire(2) };
+  assert.equal(PENDING_DAYS, 30);
+  assert.equal(await expireStalePayments(env, 1000000000000), 2);
+  assert.ok(env.DB.seen[0].includes("status = 'expired'"), 'marquée expirée');
+  assert.ok(env.DB.seen[0].includes("status = 'pending'"), 'seules les demandes encore ouvertes');
+  assert.ok(env.DB.seen[0].includes('created < ?'), 'seules les plus vieilles');
+  assert.equal(await expireStalePayments({ DB: { prepare() { throw new Error('panne'); } } }), 0, 'une panne ne casse pas la lecture');
+});
+
+/* Codes de secours : huit codes lisibles, stockés par empreinte, chacun ne
+   servant qu'une fois — même si on le retape avec des espaces ou en minuscules. */
+function fakeConfig() {
+  const rows = new Map();
+  return {
+    rows,
+    prepare(sql) {
+      let args = [];
+      const stmt = {
+        bind(...a) { args = a; return stmt; },
+        async first() {
+          if (/SELECT value FROM app_config WHERE key = \?/.test(sql)) {
+            const v = rows.get(args[0]);
+            return v === undefined ? null : { value: v };
+          }
+          throw new Error('requête inattendue : ' + sql);
+        },
+        async run() {
+          if (sql.startsWith('INSERT INTO app_config')) {
+            rows.set(args[0], args[1]);
+            return { meta: { changes: 1 } };
+          }
+          if (sql.startsWith('UPDATE app_config SET value = ? WHERE key = ? AND value = ?')) {
+            if (rows.get(args[1]) !== args[2]) return { meta: { changes: 0 } };
+            rows.set(args[1], args[0]);
+            return { meta: { changes: 1 } };
+          }
+          throw new Error('requête inattendue : ' + sql);
+        },
+      };
+      return stmt;
+    },
+  };
+}
+
+test('un code de secours ne sert qu’une fois', async () => {
+  const code = newBackupCode();
+  assert.match(code, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/, 'lisible au téléphone');
+  assert.equal(normalizeBackupCode(' abcd-efgh '), 'ABCDEFGH');
+  assert.equal(normalizeBackupCode('AB CD EF GH'), 'ABCDEFGH');
+  const env = { DB: fakeConfig() };
+  const codes = await issueBackupCodes(env, 'boss@test.ci');
+  assert.equal(codes.length, 8);
+  assert.equal(new Set(codes).size, 8, 'huit codes différents');
+  assert.equal((env.DB.rows.get('totpb:boss@test.ci') || '').includes(codes[0]), false, 'aucun code en clair en base');
+  assert.equal(await backupCodesLeft(env, 'BOSS@test.ci'), 8, 'casse ignorée');
+  assert.equal(await useBackupCode(env, 'boss@test.ci', codes[2].toLowerCase().replace('-', ' ')), true, 'accepté, espaces compris');
+  assert.equal(await backupCodesLeft(env, 'boss@test.ci'), 7);
+  assert.equal(await useBackupCode(env, 'boss@test.ci', codes[2]), false, 'déjà dépensé');
+  assert.equal(await useBackupCode(env, 'boss@test.ci', 'AAAA-AAAA'), false, 'inconnu');
+  assert.equal(await useBackupCode(env, 'boss@test.ci', 'court'), false, 'trop court');
+  assert.equal(await useBackupCode(env, 'autre@test.ci', codes[0]), false, 'pas le code d’une autre personne');
+  const fresh = await issueBackupCodes(env, 'boss@test.ci');
+  assert.equal(await backupCodesLeft(env, 'boss@test.ci'), 8, 'une nouvelle liste remplace l’ancienne');
+  assert.equal(await useBackupCode(env, 'boss@test.ci', codes[0]), false, 'les anciens codes ne marchent plus');
+  assert.equal(await useBackupCode(env, 'boss@test.ci', fresh[0]), true);
 });

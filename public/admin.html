@@ -137,8 +137,8 @@
     <input id="adEmail" type="email" autocomplete="username" inputmode="email" required>
     <label for="adCode">Code d'administration</label>
     <input id="adCode" type="password" autocomplete="current-password" required>
-    <label for="adTotp">Code à 6 chiffres (si activé)</label>
-    <input id="adTotp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
+    <label for="adTotp">Code à 6 chiffres (ou code de secours)</label>
+    <input id="adTotp" type="text" inputmode="text" autocomplete="one-time-code" maxlength="9" placeholder="123456 ou ABCD-EFGH">
     <button class="btn solid" id="adGo" type="submit">Entrer</button>
     <p class="hint err" id="adMsg"></p>
   </form>
@@ -274,6 +274,9 @@
         <p class="hint" style="margin-top:0">Le commerçant choisit un nombre de mois, paie par Wave, Orange Money ou carte, puis vous validez le transfert dans l'onglet Paiements. Prix vide (0) : seul le code d'activation reste.</p>
         <label for="priceMonth">Prix d’un mois (FCFA)</label>
         <input id="priceMonth" type="text" inputmode="numeric" value="0">
+        <label for="paySeuil">Second accord au-delà de (FCFA)</label>
+        <input id="paySeuil" type="text" inputmode="numeric" value="0">
+        <p class="hint" style="margin-top:4px">À 0 : un administrateur suffit. Au-delà, un premier donne son accord et un autre doit le confirmer.</p>
         <div class="row2">
           <div>
             <label for="payWave">Numéro Wave</label>
@@ -292,6 +295,17 @@
         <p class="hint" style="margin-top:0">Ajoutez le secret <b>ADMIN_CODES</b> au format <b>email:code,email:code</b> (Sites → Secrets), puis redéployez. Chacun entre avec son propre code et le journal note qui a agi. Sans ce secret, le code commun <b>ADMIN_CODE</b> continue de marcher.</p>
         <p class="hint" style="margin-top:8px">Second facteur : secret <b>ADMIN_TOTP</b> au format <b>email:BASE32</b> (une application d'authentification). Le code à 6 chiffres est alors demandé avec le code d'administration.</p>
         <p class="hint" id="remindState"></p>
+      </div>
+      <div class="card">
+        <h3>Codes de secours</h3>
+        <p class="hint" style="margin-top:0">Téléphone perdu ? Un code de secours remplace les six chiffres, une seule fois. Créez-en huit et gardez-les ailleurs que sur le téléphone.</p>
+        <p class="hint" id="backupState">—</p>
+        <button class="btn" id="backupNew" type="button">Créer 8 codes de secours</button>
+        <div id="backupBox" hidden style="margin-top:10px">
+          <textarea id="backupList" readonly rows="4" style="width:100%;padding:10px;border:1px solid #cfdccf;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:16px;letter-spacing:1px;background:#fff;color:var(--ink)"></textarea>
+          <button class="btn small" id="backupCopy" type="button" style="margin-top:8px">Copier les codes</button>
+        </div>
+        <p class="hint" id="backupMsg"></p>
       </div>
       <div class="card">
         <h3>Support WhatsApp</h3>
@@ -454,11 +468,16 @@
       ? '<span class="badge on">Actifs</span> Les codes partent par e-mail.'
       : '<span class="badge warn">Non configurés</span> Ajoutez les secrets <b>RESEND_API_KEY</b> et <b>MAIL_FROM</b> (Sites → Secrets), puis redéployez. En attendant, donnez les codes par WhatsApp.';
     document.getElementById('priceMonth').value = String(cfg.priceMonth || 0);
+    document.getElementById('paySeuil').value = String(cfg.paySeuil || 0);
     document.getElementById('payWave').value = cfg.payWave || '';
     document.getElementById('payOm').value = cfg.payOm || '';
     document.getElementById('payState').textContent = cfg.priceMonth
       ? `Le commerçant voit ${num(cfg.priceMonth)} FCFA par mois. ${cfg.payWave ? 'Wave : ' + cfg.payWave + '. ' : ''}${cfg.payOm ? 'Orange Money : ' + cfg.payOm + '. ' : ''}${cfg.payWave || cfg.payOm ? '' : 'Aucun numéro : seuls la carte et WhatsApp restent.'}`
       : 'Prix à 0 : l’écran de renouvellement propose seulement le code ou WhatsApp.';
+    const bk = data.totpBackup || {};
+    document.getElementById('backupState').textContent = !bk.active
+      ? 'Aucun second facteur sur votre compte : ces codes ne serviraient à rien.'
+      : bk.left ? `${num(bk.left)} code(s) de secours restants.` : 'Aucun code de secours : créez-en avant de perdre le téléphone.';
     document.getElementById('remindState').textContent = data.reminderDay
       ? `Rappels J-7 : dernier envoi le ${data.reminderDay.split('-').reverse().join('/')}.`
       : 'Rappels J-7 : pas encore envoyés (il faut RESEND_API_KEY, et une boutique à moins de 7 jours).';
@@ -816,7 +835,7 @@
           <div>
             <div class="t">${esc(p.shop || p.email || p.phone || '—')}</div>
             <div class="s">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'} · réf. <b>${esc(p.ref)}</b></div>
-            <div class="s">Demandé le ${when(p.created)}${hoursSince(p.created) >= 24 ? ' · <b style="color:#7a4a00">en attente depuis ' + num(hoursSince(p.created)) + ' h</b>' : ''}${p.notified ? ' · relancé' : ''}</div>
+            <div class="s">Demandé le ${when(p.created)}${hoursSince(p.created) >= 24 ? ' · <b style="color:#7a4a00">en attente depuis ' + num(hoursSince(p.created)) + ' h</b>' : ''}${p.notified ? ' · relancé' : ''}${p.approvedBy ? ' · <b>1er accord : ' + esc(p.approvedBy) + '</b>' : ''}</div>
           </div>
           <div>${hoursSince(p.created) >= 24 ? '<span class="badge warn">En retard</span>' : ''}</div>
           <div class="acts2">
@@ -831,6 +850,47 @@
         : '<p class="empty">—</p>';
     } catch { box.innerHTML = '<p class="empty">—</p>'; }
   }
+
+  /* Codes de secours : affichés une seule fois, puis seulement leur nombre. */
+  document.getElementById('backupNew').onclick = async () => {
+    if (!confirm('Créer 8 nouveaux codes de secours ? Les anciens ne marcheront plus.')) return;
+    const msg = document.getElementById('backupMsg');
+    msg.className = 'hint';
+    msg.textContent = 'Création…';
+    try {
+      const r = await fetch('/api/admin/totp/backup', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}',
+      });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+      if (r.status === 400) {
+        msg.className = 'hint err';
+        msg.textContent = 'Aucun second facteur sur ce compte : ces codes ne serviraient à rien.';
+        return;
+      }
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      document.getElementById('backupList').value = (d.codes || []).join('\n');
+      document.getElementById('backupBox').hidden = false;
+      document.getElementById('backupState').textContent = `${num(d.left)} code(s) de secours restants.`;
+      msg.className = 'hint ok';
+      msg.textContent = 'Codes créés. Notez-les maintenant : ils ne seront plus affichés.';
+      toast('Codes de secours créés.');
+    } catch {
+      msg.className = 'hint err';
+      msg.textContent = 'Création impossible. Réessayez.';
+    }
+  };
+  document.getElementById('backupCopy').onclick = async () => {
+    const msg = document.getElementById('backupMsg');
+    try {
+      await navigator.clipboard.writeText(document.getElementById('backupList').value);
+      msg.className = 'hint ok';
+      msg.textContent = 'Codes copiés.';
+    } catch {
+      msg.className = 'hint err';
+      msg.textContent = 'Copie impossible : sélectionnez le texte à la main.';
+    }
+  };
 
   document.getElementById('purgeOld').onclick = async () => {
     if (!confirm('Supprimer les paiements réglés et le journal de plus d’un an ? Les fichiers CSV déjà exportés restent, cette action ne se défait pas.')) return;
@@ -887,11 +947,24 @@
           throw new Error('La référence ne correspond pas à cette demande. Rechargez la liste.');
         } else if (e.error === 'amount') {
           throw new Error('Le montant de cette demande est nul : refusez-la et faites-en une nouvelle.');
+        } else if (e.error === 'self') {
+          throw new Error('Vous avez déjà donné le premier accord : un autre administrateur doit valider.');
+        } else if (e.error === 'expired') {
+          throw new Error('Cette demande a expiré. Demandez à la boutique d’en créer une nouvelle.');
+        } else if (e.error === 'done') {
+          throw new Error('Cette demande a déjà été traitée. Rechargez la liste.');
         }
       }
       if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
       if (!r.ok) throw new Error('Non enregistré. Réessayez.');
       const d = await r.json().catch(() => ({}));
+      if (d.need === 'second') {
+        msg.className = 'hint ok';
+        msg.textContent = 'Premier accord enregistré. Un autre administrateur doit confirmer.';
+        toast('Un second accord est nécessaire.');
+        await loadPayments();
+        return;
+      }
       msg.className = 'hint ok';
       if (remind) msg.textContent = d.mail ? 'Relance envoyée par e-mail.' : 'E-mail indisponible : ouvrez le lien WhatsApp.';
       else if (refund) msg.textContent = 'Remboursement enregistré, mois retirés.';
@@ -989,6 +1062,7 @@
           supportWa: document.getElementById('supportWa').value.trim(),
           officialUrl: document.getElementById('officialUrl').value.trim(),
           priceMonth: document.getElementById('priceMonth').value.trim(),
+          paySeuil: document.getElementById('paySeuil').value.trim(),
           payWave: document.getElementById('payWave').value.trim(),
           payOm: document.getElementById('payOm').value.trim(),
         }),

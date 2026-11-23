@@ -326,6 +326,81 @@ async function totpRemember(env, email, counter) {
   } catch { /* un échec mémoire ne doit pas empêcher la connexion */ }
 }
 
+/* Codes de secours : si le téléphone est perdu, un code à usage unique ouvre
+   encore l'administration. Seule leur empreinte est gardée, comme un mot de
+   passe : l'écran les affiche une fois, puis plus jamais. */
+const BACKUP_COUNT = 8;
+function newBackupCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  const s = [...bytes].map((b) => REF_ALPHABET[b % REF_ALPHABET.length]).join('');
+  return s.slice(0, 4) + '-' + s.slice(4);
+}
+const normalizeBackupCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const backupKey = (email) => 'totpb:' + String(email || '').trim().toLowerCase();
+const backupHash = (email, code) => sha256('backup:' + String(email || '').trim().toLowerCase() + ':' + normalizeBackupCode(code));
+async function backupHashes(env, email) {
+  try {
+    const row = await env.DB.prepare('SELECT value FROM app_config WHERE key = ?').bind(backupKey(email)).first();
+    const list = row ? JSON.parse(String(row.value || '[]')) : [];
+    return Array.isArray(list) ? list.map(String) : [];
+  } catch { return []; }
+}
+async function backupCodesLeft(env, email) {
+  return (await backupHashes(env, email)).length;
+}
+async function issueBackupCodes(env, email) {
+  const list = [];
+  for (let i = 0; i < BACKUP_COUNT; i += 1) list.push(newBackupCode());
+  const hashes = [];
+  for (const c of list) hashes.push(await backupHash(email, c));
+  /* Une nouvelle liste remplace l'ancienne : un papier égaré ne doit pas
+     rester une clé éternelle. */
+  await env.DB.prepare('INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .bind(backupKey(email), JSON.stringify(hashes)).run();
+  return list;
+}
+async function useBackupCode(env, email, code) {
+  const plain = normalizeBackupCode(code);
+  if (plain.length !== 8) return false;
+  const key = backupKey(email);
+  const hash = await backupHash(email, plain);
+  /* Retrait sous condition sur l'ancienne valeur : deux essais simultanés du
+     même code ne peuvent pas le dépenser deux fois. */
+  for (let i = 0; i < 2; i += 1) {
+    const row = await env.DB.prepare('SELECT value FROM app_config WHERE key = ?').bind(key).first().catch(() => null);
+    if (!row) return false;
+    let list;
+    try { list = JSON.parse(String(row.value || '[]')); } catch { return false; }
+    if (!Array.isArray(list) || !list.includes(hash)) return false;
+    const next = JSON.stringify(list.filter((h) => h !== hash));
+    const done = await env.DB.prepare('UPDATE app_config SET value = ? WHERE key = ? AND value = ?')
+      .bind(next, key, String(row.value)).run().catch(() => null);
+    if (done && done.meta && done.meta.changes) return true;
+  }
+  return false;
+}
+
+/* Une demande sans transfert au bout de trente jours n'est plus une demande :
+   elle est marquée expirée, la boutique peut recommencer, et l'admin ne voit
+   plus une ligne qui traîne. Le balayage se fait à la lecture, sans réveil
+   planifié. */
+const PENDING_DAYS = 30;
+async function expireStalePayments(env, now) {
+  const cutoff = (Number(now) || Date.now()) - PENDING_DAYS * 86400000;
+  try {
+    const r = await env.DB.prepare(
+      "UPDATE payments SET status = 'expired', note = COALESCE(note, 'demande expirée') WHERE status = 'pending' AND created < ?",
+    ).bind(cutoff).run();
+    const n = Number((r.meta && r.meta.changes) || 0);
+    if (n) await adminLog(env, 'systeme', 'request-expire', null, `${n} demande(s) sans transfert`);
+    /* Un premier accord sur une demande expirée ne doit pas survivre. */
+    await env.DB.prepare(
+      "DELETE FROM app_config WHERE key LIKE 'payok:%' AND substr(key, 7) NOT IN (SELECT id FROM payments WHERE status = 'pending')",
+    ).run().catch(() => {});
+    return n;
+  } catch { return 0; }
+}
+
 /* Reçu de paiement : au commerçant, et en copie au support s'il est réglé.
    Sans clé d'envoi, le reçu reste affiché dans l'application et l'admin le
    transmet sur WhatsApp. */
@@ -757,10 +832,12 @@ async function readConfig(env) {
     payWave: map.payWave || '',
     payOm: map.payOm || '',
     priceMonth: Math.max(0, Math.round(Number(map.priceMonth) || 0)),
+    /* Seuil du second accord : 0 = un seul administrateur suffit. */
+    paySeuil: Math.max(0, Math.round(Number(map.paySeuil) || 0)),
   };
 }
 async function saveConfig(env, cfg) {
-  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom], ['supportWa', cfg.supportWa || ''], ['officialUrl', cfg.officialUrl || ''], ['payWave', cfg.payWave || ''], ['payOm', cfg.payOm || ''], ['priceMonth', String(Math.max(0, Math.round(Number(cfg.priceMonth) || 0)))]];
+  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom], ['supportWa', cfg.supportWa || ''], ['officialUrl', cfg.officialUrl || ''], ['payWave', cfg.payWave || ''], ['payOm', cfg.payOm || ''], ['priceMonth', String(Math.max(0, Math.round(Number(cfg.priceMonth) || 0)))], ['paySeuil', String(Math.max(0, Math.round(Number(cfg.paySeuil) || 0)))]];
   await env.DB.batch(pairs.map(([k, v]) => env.DB.prepare(
     'INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   ).bind(k, v)));
@@ -1073,9 +1150,16 @@ async function api(request, env, url, ctx) {
        d'administration, puis les six chiffres de son téléphone — et chaque
        code à six chiffres ne sert qu'une fois. */
     const totpSecret = adminTotps(env).get(email);
-    const counter = totpSecret ? await totpMatch(totpSecret, body.totp, Date.now()) : null;
+    let counter = totpSecret ? await totpMatch(totpSecret, body.totp, Date.now()) : null;
     const lastCounter = totpSecret ? await totpLastUsed(env, email) : 0;
-    const second = totpSecret ? counter !== null && counter > lastCounter : true;
+    let second = totpSecret ? counter !== null && counter > lastCounter : true;
+    /* Téléphone perdu : un code de secours, à usage unique, remplace les six
+       chiffres. Il n'ouvre la porte qu'une fois, puis disparaît. */
+    let backup = false;
+    if (totpSecret && !second) {
+      backup = await useBackupCode(env, email, body.totp);
+      if (backup) { second = true; counter = null; }
+    }
     const ok = adminEmailOk(email, list) && !!expectedCode
       && same(await sha256(code), await sha256(expectedCode)) && second;
     if (!ok) {
@@ -1087,7 +1171,7 @@ async function api(request, env, url, ctx) {
     const expires = Date.now() + ADMIN_SESSION_MS;
     const token = await adminToken(env, email, expires);
     if (counter !== null) await totpRemember(env, email, counter);
-    await adminLog(env, email, 'login', null, 'session ouverte');
+    await adminLog(env, email, 'login', null, backup ? 'session ouverte · code de secours' : 'session ouverte');
     /* SameSite=Strict : le cookie d'administration ne part jamais avec une
        requête venue d'un autre site, même en simple navigation. */
     return json({ ok: true, email, expires }, 200, {
@@ -1109,6 +1193,16 @@ async function api(request, env, url, ctx) {
      d'administration, et le code reste exigé à chaque nouveau poste. */
   if (path.startsWith('/api/admin/') && !admin) return json({ error: 'auth' }, 401);
   if (!user && !admin) return json({ error: 'auth' }, 401);
+
+  /* Codes de secours : le téléphone est perdu, la session est encore ouverte.
+     On en crée huit, affichés une seule fois, jamais relus ensuite. */
+  if (path === '/api/admin/totp/backup' && request.method === 'POST') {
+    const email = String(admin.email || '').trim().toLowerCase();
+    if (!adminTotps(env).get(email)) return json({ error: 'totp' }, 400);
+    const codes = await issueBackupCodes(env, email);
+    await adminLog(env, email, 'totp-backup', null, `${codes.length} codes de secours créés`);
+    return json({ codes, left: codes.length });
+  }
 
   /* ---------------- tableau de bord administrateur ---------------- */
   if (path === '/api/admin/stats' && request.method === 'GET') {
@@ -1167,6 +1261,10 @@ async function api(request, env, url, ctx) {
        FROM users u LEFT JOIN state s ON s.user_id = u.id
        WHERE u.owner_id IS NULL ORDER BY u.created DESC LIMIT 100`,
     ).all();
+    /* Codes de secours restants pour la personne connectée : pour qu'elle en
+       recrée avant de perdre son téléphone, pas après. */
+    const backupLeft = admin ? await backupCodesLeft(env, admin.email) : 0;
+    const backupOn = !!(admin && adminTotps(env).get(String(admin.email || '').trim().toLowerCase()));
     return json({
       counts: {
         ...counts,
@@ -1195,6 +1293,7 @@ async function api(request, env, url, ctx) {
          qu'un poste laissé ouvert se voie avant de surprendre. */
       admin: admin ? { email: admin.email, expires: admin.expires } : null,
       /* Ce qui est branché, jamais la valeur des secrets. */
+      totpBackup: { active: backupOn, left: backupLeft },
       hooks: {
         pay: !!env.PAY_HOOK_SECRET,
         card: !!env.STRIPE_SECRET_KEY,
@@ -1334,12 +1433,14 @@ async function api(request, env, url, ctx) {
     if (String(body.payWave || '').trim() && !validSupportWa(body.payWave)) return json({ error: 'pay' }, 400);
     if (String(body.payOm || '').trim() && !validSupportWa(body.payOm)) return json({ error: 'pay' }, 400);
     const priceMonth = Math.max(0, Math.min(1000000, Math.round(Number(body.priceMonth) || 0)));
+    /* Seuil du second accord : un montant en francs, jamais négatif. */
+    const paySeuil = Math.max(0, Math.min(10000000, Math.round(Number(body.paySeuil) || 0)));
     const cfg = {
       ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom, supportWa, officialUrl,
-      payWave: digitsOf(body.payWave).slice(0, 15), payOm: digitsOf(body.payOm).slice(0, 15), priceMonth,
+      payWave: digitsOf(body.payWave).slice(0, 15), payOm: digitsOf(body.payOm).slice(0, 15), priceMonth, paySeuil,
     };
     await saveConfig(env, cfg);
-    await adminLog(env, admin.email, 'config', 'réglages', `prix ${priceMonth} FCFA · wave ${cfg.payWave || '—'} · om ${cfg.payOm || '—'}`);
+    await adminLog(env, admin.email, 'config', 'réglages', `prix ${priceMonth} FCFA · wave ${cfg.payWave || '—'} · om ${cfg.payOm || '—'}${paySeuil ? ' · 2 accords dès ' + paySeuil + ' FCFA' : ''}`);
     return json({ ok: true, config: cfg });
   }
 
@@ -1373,18 +1474,30 @@ async function api(request, env, url, ctx) {
   /* Paiements : les demandes Wave / Orange Money en attente, et les dernières
      lignes réglées. La validation est le seul geste qui ouvre un mois. */
   if (path === '/api/admin/payments' && request.method === 'GET') {
+    /* Les demandes sans transfert n'encombrent plus la liste. */
+    await expireStalePayments(env);
     const rows = await env.DB.prepare(
       `SELECT p.id, p.ref, p.months, p.amount, p.method, p.status, p.created, p.paid_at, p.actor, p.note, p.notified,
         u.email, u.phone, COALESCE(json_extract(s.json,'$.shop'), '') AS shop
        FROM payments p LEFT JOIN users u ON u.id = p.user_id LEFT JOIN state s ON s.user_id = p.user_id
        ORDER BY p.created DESC LIMIT 40`,
     ).all().catch(() => ({ results: [] }));
+    /* Premier accord déjà donné, en attente d'un second regard. */
+    const apprRows = await env.DB.prepare("SELECT key, value FROM app_config WHERE key LIKE 'payok:%'").all().catch(() => ({ results: [] }));
+    const approved = new Map();
+    for (const r of apprRows.results || []) {
+      try {
+        const v = JSON.parse(String(r.value));
+        if (v && v.by) approved.set(String(r.key).slice(6), String(v.by));
+      } catch { /* ligne illisible : ignorée */ }
+    }
     return json({
       payments: (rows.results || []).map((r) => ({
         id: String(r.id), ref: String(r.ref || ''), months: Number(r.months) || 1, amount: Number(r.amount) || 0,
         method: String(r.method || ''), status: String(r.status || ''), created: Number(r.created) || 0,
         paidAt: Number(r.paid_at) || 0, actor: r.actor || null, note: r.note || null, notified: Number(r.notified) || 0,
         email: r.email || null, phone: r.phone || null, shop: String(r.shop || ''),
+        approvedBy: approved.get(String(r.id)) || null,
       })),
     });
   }
@@ -1394,6 +1507,8 @@ async function api(request, env, url, ctx) {
     const id = String(body.id || '');
     const pay = await env.DB.prepare('SELECT * FROM payments WHERE id = ?').bind(id).first();
     if (!pay) return json({ error: 'notfound' }, 404);
+    /* Expirée : la boutique doit en créer une nouvelle, rien ne se rouvre. */
+    if (pay.status === 'expired') return json({ error: 'expired' }, 409);
     /* Déjà réglée ou refusée : le dire clairement, sans rien rouvrir. */
     if (pay.status !== 'pending') return json({ error: 'done' }, 409);
     const target = await env.DB.prepare('SELECT id, email, phone, premium_until FROM users WHERE id = ?').bind(pay.user_id).first();
@@ -1408,22 +1523,42 @@ async function api(request, env, url, ctx) {
       if (ref !== String(pay.ref).toUpperCase()) return json({ error: 'ref' }, 409);
       if (!(Number(pay.amount) > 0)) return json({ error: 'amount' }, 409);
       if (!body.force && Date.now() - (Number(pay.created) || 0) > 30 * 86400000) return json({ error: 'old' }, 409);
+      /* Deux regards au-delà d'un seuil : le premier administrateur enregistre
+         son accord, un autre doit confirmer. Un même compte ne signe jamais
+         les deux fois. */
+      const cfg = await readConfig(env);
+      const seuil = Math.max(0, Math.round(Number(cfg.paySeuil) || 0));
+      const apprKey = 'payok:' + id;
+      let firstBy = '';
+      if (seuil && Number(pay.amount) >= seuil) {
+        const row = await env.DB.prepare('SELECT value FROM app_config WHERE key = ?').bind(apprKey).first().catch(() => null);
+        try { firstBy = row ? String((JSON.parse(String(row.value)) || {}).by || '') : ''; } catch { firstBy = ''; }
+        if (!firstBy) {
+          await env.DB.prepare('INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+            .bind(apprKey, JSON.stringify({ by: admin.email, at: Date.now() })).run();
+          await adminLog(env, admin.email, 'payment-first', label, `${pay.amount} FCFA · ${pay.ref} · attend un second accord`);
+          return json({ ok: false, need: 'second', first: admin.email, seuil });
+        }
+        if (firstBy === admin.email) return json({ error: 'self' }, 409);
+      }
       const months = Math.max(1, Number(pay.months) || 1);
       /* Le statut est changé en premier et sous condition : deux clics
          simultanés n'ouvrent qu'un mois. */
       const claim = await env.DB.prepare("UPDATE payments SET status = 'paid', paid_at = ?, actor = ?, note = ? WHERE id = ? AND status = 'pending'")
         .bind(Date.now(), admin.email, note, id).run();
       if (!claim.meta || !claim.meta.changes) return json({ error: 'done' }, 409);
+      if (firstBy) await env.DB.prepare('DELETE FROM app_config WHERE key = ?').bind(apprKey).run().catch(() => {});
       await env.DB.prepare('UPDATE users SET premium_until = MAX(?, COALESCE(premium_until, 0)) + ?, premium_reminded = 0 WHERE id = ?')
         .bind(Date.now(), months * PREMIUM_MONTH_MS, target.id).run();
       const fresh = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(target.id).first();
       const until = Number(fresh && fresh.premium_until) || 0;
       const who = await env.DB.prepare("SELECT COALESCE(json_extract(s.json,'$.shop'), '') AS shop FROM state s WHERE s.user_id = ?").bind(target.id).first();
       const mailed = await sendReceiptMail(env, target.email, { shop: String((who && who.shop) || ''), months, amount: Number(pay.amount) || 0, ref: pay.ref, until });
-      await adminLog(env, admin.email, 'payment', label, `${months} mois · ${pay.amount} FCFA · ${pay.ref}${mailed ? ' · reçu envoyé' : ''}`);
+      await adminLog(env, admin.email, 'payment', label, `${months} mois · ${pay.amount} FCFA · ${pay.ref}${firstBy ? ' · 2 regards (' + firstBy + ')' : ''}${mailed ? ' · reçu envoyé' : ''}`);
       return json({ ok: true, premiumUntil: until, mail: mailed });
     }
     await env.DB.prepare("UPDATE payments SET status = 'rejected', actor = ?, note = ? WHERE id = ?").bind(admin.email, note, id).run();
+    await env.DB.prepare('DELETE FROM app_config WHERE key = ?').bind('payok:' + id).run().catch(() => {});
     await adminLog(env, admin.email, 'payment-reject', label, `${pay.ref}${note ? ' · ' + note : ''}`);
     return json({ ok: true });
   }
@@ -1467,6 +1602,9 @@ async function api(request, env, url, ctx) {
      guillemets sont posés dans csvOf pour qu'Excel ne casse rien. */
   if (path === '/api/admin/export' && request.method === 'GET') {
     const kind = url.searchParams.get('type') === 'log' ? 'log' : 'payments';
+    /* Un export sort des données personnelles du serveur : il laisse une
+       trace, écrite avant la lecture pour figurer dans le fichier du journal. */
+    await adminLog(env, admin.email, 'export', kind === 'log' ? 'journal' : 'paiements', 'CSV téléchargé');
     let rows;
     let name;
     if (kind === 'log') {
@@ -1504,6 +1642,7 @@ async function api(request, env, url, ctx) {
     const cutoff = Date.now() - 400 * 86400000;
     const a = await env.DB.prepare("DELETE FROM payments WHERE created < ? AND status <> 'pending'").bind(cutoff).run();
     const b = await env.DB.prepare('DELETE FROM admin_log WHERE at < ?').bind(cutoff).run();
+    await env.DB.prepare("DELETE FROM app_config WHERE key LIKE 'payok:%' AND substr(key, 7) NOT IN (SELECT id FROM payments WHERE status = 'pending')").run().catch(() => {});
     const pays = Number((a.meta && a.meta.changes) || 0);
     const lines = Number((b.meta && b.meta.changes) || 0);
     await adminLog(env, admin.email, 'purge', null, `${pays} paiement(s) · ${lines} ligne(s) de journal`);
@@ -1605,6 +1744,8 @@ async function api(request, env, url, ctx) {
   /* Demande en attente côté commerçant : il voit sa référence et peut
      l'annuler s'il s'est trompé de moyen ou de durée. */
   if (path === '/api/premium/request' && request.method === 'GET') {
+    /* Une demande trop vieille disparaît : plus de carte bloquante. */
+    await expireStalePayments(env);
     const row = await env.DB.prepare(
       "SELECT id, ref, months, amount, method, created FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created DESC LIMIT 1",
     ).bind(user.id).first();
