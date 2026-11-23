@@ -6,72 +6,131 @@
 <meta name="robots" content="noindex,nofollow">
 <title>Administration — Assistant Commercial</title>
 <style>
-  /* Tableau de bord interne : lu sur téléphone comme sur ordinateur. Gros
-     chiffres, une action par bouton, rien à interpréter. */
+  /* Tableau de bord interne : lisible sur téléphone comme sur ordinateur.
+     Une section par onglet, de gros boutons, aucune décoration inutile. */
   * { box-sizing: border-box; }
-  /* « hidden » doit gagner contre les display des boutons de l'en-tête. */
   [hidden] { display: none !important; }
-  body { margin: 0; background: #f2f5ef; color: #14261b; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Tahoma, sans-serif; font-size: 16px; line-height: 1.5; }
-  header { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; background: #14532d; color: #fff; }
-  header b { font-size: 19px; flex: 1 1 auto; }
-  header a, header button { min-height: 44px; display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 12px; border: 2px solid #fff; background: transparent; color: #fff; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
-  main { max-width: 1100px; margin: 0 auto; padding: 16px 12px 48px; }
-  .msg { background: #fff; border: 2px solid #d9e5db; border-radius: 14px; padding: 18px; margin: 12px 0; }
-  .msg h2 { margin: 0 0 6px; font-size: 20px; color: #14532d; }
-  .msg a.btn, .msg button.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; margin-top: 12px; padding: 10px 18px; border-radius: 12px; border: 2px solid #14532d; background: #14532d; color: #fff; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; margin: 4px 0 18px; }
-  .card { background: #fff; border: 1px solid #d9e5db; border-radius: 14px; padding: 14px; }
-  .card b { display: block; font-size: 30px; line-height: 1.1; color: #14532d; }
-  .card span { display: block; font-size: 15px; color: #4a5a4f; margin-top: 4px; }
-  section { background: #fff; border: 1px solid #d9e5db; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-  section h2 { margin: 0 0 10px; font-size: 18px; color: #14532d; }
-  .bar { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin: 8px 0; }
-  .bar .lab { font-size: 15px; }
-  .bar .track { grid-column: 1 / -1; height: 10px; border-radius: 6px; background: #e5ece6; overflow: hidden; }
-  .bar .fill { height: 100%; background: #14532d; border-radius: 6px; }
-  .bar .n { font-weight: 800; font-size: 16px; }
-  .shop { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid #e6ece7; }
-  .shop:first-of-type { border-top: 0; }
-  .shop .t { font-weight: 800; font-size: 17px; }
-  .shop .s { font-size: 14px; color: #4a5a4f; }
-  .shop .acts { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
-  .btn { min-height: 44px; padding: 8px 14px; border-radius: 12px; border: 2px solid #14532d; background: #fff; color: #14532d; font: inherit; font-weight: 700; cursor: pointer; }
-  .btn:disabled { opacity: .4; cursor: not-allowed; }
-  .btn.solid { background: #14532d; color: #fff; }
-  .tag { display: inline-block; padding: 3px 10px; border-radius: 9px; font-size: 14px; font-weight: 700; }
-  .tag.on { background: #e5f5e9; color: #14532d; border: 1px solid #14532d; }
-  .tag.off { background: #f1f1ee; color: #4a5a4f; border: 1px solid #c9d2cb; }
-  label { display: block; font-weight: 700; margin: 12px 0 4px; font-size: 15px; }
-  input[type="text"], input[type="email"], input[type="password"] { width: 100%; min-height: 48px; padding: 10px 12px; border: 2px solid #cfdccf; border-radius: 12px; font: inherit; background: #fff; }
-  .check { display: flex; gap: 12px; align-items: center; min-height: 44px; margin-top: 10px; font-weight: 700; }
-  .check input { width: 24px; height: 24px; }
-  .hint { font-size: 14px; color: #4a5a4f; margin: 6px 0 0; }
-  .ok { color: #14532d; font-weight: 700; }
-  .err { color: #b00020; font-weight: 700; }
-  /* Sur téléphone, une boutique tient sur une colonne : le nom et les chiffres
-     respirent, le badge descend d'une ligne, les boutons restent gros. */
-  @media (max-width: 719px) {
-    .shop { grid-template-columns: 1fr; }
-    .shop .acts { grid-column: 1 / -1; }
+  :root {
+    --vert: #14532d;
+    --vert-clair: #1d6b3b;
+    --ink: #16241b;
+    --muted: #5d6b62;
+    --line: #e3e9e4;
+    --bg: #f4f6f3;
+    --card: #fff;
+    --okbg: #e8f5ec;
+    --warnbg: #fff5e1;
+    --warn: #7a4a00;
+    --err: #b00020;
   }
-  @media (min-width: 720px) {
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", Roboto, Tahoma, sans-serif; font-size: 16px; line-height: 1.5; }
+  header { position: sticky; top: 0; z-index: 5; background: #fff; border-bottom: 1px solid var(--line); box-shadow: 0 1px 2px rgba(16, 40, 24, .04); }
+  .top { display: flex; align-items: center; gap: 12px; max-width: 1040px; margin: 0 auto; padding: 10px 14px; }
+  .brand { min-width: 0; flex: 1 1 auto; }
+  .brand b { display: block; font-size: 18px; line-height: 1.2; color: var(--vert); }
+  .brand span { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acts { display: flex; gap: 8px; flex: 0 0 auto; }
+  .acts a, .acts button { min-height: 44px; display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); font: inherit; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; }
+  .acts a:hover, .acts button:hover { border-color: var(--vert); color: var(--vert); }
+  #tabs { display: flex; gap: 8px; max-width: 1040px; margin: 0 auto; padding: 12px 14px 0; }
+  #tabs button { flex: 0 0 auto; min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; white-space: nowrap; }
+  #tabs button:hover { color: var(--vert); border-color: #bcd4c3; }
+  #tabs button[aria-current="page"] { background: var(--vert); border-color: var(--vert); color: #fff; }
+  #tabs .n { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 999px; background: #eef2ee; color: var(--muted); font-size: 13px; line-height: 22px; }
+  #tabs button[aria-current="page"] .n { background: rgba(255, 255, 255, .22); color: #fff; }
+  main { max-width: 1040px; margin: 0 auto; padding: 18px 14px 56px; }
+  h2 { margin: 0 0 4px; font-size: 18px; color: var(--vert); }
+  h3 { margin: 0 0 8px; font-size: 16px; color: var(--ink); }
+  .lead { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+  .panel > .card + .card { margin-top: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .kpi b { display: block; font-size: 28px; line-height: 1.1; color: var(--vert); font-variant-numeric: tabular-nums; }
+  .kpi span { display: block; font-size: 14px; color: var(--muted); margin-top: 4px; }
+  .bar { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; padding: 7px 0; }
+  .bar + .bar { border-top: 1px solid var(--line); }
+  .bar .lab { font-size: 14px; }
+  .bar .n { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .bar .track { display: block; grid-column: 1 / -1; height: 7px; border-radius: 999px; background: #edf1ee; overflow: hidden; }
+  .bar .fill { display: block; height: 100%; background: var(--vert); border-radius: 999px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .tools input[type="search"] { flex: 1 1 220px; min-width: 0; }
+  .chip { min-height: 44px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--muted); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--vert); border-color: var(--vert); color: #fff; }
+  .shop { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
+  .shop:first-child { border-top: 0; }
+  .shop .t { font-weight: 700; font-size: 16px; }
+  .shop .s { font-size: 14px; color: var(--muted); }
+  .shop .acts2 { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
+  .btn { min-height: 44px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--vert); background: #fff; color: var(--vert); font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; }
+  .btn:hover { background: var(--okbg); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.solid { background: var(--vert); color: #fff; }
+  .btn.solid:hover { background: var(--vert-clair); }
+  .btn.small { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+  .badge.on { background: var(--okbg); color: var(--vert); }
+  .badge.off { background: #f0f2ef; color: var(--muted); }
+  .badge.warn { background: var(--warnbg); color: var(--warn); }
+  label { display: block; font-weight: 600; margin: 14px 0 5px; font-size: 14px; }
+  input[type="text"], input[type="email"], input[type="password"], input[type="search"] { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #cfdccf; border-radius: 10px; font: inherit; background: #fff; color: var(--ink); }
+  input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid #8fd0a6; outline-offset: 1px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .check { display: flex; gap: 12px; align-items: center; min-height: 44px; margin-top: 12px; font-weight: 600; }
+  .check input { width: 24px; height: 24px; }
+  .hint { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+  .ok { color: var(--vert); font-weight: 700; }
+  .err { color: var(--err); font-weight: 700; }
+  .msg { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 0 0 14px; }
+  .code { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  .code:first-child { border-top: 0; }
+  .code b { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 19px; letter-spacing: 2px; }
+  .code.expired b { text-decoration: line-through; opacity: .5; }
+  .hist { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+  .hist:first-child { border-top: 0; }
+  .hist .who { text-align: right; }
+  .empty { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: #12351f; color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 20; }
+  #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+  @media (max-width: 600px) {
+    #tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    #tabs button { width: 100%; }
+    .cards { grid-template-columns: 1fr 1fr; }
+    main { padding-top: 14px; }
+    .row2 { grid-template-columns: 1fr; }
+    .shop { grid-template-columns: 1fr; }
+    .shop .acts2 { grid-column: 1 / -1; }
+    .shop .btn { flex: 1 1 auto; }
+    .brand span { display: none; }
+  }
+  @media (min-width: 601px) {
     .shop { grid-template-columns: 1fr auto auto; }
-    .shop .acts { grid-column: auto; }
+    .shop .acts2 { grid-column: auto; }
   }
 </style>
 </head>
 <body>
 <header>
-  <b>Administration</b>
-  <button id="reload" type="button">Rafraîchir</button>
-  <button id="adOut" type="button" hidden>Quitter</button>
-  <a href="/">Application</a>
+  <div class="top">
+    <div class="brand"><b>Administration</b><span>Assistant Commercial · données des boutiques</span></div>
+    <div class="acts">
+      <a href="/">Application</a>
+      <button id="adOut" type="button" hidden>Quitter</button>
+    </div>
+  </div>
 </header>
+<nav id="tabs" aria-label="Sections de l'administration">
+  <button type="button" data-tab="overview" aria-current="page">Vue d'ensemble</button>
+  <button type="button" data-tab="shops">Boutiques <span class="n" id="tabShops">0</span></button>
+  <button type="button" data-tab="premium">Premium <span class="n" id="tabPremium">0</span></button>
+  <button type="button" data-tab="settings">Réglages</button>
+</nav>
 <main>
   <div id="state" class="msg"><h2>Chargement…</h2></div>
   <form id="login" class="msg" hidden>
     <h2>Connexion administrateur</h2>
-    <p class="hint">Entrez un e-mail autorisé et le code d'administration.</p>
+    <p class="lead">Entrez un e-mail autorisé et le code d'administration.</p>
     <label for="adEmail">Adresse e-mail</label>
     <input id="adEmail" type="email" autocomplete="username" inputmode="email" required>
     <label for="adCode">Code d'administration</label>
@@ -79,69 +138,140 @@
     <button class="btn solid" id="adGo" type="submit">Entrer</button>
     <p class="hint err" id="adMsg"></p>
   </form>
+
   <div id="dash" hidden>
-    <div class="cards" id="cards"></div>
-    <section>
-      <h2>Nouvelles boutiques (14 jours)</h2>
-      <div id="signups"></div>
+    <section id="p-overview" class="panel" aria-labelledby="t-overview">
+      <h2 id="t-overview">Vue d'ensemble</h2>
+      <p class="lead">Ce que font les boutiques, en un coup d'œil.</p>
+      <div class="cards" id="cards"></div>
+      <div class="card">
+        <h3>Nouvelles boutiques (14 jours)</h3>
+        <div id="signups"></div>
+      </div>
+      <div class="card">
+        <h3>Pays des boutiques</h3>
+        <div id="countries"><p class="empty">—</p></div>
+      </div>
+      <div class="card">
+        <h3>D'où viennent les installations</h3>
+        <div id="channels"><p class="empty">—</p></div>
+      </div>
     </section>
-    <section>
-      <h2>Pays des boutiques</h2>
-      <div id="countries"><p class="hint">—</p></div>
+
+    <section id="p-shops" class="panel" aria-labelledby="t-shops" hidden>
+      <h2 id="t-shops">Boutiques</h2>
+      <p class="lead">Cherchez une boutique, puis offrez un mois de Premium ou retirez-le.</p>
+      <div class="card">
+        <div class="tools">
+          <label for="shopSearch" class="sr" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Rechercher une boutique</label>
+          <input id="shopSearch" type="search" placeholder="Nom, e-mail ou téléphone…" autocomplete="off">
+          <button class="chip" type="button" data-filter="all" aria-pressed="true">Toutes</button>
+          <button class="chip" type="button" data-filter="premium" aria-pressed="false">Premium</button>
+          <button class="chip" type="button" data-filter="free" aria-pressed="false">Gratuites</button>
+        </div>
+        <p class="hint" id="shopsCount"></p>
+        <div id="shops"><p class="empty">—</p></div>
+        <div style="margin-top:12px"><button class="btn" id="shopsMore" type="button" hidden>Voir plus</button></div>
+        <p class="hint" id="premMsg"></p>
+      </div>
     </section>
-    <section>
-      <h2>D'où viennent les installations</h2>
-      <div id="channels"><p class="hint">—</p></div>
+
+    <section id="p-premium" class="panel" aria-labelledby="t-premium" hidden>
+      <h2 id="t-premium">Premium</h2>
+      <p class="lead">Un code ouvre le nombre de mois choisi, une seule fois, à la boutique qui le saisit dans l'application.</p>
+      <div class="card">
+        <h3>Créer un code</h3>
+        <div class="row2">
+          <div>
+            <label for="codeMonths">Mois offerts</label>
+            <input id="codeMonths" type="text" inputmode="numeric" value="1">
+          </div>
+          <div>
+            <label for="codeDays">Valable (jours)</label>
+            <input id="codeDays" type="text" inputmode="numeric" value="30">
+          </div>
+        </div>
+        <button class="btn solid" id="codeNew" type="button" style="margin-top:14px">Créer un code</button>
+        <p class="hint" id="codeMsg"></p>
+      </div>
+      <div class="card">
+        <h3>Codes disponibles <span class="badge off" id="codesCount">0</span></h3>
+        <p class="hint" style="margin-top:0">Touchez un code pour le copier.</p>
+        <div id="codes"><p class="empty">—</p></div>
+      </div>
+      <div class="card">
+        <h3>Qui a activé</h3>
+        <div id="codeHistory"><p class="empty">—</p></div>
+        <p class="hint" id="usedMsg"></p>
+      </div>
     </section>
-    <section>
-      <h2>Boutiques</h2>
-      <p class="hint">Les 100 plus récentes. « +1 mois » offre un mois de Premium, « Retirer » le retire.</p>
-      <div id="shops"><p class="hint">—</p></div>
-      <p class="hint" id="premMsg"></p>
-    </section>
-    <section>
-      <h2>Codes d'activation Premium</h2>
-      <p class="hint">Un code ouvre le nombre de mois choisi, une seule fois, à la boutique qui le saisit dans Réglages → Premium.</p>
-      <label for="codeMonths">Mois offerts</label>
-      <input id="codeMonths" type="text" inputmode="numeric" value="1">
-      <label for="codeDays">Valable (jours)</label>
-      <input id="codeDays" type="text" inputmode="numeric" value="30">
-      <button class="btn solid" id="codeNew" type="button">Créer un code</button>
-      <p class="hint" id="codeMsg"></p>
-      <div id="codes"><p class="hint">—</p></div>
-      <h2 style="margin-top:18px">Qui a activé</h2>
-      <div id="codeHistory"><p class="hint">—</p></div>
-    </section>
-    <section>
-      <h2>Publicité</h2>
-      <p class="hint">Une seule configuration pour toute l'application. Sans identifiant AdSense valide, aucune annonce ne s'affiche, même si la case est cochée.</p>
-      <label class="check"><input type="checkbox" id="adsOn"> Afficher la publicité</label>
-      <label for="adsClient">Identifiant éditeur AdSense</label>
-      <input id="adsClient" type="text" inputmode="text" placeholder="ca-pub-0000000000000000" autocomplete="off">
-      <label for="adsTop">Emplacement du haut</label>
-      <input id="adsTop" type="text" inputmode="numeric" placeholder="1234567890" autocomplete="off">
-      <label for="adsBottom">Emplacement du bas</label>
-      <input id="adsBottom" type="text" inputmode="numeric" placeholder="0987654321" autocomplete="off">
-      <h2 style="margin-top:18px">Support WhatsApp</h2>
-      <p class="hint">Le bouton « Support WhatsApp » des comptes Premium et la demande d'activation Premium arrivent sur ce numéro. Laissez vide pour masquer le bouton.</p>
-      <label for="supportWa">Numéro WhatsApp du support (indicatif compris)</label>
-      <input id="supportWa" type="text" inputmode="tel" placeholder="+225 07 00 00 00 00" autocomplete="off">
-      <button class="btn solid" id="adsSave" type="button">Enregistrer</button>
-      <p class="hint" id="adsMsg"></p>
+
+    <section id="p-settings" class="panel" aria-labelledby="t-settings" hidden>
+      <h2 id="t-settings">Réglages</h2>
+      <p class="lead">Une seule configuration pour toute l'application.</p>
+      <div class="card">
+        <h3>Support WhatsApp</h3>
+        <p class="hint" style="margin-top:0">Le bouton « Support WhatsApp » des comptes Premium et la demande de code y arrivent. Laissez vide pour le masquer.</p>
+        <label for="supportWa">Numéro WhatsApp du support (indicatif compris)</label>
+        <input id="supportWa" type="text" inputmode="tel" placeholder="+225 07 00 00 00 00" autocomplete="off">
+      </div>
+      <div class="card">
+        <h3>Publicité</h3>
+        <p class="hint" style="margin-top:0">Sans identifiant AdSense valide, aucune annonce ne s'affiche, même si la case est cochée.</p>
+        <label class="check"><input type="checkbox" id="adsOn"> Afficher la publicité</label>
+        <label for="adsClient">Identifiant éditeur AdSense</label>
+        <input id="adsClient" type="text" inputmode="text" placeholder="ca-pub-0000000000000000" autocomplete="off">
+        <div class="row2">
+          <div>
+            <label for="adsTop">Emplacement du haut</label>
+            <input id="adsTop" type="text" inputmode="numeric" placeholder="1234567890" autocomplete="off">
+          </div>
+          <div>
+            <label for="adsBottom">Emplacement du bas</label>
+            <input id="adsBottom" type="text" inputmode="numeric" placeholder="0987654321" autocomplete="off">
+          </div>
+        </div>
+        <button class="btn solid" id="adsSave" type="button" style="margin-top:16px">Enregistrer les réglages</button>
+        <p class="hint" id="adsMsg"></p>
+      </div>
     </section>
   </div>
 </main>
+<div id="toast" role="status" aria-live="polite"></div>
 <script>
   const stateBox = document.getElementById('state');
   const dash = document.getElementById('dash');
   const loginBox = document.getElementById('login');
   let data = null;
+  const view = { tab: 'overview', q: '', filter: 'all', shown: 20 };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const day = (ms) => (ms ? new Date(Number(ms)).toLocaleDateString('fr-FR') : '—');
   const num = (n) => Number(n || 0).toLocaleString('fr-FR');
   const premiumOn = (u) => Number(u) > Date.now();
-  const premiumLabel = (u) => (premiumOn(u) ? 'Premium jusqu’au ' + day(u) : 'Gratuit');
+  const premiumLabel = (u) => (premiumOn(u) ? 'Premium · ' + day(u) : 'Gratuit');
+
+  let toastTimer = null;
+  function toast(text) {
+    const t = document.getElementById('toast');
+    t.textContent = text;
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('on'), 2200);
+  }
+
+  function showTab(tab) {
+    view.tab = tab;
+    document.querySelectorAll('#tabs button').forEach((b) => {
+      if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('.panel').forEach((p) => { p.hidden = p.id !== 'p-' + tab; });
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-tab]');
+    if (b) showTab(b.dataset.tab);
+  });
 
   function message(html, action) {
     dash.hidden = true;
@@ -158,8 +288,6 @@
     }
   }
 
-  /* La page d'administration a sa propre connexion : pas besoin d'un compte
-     dans l'application, seulement d'un e-mail autorisé et du code. */
   function showLogin(text) {
     dash.hidden = true;
     stateBox.hidden = true;
@@ -182,32 +310,32 @@
     const c = data.counts || {};
     document.getElementById('cards').innerHTML = [
       [c.owners, 'boutiques'],
-      [c.staff, 'vendeurs'],
-      [c.active7, 'actives cette semaine'],
       [c.premium, 'Premium'],
-      [c.newToday, 'inscrites aujourd’hui'],
+      [c.new7, 'nouvelles en 7 jours'],
+      [c.active7, 'actives cette semaine'],
       [c.sales, 'ventes enregistrées'],
       [c.docs, 'devis et factures'],
-      [c.new7, 'nouvelles en 7 jours'],
-    ].map(([v, l]) => `<div class="card"><b>${num(v)}</b><span>${l}</span></div>`).join('');
+    ].map(([v, l]) => `<div class="kpi"><b>${num(v)}</b><span>${l}</span></div>`).join('');
+    document.getElementById('tabShops').textContent = num(c.owners);
+    document.getElementById('tabPremium').textContent = num(c.premium);
 
-    const days = data.signups || [];
+    const days = (data.signups || []).filter((d) => Number(d.n) > 0);
     const maxDay = Math.max(1, ...days.map((d) => d.n));
     document.getElementById('signups').innerHTML = days.length
       ? days.map((d) => bar(d.day.slice(8) + '/' + d.day.slice(5, 7), d.n, maxDay)).join('')
-      : '<p class="hint">Aucune inscription récente.</p>';
+      : '<p class="empty">Aucune inscription récente.</p>';
 
     const countries = data.countries || [];
     const maxC = Math.max(1, ...countries.map((x) => x.n));
     document.getElementById('countries').innerHTML = countries.length
       ? countries.map((x) => bar(x.country || '—', x.n, maxC)).join('')
-      : '<p class="hint">Aucun pays renseigné.</p>';
+      : '<p class="empty">Aucun pays renseigné.</p>';
 
     const channels = data.channels || [];
     const maxCh = Math.max(1, ...channels.map((x) => x.n));
     document.getElementById('channels').innerHTML = channels.length
       ? channels.map((x) => bar(x.src || 'direct', x.n, maxCh)).join('')
-      : '<p class="hint">Aucune installation comptée.</p>';
+      : '<p class="empty">Aucune installation comptée.</p>';
 
     renderShops();
     const cfg = data.config || {};
@@ -218,45 +346,148 @@
     document.getElementById('supportWa').value = cfg.supportWa || '';
   }
 
+  function filteredShops() {
+    const q = view.q.trim().toLowerCase();
+    return (data.shops || []).filter((s) => {
+      if (view.filter === 'premium' && !premiumOn(s.premiumUntil)) return false;
+      if (view.filter === 'free' && premiumOn(s.premiumUntil)) return false;
+      if (!q) return true;
+      return [s.shop, s.email, s.phone, s.name, s.country, s.src, s.id].join(' ').toLowerCase().includes(q);
+    });
+  }
+
   function renderShops() {
-    const shops = data.shops || [];
+    const list = filteredShops();
     const box = document.getElementById('shops');
-    if (!shops.length) { box.innerHTML = '<p class="hint">Aucune boutique.</p>'; return; }
-    box.innerHTML = shops.map((s) => `<div class="shop">
+    const count = document.getElementById('shopsCount');
+    count.textContent = list.length === 1 ? '1 boutique' : `${num(list.length)} boutiques`;
+    if (!list.length) {
+      box.innerHTML = `<p class="empty">${(data.shops || []).length ? 'Aucune boutique ne correspond à cette recherche.' : 'Aucune boutique.'}</p>`;
+      document.getElementById('shopsMore').hidden = true;
+      return;
+    }
+    box.innerHTML = list.slice(0, view.shown).map((s) => `<div class="shop">
       <div>
         <div class="t">${esc(s.shop || '(sans nom)')}</div>
         <div class="s">${esc(s.email || s.phone || s.id)} · ${esc(s.country || 'pays ?')} · ${num(s.sales)} vente${Number(s.sales) === 1 ? '' : 's'} · ${num(s.docs)} doc${Number(s.docs) === 1 ? '' : 's'}</div>
         <div class="s">Inscrite le ${day(s.created)} · ${Number(s.updated) > 1000000000000 ? 'vue le ' + day(s.updated) : 'jamais ouverte'}${s.src ? ' · ' + esc(s.src) : ''}</div>
       </div>
-      <div><span class="tag ${premiumOn(s.premiumUntil) ? 'on' : 'off'}">${premiumLabel(s.premiumUntil)}</span></div>
-      <div class="acts">
-        <button class="btn" type="button" data-id="${esc(s.id)}" data-months="1">+1 mois</button>
-        <button class="btn" type="button" data-id="${esc(s.id)}" data-months="0" ${premiumOn(s.premiumUntil) ? '' : 'disabled'}>Retirer</button>
+      <div><span class="badge ${premiumOn(s.premiumUntil) ? 'on' : 'off'}">${premiumLabel(s.premiumUntil)}</span></div>
+      <div class="acts2">
+        <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="1">+1 mois</button>
+        <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="0" ${premiumOn(s.premiumUntil) ? '' : 'disabled'}>Retirer</button>
       </div>
     </div>`).join('');
-    box.onclick = async (e) => {
-      const b = e.target.closest('button[data-id]');
-      if (!b) return;
-      const msg = document.getElementById('premMsg');
-      b.disabled = true;
-      msg.className = 'hint';
-      msg.textContent = 'Enregistrement…';
-      try {
-        const r = await fetch('/api/admin/premium', {
-          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ id: b.dataset.id, months: Number(b.dataset.months) }),
-        });
-        if (!r.ok) throw new Error();
-        msg.className = 'ok';
-        msg.textContent = Number(b.dataset.months) ? 'Premium offert pour un mois.' : 'Premium retiré.';
-        await load(true);
-      } catch {
-        b.disabled = false;
-        msg.className = 'err';
-        msg.textContent = 'Non enregistré. Réessayez.';
-      }
-    };
+    const more = document.getElementById('shopsMore');
+    more.hidden = list.length <= view.shown;
   }
+
+  document.getElementById('shops').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-id]');
+    if (!b) return;
+    const msg = document.getElementById('premMsg');
+    b.disabled = true;
+    msg.className = 'hint';
+    msg.textContent = 'Enregistrement…';
+    try {
+      const r = await fetch('/api/admin/premium', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: b.dataset.id, months: Number(b.dataset.months) }),
+      });
+      if (!r.ok) throw new Error();
+      toast(Number(b.dataset.months) ? 'Un mois de Premium offert.' : 'Premium retiré.');
+      msg.textContent = '';
+      await load(true);
+    } catch {
+      b.disabled = false;
+      msg.className = 'hint err';
+      msg.textContent = 'Non enregistré. Réessayez.';
+    }
+  });
+
+  document.getElementById('shopSearch').addEventListener('input', (e) => {
+    view.q = e.target.value;
+    view.shown = 20;
+    renderShops();
+  });
+  document.querySelectorAll('.chip[data-filter]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      view.filter = chip.dataset.filter;
+      document.querySelectorAll('.chip[data-filter]').forEach((x) => x.setAttribute('aria-pressed', x === chip ? 'true' : 'false'));
+      view.shown = 20;
+      renderShops();
+    });
+  });
+  document.getElementById('shopsMore').addEventListener('click', () => {
+    view.shown += 20;
+    renderShops();
+  });
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Code ' + text + ' copié.');
+    } catch {
+      toast('Copie impossible : notez le code.');
+    }
+  }
+
+  async function loadCodes() {
+    const box = document.getElementById('codes');
+    try {
+      const r = await fetch('/api/admin/codes', { cache: 'no-store', credentials: 'same-origin' });
+      if (!r.ok) { box.innerHTML = '<p class="empty">—</p>'; return; }
+      const d = await r.json();
+      const codes = d.codes || [];
+      const now = Date.now();
+      document.getElementById('codesCount').textContent = num(codes.length);
+      box.innerHTML = codes.length
+        ? codes.map((c) => {
+          const exp = Number(c.expires) || 0;
+          const expired = exp && exp <= now;
+          const when = exp ? `${expired ? 'expiré le' : 'valable jusqu’au'} ${day(exp)}` : 'sans date de fin';
+          return `<div class="code${expired ? ' expired' : ''}"><div><b>${esc(c.code)}</b><div class="hint" style="margin:0">${num(c.months)} mois · ${when}</div></div>
+            <button class="btn small" type="button" data-copy="${esc(c.code)}" ${expired ? 'disabled' : ''}>${expired ? 'Expiré' : 'Copier'}</button></div>`;
+        }).join('')
+        : '<p class="empty">Aucun code disponible. Créez-en un après un paiement.</p>';
+      box.querySelectorAll('button[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy); });
+
+      const h = d.history || [];
+      const hist = document.getElementById('codeHistory');
+      hist.innerHTML = h.length
+        ? h.map((x) => `<div class="hist"><div><b style="letter-spacing:1px">${esc(x.code)}</b><div class="hint" style="margin:0">${num(x.months)} mois</div></div>
+          <div class="hint who" style="margin:0">${esc(x.shop || x.name || x.email || x.phone || '—')}${x.email && (x.shop || x.name) ? '<br>' + esc(x.email) : ''}<br>${day(x.usedAt)}</div></div>`).join('')
+        : '<p class="empty">Aucune activation pour le moment.</p>';
+      document.getElementById('usedMsg').textContent = `${num(d.used || 0)} code${Number(d.used) === 1 ? '' : 's'} déjà utilisé${Number(d.used) === 1 ? '' : 's'}.`;
+    } catch {
+      box.innerHTML = '<p class="empty">—</p>';
+    }
+  }
+
+  document.getElementById('codeNew').onclick = async () => {
+    const msg = document.getElementById('codeMsg');
+    const btn = document.getElementById('codeNew');
+    const days = Math.max(1, Math.min(365, Math.round(Number(document.getElementById('codeDays').value) || 30)));
+    msg.className = 'hint';
+    msg.textContent = 'Création…';
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/admin/codes', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ months: document.getElementById('codeMonths').value, days }),
+      });
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      msg.className = 'hint ok';
+      msg.textContent = `Code ${d.code} créé pour ${num(d.months)} mois, valable ${days} jours.`;
+      await copyText(d.code);
+      await loadCodes();
+    } catch {
+      msg.className = 'hint err';
+      msg.textContent = 'Non créé. Réessayez.';
+    }
+    btn.disabled = false;
+  };
 
   async function load(keep) {
     if (!keep) message('<h2>Chargement…</h2>');
@@ -264,18 +495,18 @@
     try {
       r = await fetch('/api/admin/stats', { cache: 'no-store', credentials: 'same-origin' });
     } catch {
-      message('<h2>Pas de connexion</h2><p>Vérifiez le réseau, puis réessayez.</p>', { label: 'Réessayer', run: () => load() });
+      message('<h2>Pas de connexion</h2><p class="hint">Vérifiez le réseau, puis réessayez.</p>', { label: 'Réessayer', run: () => load() });
       return;
     }
     if (r.status === 401) { showLogin(''); return; }
     if (r.status === 403) { showLogin('Ce compte n’est pas autorisé à administrer.'); return; }
     if (r.status === 503) {
-      message('<h2>Administration non configurée</h2><p>Ajoutez les secrets <b>ADMIN_EMAILS</b> (les e-mails autorisés) et <b>ADMIN_CODE</b> (le code commun) dans Sites → Secrets, puis rechargez cette page.</p>',
+      message('<h2>Administration non configurée</h2><p class="hint">Ajoutez les secrets <b>ADMIN_EMAILS</b> (les e-mails autorisés) et <b>ADMIN_CODE</b> (le code commun) dans Sites → Secrets, puis rechargez cette page.</p>',
         { label: 'Réessayer', run: () => load() });
       return;
     }
     if (!r.ok) {
-      message('<h2>Erreur du serveur</h2><p>Rien n’a été modifié. Réessayez dans un instant.</p>', { label: 'Réessayer', run: () => load() });
+      message('<h2>Erreur du serveur</h2><p class="hint">Rien n’a été modifié. Réessayez dans un instant.</p>', { label: 'Réessayer', run: () => load() });
       return;
     }
     data = await r.json();
@@ -287,59 +518,7 @@
     loadCodes();
   }
 
-  async function loadCodes() {
-    const box = document.getElementById('codes');
-    try {
-      const r = await fetch('/api/admin/codes', { cache: 'no-store', credentials: 'same-origin' });
-      if (!r.ok) { box.innerHTML = '<p class="hint">—</p>'; return; }
-      const d = await r.json();
-      const codes = d.codes || [];
-      const now = Date.now();
-      box.innerHTML = (codes.length
-        ? codes.map((c) => {
-          const exp = Number(c.expires) || 0;
-          const expired = exp && exp <= now;
-          const when = exp ? `${expired ? 'expiré le' : 'valable jusqu’au'} ${day(exp)}` : 'sans date de fin';
-          return `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #e6ece7"><b style="font-size:20px;letter-spacing:2px;${expired ? 'text-decoration:line-through;opacity:.5' : ''}">${esc(c.code)}</b><span class="hint">${num(c.months)} mois · ${when}</span></div>`;
-        }).join('')
-        : '<p class="hint">Aucun code disponible. Créez-en un après un paiement.</p>')
-        + `<p class="hint">${num(d.used || 0)} code${Number(d.used) === 1 ? '' : 's'} déjà utilisé${Number(d.used) === 1 ? '' : 's'}.</p>`;
-      const hist = document.getElementById('codeHistory');
-      const h = d.history || [];
-      hist.innerHTML = h.length
-        ? h.map((x) => `<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid #e6ece7"><div><b style="letter-spacing:1px">${esc(x.code)}</b> <span class="hint">${num(x.months)} mois</span></div><div class="hint" style="text-align:right">${esc(x.shop || x.name || x.email || x.phone || '—')}${x.email && (x.shop || x.name) ? '<br>' + esc(x.email) : ''}<br>${day(x.usedAt)}</div></div>`).join('')
-        : '<p class="hint">Aucune activation pour le moment.</p>';
-    } catch { box.innerHTML = '<p class="hint">—</p>'; }
-  }
-
-  document.getElementById('codeNew').onclick = async () => {
-    const msg = document.getElementById('codeMsg');
-    const btn = document.getElementById('codeNew');
-    msg.className = 'hint';
-    msg.textContent = 'Création…';
-    btn.disabled = true;
-    try {
-      const r = await fetch('/api/admin/codes', {
-        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          months: document.getElementById('codeMonths').value,
-          days: document.getElementById('codeDays').value,
-        }),
-      });
-      if (!r.ok) throw new Error();
-      const d = await r.json();
-      msg.className = 'ok';
-      const days = Math.max(1, Math.min(365, Math.round(Number(document.getElementById('codeDays').value) || 30)));
-      msg.textContent = `Code ${d.code} créé pour ${num(d.months)} mois, valable ${days} jours.`;
-      await loadCodes();
-    } catch {
-      msg.className = 'err';
-      msg.textContent = 'Non créé. Réessayez.';
-    }
-    btn.disabled = false;
-  };
-
-  document.getElementById('reload').onclick = () => load();
+  document.getElementById('reload')?.addEventListener('click', () => load());
   loginBox.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = document.getElementById('adGo');
@@ -391,22 +570,24 @@
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
-        msg.className = 'err';
+        msg.className = 'hint err';
         msg.textContent = j.error === 'client' ? 'Identifiant AdSense invalide (ca-pub-…).'
           : j.error === 'slot' ? 'Emplacement invalide : chiffres seulement.'
-          : j.error === 'support' ? 'Numéro WhatsApp invalide (8 à 15 chiffres, indicatif compris).'
-          : 'Non enregistré. Réessayez.';
+            : j.error === 'support' ? 'Numéro WhatsApp invalide (8 à 15 chiffres, indicatif compris).'
+              : 'Non enregistré. Réessayez.';
         return;
       }
-      msg.className = 'ok';
+      msg.className = 'hint ok';
       msg.textContent = 'Réglages enregistrés.';
+      toast('Réglages enregistrés.');
       await load(true);
     } catch {
-      msg.className = 'err';
+      msg.className = 'hint err';
       msg.textContent = 'Pas de connexion : rien n’a changé.';
     }
   };
 
+  showTab('overview');
   load();
 </script>
 </body>
