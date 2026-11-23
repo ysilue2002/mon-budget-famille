@@ -137,6 +137,8 @@
     <input id="adEmail" type="email" autocomplete="username" inputmode="email" required>
     <label for="adCode">Code d'administration</label>
     <input id="adCode" type="password" autocomplete="current-password" required>
+    <label for="adTotp">Code à 6 chiffres (si activé)</label>
+    <input id="adTotp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
     <button class="btn solid" id="adGo" type="submit">Entrer</button>
     <p class="hint err" id="adMsg"></p>
   </form>
@@ -242,6 +244,12 @@
       <h2 id="t-log">Journal</h2>
       <p class="lead">Qui a offert un mois, créé un lot, changé un réglage ou débloqué un compte. Conservé un peu plus d'un an.</p>
       <div class="card">
+        <div class="tools">
+          <a class="btn" href="/api/admin/export?type=payments">Exporter les paiements (CSV)</a>
+          <a class="btn" href="/api/admin/export?type=log">Exporter le journal (CSV)</a>
+          <button class="btn" id="purgeOld" type="button">Purger au-delà d'un an</button>
+        </div>
+        <p class="hint" id="purgeMsg"></p>
         <div id="logList"><p class="empty">—</p></div>
       </div>
     </section>
@@ -277,10 +285,12 @@
           </div>
         </div>
         <p class="hint" id="payState"></p>
+        <p class="hint" id="hookState"></p>
       </div>
       <div class="card">
         <h3>Chaque personne son code</h3>
         <p class="hint" style="margin-top:0">Ajoutez le secret <b>ADMIN_CODES</b> au format <b>email:code,email:code</b> (Sites → Secrets), puis redéployez. Chacun entre avec son propre code et le journal note qui a agi. Sans ce secret, le code commun <b>ADMIN_CODE</b> continue de marcher.</p>
+        <p class="hint" style="margin-top:8px">Second facteur : secret <b>ADMIN_TOTP</b> au format <b>email:BASE32</b> (une application d'authentification). Le code à 6 chiffres est alors demandé avec le code d'administration.</p>
         <p class="hint" id="remindState"></p>
       </div>
       <div class="card">
@@ -325,6 +335,7 @@
   const day = (ms) => (ms ? new Date(Number(ms)).toLocaleDateString('fr-FR') : '—');
   const num = (n) => Number(n || 0).toLocaleString('fr-FR');
   const premiumOn = (u) => Number(u) > Date.now();
+  const hoursSince = (ms) => Math.max(0, Math.floor((Date.now() - (Number(ms) || 0)) / 3600000));
   /* Jours restants de Premium : 0 si gratuit ou déjà fini. */
   const daysLeft = (u) => {
     const left = Number(u) - Date.now();
@@ -453,6 +464,8 @@
       : 'Rappels J-7 : pas encore envoyés (il faut RESEND_API_KEY, et une boutique à moins de 7 jours).';
     document.getElementById('payPending').textContent = num((data.counts || {}).pendingPayments || 0);
     document.getElementById('tabPay').textContent = num((data.counts || {}).pendingPayments || 0);
+    const hooks = data.hooks || {};
+    document.getElementById('hookState').innerHTML = `Rapprochement automatique : ${hooks.pay ? '<span class="badge on">actif</span>' : '<span class="badge warn">non configuré</span>'} — secret <b>PAY_HOOK_SECRET</b>, appel <b>POST /api/payments/hook</b> signé. Carte : ${hooks.card ? '<span class="badge on">Stripe</span>' : '<span class="badge off">Stripe non configuré</span>'}. Second facteur : ${hooks.totp ? num(hooks.totp) + ' personne(s)' : 'aucun'}.`;
   }
 
   function filteredShops() {
@@ -486,6 +499,9 @@
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="1">+1 mois</button>
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="0" ${premiumOn(s.premiumUntil) ? '' : 'disabled'}>Retirer</button>
         <button class="btn small" type="button" data-reset="${esc(s.id)}" data-phone="${esc(String(s.phone || '').replace(/\D/g, ''))}">Code de passe</button>
+        <select data-codem="${esc(s.id)}" aria-label="Mois du code Premium" style="min-height:44px;padding:6px 10px;border:1px solid #cfdccf;border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink)">
+          <option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">12 mois</option>
+        </select>
         <button class="btn small" type="button" data-code="${esc(s.id)}" data-phone="${esc(String(s.phone || '').replace(/\D/g, ''))}">Code Premium</button>
         ${s.locked ? `<button class="btn small" type="button" data-unlock="${esc(s.id)}">Débloquer</button>` : ''}
       </div>
@@ -555,17 +571,19 @@
     const cb = e.target.closest('button[data-code]');
     if (cb) {
       cb.disabled = true;
+      const picker = cb.parentElement.querySelector('select[data-codem]');
+      const months = Math.max(1, Math.min(12, Math.round(Number(picker && picker.value) || 1)));
       try {
         const r = await fetch('/api/admin/codes', {
           method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ userId: cb.dataset.code, months: 1, days: 30 }),
+          body: JSON.stringify({ userId: cb.dataset.code, months, days: 30 }),
         });
         if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
         if (!r.ok) throw new Error();
         const d = await r.json();
         const code = (d.codes && d.codes[0]) || d.code || '';
         const phone = String(cb.dataset.phone || '').replace(/\D/g, '');
-        const text = `Bonjour, votre code Premium Assistant Commercial (1 mois) : ${code}. Il ne fonctionne que dans votre boutique.`;
+        const text = `Bonjour, votre code Premium Assistant Commercial (${months} mois) : ${code}. Il ne fonctionne que dans votre boutique.`;
         const box = document.createElement('div');
         box.className = 'acts2';
         box.style.marginTop = '4px';
@@ -794,44 +812,74 @@
       document.getElementById('payPending').textContent = num(pending.length);
       document.getElementById('tabPay').textContent = num(pending.length);
       box.innerHTML = pending.length
-        ? pending.map((p) => `<div class="shop">
+        ? pending.map((p) => `        <div class="shop">
           <div>
             <div class="t">${esc(p.shop || p.email || p.phone || '—')}</div>
             <div class="s">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'} · réf. <b>${esc(p.ref)}</b></div>
-            <div class="s">Demandé le ${when(p.created)}</div>
+            <div class="s">Demandé le ${when(p.created)}${hoursSince(p.created) >= 24 ? ' · <b style="color:#7a4a00">en attente depuis ' + num(hoursSince(p.created)) + ' h</b>' : ''}${p.notified ? ' · relancé' : ''}</div>
           </div>
-          <div></div>
+          <div>${hoursSince(p.created) >= 24 ? '<span class="badge warn">En retard</span>' : ''}</div>
           <div class="acts2">
             <button class="btn small solid" type="button" data-pay-ok="${esc(p.id)}">Paiement reçu</button>
+            <button class="btn small" type="button" data-pay-remind="${esc(p.id)}">Relancer</button>
             <button class="btn small" type="button" data-pay-no="${esc(p.id)}">Refuser</button>
           </div>
         </div>`).join('')
         : '<p class="empty">Aucune demande en attente.</p>';
       document.getElementById('payHistory').innerHTML = done.length
-        ? done.slice(0, 12).map((p) => `<div class="hist"><div><b>${esc(p.ref)}</b><div class="hint" style="margin:0">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'}</div></div><div class="hint who" style="margin:0">${esc(p.shop || p.email || p.phone || '—')}<br>${when(p.paidAt || p.created)} · ${p.status === 'paid' ? 'validé' : 'refusé'}</div></div>`).join('')
+        ? done.slice(0, 12).map((p) => `<div class="hist"><div><b>${esc(p.ref)}</b><div class="hint" style="margin:0">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'}</div></div><div class="hint who" style="margin:0">${esc(p.shop || p.email || p.phone || '—')}<br>${when(p.paidAt || p.created)} · ${p.status === 'paid' ? 'validé' : p.status === 'refunded' ? 'remboursé' : 'refusé'}${p.status === 'paid' ? ` <button class="btn small" type="button" data-pay-refund="${esc(p.id)}">Rembourser</button>` : ''}</div></div>`).join('')
         : '<p class="empty">—</p>';
     } catch { box.innerHTML = '<p class="empty">—</p>'; }
   }
 
+  document.getElementById('purgeOld').onclick = async () => {
+    if (!confirm('Supprimer les paiements réglés et le journal de plus d’un an ? Les fichiers CSV déjà exportés restent, cette action ne se défait pas.')) return;
+    const msg = document.getElementById('purgeMsg');
+    msg.className = 'hint';
+    msg.textContent = 'Purge…';
+    try {
+      const r = await fetch('/api/admin/purge', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      msg.className = 'hint ok';
+      msg.textContent = `${num(d.payments)} paiement(s) et ${num(d.log)} ligne(s) de journal supprimés.`;
+      await loadLog();
+    } catch {
+      msg.className = 'hint err';
+      msg.textContent = 'Purge impossible. Réessayez.';
+    }
+  };
+
   document.getElementById('payList').addEventListener('click', async (e) => {
     const ok = e.target.closest('button[data-pay-ok]');
     const no = e.target.closest('button[data-pay-no]');
-    const b = ok || no;
+    const remind = e.target.closest('button[data-pay-remind]');
+    const refund = e.target.closest('button[data-pay-refund]');
+    const b = ok || no || remind || refund;
     if (!b) return;
+    if (refund && !confirm('Rembourser ce paiement ? Les mois seront retirés de la boutique.')) return;
     const msg = document.getElementById('payMsg');
     b.disabled = true;
     msg.className = 'hint';
     msg.textContent = 'Enregistrement…';
     try {
-      const r = await fetch('/api/admin/payment', {
+      let path = '/api/admin/payment';
+      let payload = { id: ok ? ok.dataset.payOk : no.dataset.payNo, ok: !!ok };
+      if (remind) { path = '/api/admin/payment-remind'; payload = { id: remind.dataset.payRemind }; }
+      if (refund) { path = '/api/admin/refund'; payload = { id: refund.dataset.payRefund }; }
+      const r = await fetch(path, {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: ok ? ok.dataset.payOk : no.dataset.payNo, ok: !!ok }),
+        body: JSON.stringify(payload),
       });
       if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
       if (!r.ok) throw new Error();
+      const d = await r.json().catch(() => ({}));
       msg.className = 'hint ok';
-      msg.textContent = ok ? 'Paiement validé, mois ouvert.' : 'Demande refusée.';
-      toast(ok ? 'Mois ouvert.' : 'Demande refusée.');
+      if (remind) msg.textContent = d.mail ? 'Relance envoyée par e-mail.' : 'E-mail indisponible : ouvrez le lien WhatsApp.';
+      else if (refund) msg.textContent = 'Remboursement enregistré, mois retirés.';
+      else msg.textContent = ok ? 'Paiement validé, mois ouvert.' : 'Demande refusée.';
+      toast(remind ? 'Relance enregistrée.' : refund ? 'Remboursement enregistré.' : ok ? 'Mois ouvert.' : 'Demande refusée.');
       await load(true);
       await loadPayments();
     } catch {
@@ -886,10 +934,12 @@
         body: JSON.stringify({
           email: document.getElementById('adEmail').value.trim(),
           code: document.getElementById('adCode').value,
+          totp: document.getElementById('adTotp').value.trim(),
         }),
       });
       if (r.ok) {
         document.getElementById('adCode').value = '';
+        document.getElementById('adTotp').value = '';
         await load(true);
         return;
       }

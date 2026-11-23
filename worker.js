@@ -129,6 +129,8 @@ function ensureSchema(env) {
     /* Rappel J-7 : on retient la date de fin déjà annoncée, pour ne pas
        répéter le même e-mail chaque jour. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN premium_reminded INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+    /* Relance d'une demande de paiement : une seule fois par demande. */
+    try { await env.DB.prepare('ALTER TABLE payments ADD COLUMN notified INTEGER NOT NULL DEFAULT 0').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run(    );
@@ -233,7 +235,121 @@ async function maybePremiumReminder(env, origin) {
     const sent = await sendPremiumMail(env, u.email, days, origin);
     if (!sent) await env.DB.prepare('UPDATE users SET premium_reminded = 0 WHERE id = ?').bind(u.id).run();
   }
+  /* Demandes de paiement oubliées : une relance, une seule fois, après 24 h.
+     Le bouton de l'admin reste là pour relancer à la main. */
+  const stale = await env.DB.prepare(
+    "SELECT p.id, p.ref, p.months, p.amount, u.email FROM payments p JOIN users u ON u.id = p.user_id WHERE p.status = 'pending' AND COALESCE(p.notified, 0) = 0 AND p.created < ? AND u.email IS NOT NULL LIMIT 10",
+  ).bind(now - 86400000).all();
+  for (const p of stale.results || []) {
+    const own = await env.DB.prepare('UPDATE payments SET notified = 1 WHERE id = ? AND COALESCE(notified, 0) = 0').bind(p.id).run();
+    if (!own.meta || !own.meta.changes) continue;
+    const text = `Bonjour,\n\nVotre demande Premium ${p.ref} (${p.months} mois, ${p.amount} FCFA) est toujours en attente.\n\nSi vous avez déjà transféré, envoyez-nous la preuve sur WhatsApp. Sinon, recommencez depuis l'application : Réglages → Premium → Payer maintenant.`;
+    const sent = await sendTextMail(env, p.email, 'Assistant Commercial : paiement en attente', text);
+    if (!sent) await env.DB.prepare('UPDATE payments SET notified = 0 WHERE id = ?').bind(p.id).run();
+  }
 }
+
+/* Base32 (RFC 4648) : c'est l'alphabet que les applications
+d'authentification affichent. */
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function b32decode(text) {
+  const clean = String(text || '').toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = 0;
+  let value = 0;
+  const out = [];
+  for (const c of clean) {
+    value = (value << 5) | B32.indexOf(c);
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((value >>> bits) & 255);
+      /* On ne garde que les bits restants : sans ce masque, la valeur dépasse
+         32 bits et les octets suivants sont faux. */
+      value &= (1 << bits) - 1;
+    }
+  }
+  return new Uint8Array(out);
+}
+async function hotp(secret, counter) {
+  const key = await crypto.subtle.importKey('raw', b32decode(secret), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const buf = new Uint8Array(8);
+  let c = counter;
+  for (let i = 7; i >= 0; i -= 1) { buf[i] = c & 255; c = Math.floor(c / 256); }
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, buf));
+  const off = mac[mac.length - 1] & 15;
+  const num = ((mac[off] & 127) << 24) | (mac[off + 1] << 16) | (mac[off + 2] << 8) | mac[off + 3];
+  return String(num % 1000000).padStart(6, '0');
+}
+const totpAt = (secret, ms) => hotp(secret, Math.floor(Number(ms) / 30000));
+/* Second facteur optionnel : « email:BASE32,email:BASE32 » dans ADMIN_TOTP.
+   Une personne sans secret garde le seul code d'administration. */
+function adminTotps(env) {
+  const map = new Map();
+  for (const part of String(env.ADMIN_TOTP || '').split(',')) {
+    const at = part.indexOf(':');
+    if (at < 1) continue;
+    const mail = part.slice(0, at).trim().toLowerCase();
+    const secret = part.slice(at + 1).trim();
+    if (mail && secret) map.set(mail, secret);
+  }
+  return map;
+}
+async function totpOk(env, email, code) {
+  const secret = adminTotps(env).get(String(email || '').trim().toLowerCase());
+  if (!secret) return true;
+  const given = String(code || '').replace(/\D/g, '');
+  if (given.length !== 6) return false;
+  const now = Date.now();
+  /* Une fenêtre de trente secondes de chaque côté : les horloges de téléphone
+     dérivent un peu, et un code tapé juste avant la bascule doit passer. */
+  for (const step of [-1, 0, 1]) {
+    if (same(given, await totpAt(secret, now + step * 30000))) return true;
+  }
+  return false;
+}
+
+/* Reçu de paiement : au commerçant, et en copie au support s'il est réglé.
+   Sans clé d'envoi, le reçu reste affiché dans l'application et l'admin le
+   transmet sur WhatsApp. */
+async function sendReceiptMail(env, to, info) {
+  if (!env.RESEND_API_KEY || !to) return false;
+  const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
+  const copy = String(env.SUPPORT_EMAIL || '').trim();
+  const text = `Bonjour${info.shop ? ' ' + info.shop : ''},\n\nNous avons reçu votre paiement.\n\n  ${info.months} mois de Premium · ${info.amount} FCFA\n  Référence : ${info.ref}\n  Premium valable jusqu'au ${new Date(info.until).toLocaleDateString('fr-FR')}\n\nMerci. L'équipe Assistant Commercial.`;
+  try {
+    const body = { from, to: [to], subject: 'Assistant Commercial : paiement reçu', text };
+    if (copy) body.bcc = [copy];
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+/* Relance d'une demande en attente : e-mail simple, sans reçu. */
+async function sendTextMail(env, to, subject, text) {
+  if (!env.RESEND_API_KEY || !to) return false;
+  const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ from, to: [to], subject, text }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+/* CSV pour la comptabilité : une cellule entre guillemets dès qu'elle contient
+   une virgule, un guillemet ou un saut de ligne. Le BOM fait ouvrir le fichier
+   en UTF-8 par Excel. */
+const csvCell = (v) => {
+  const s = String(v == null ? '' : v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+const csvOf = (rows) => '\ufeff' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
 
 /* Journal d'administration. Écrit après coup, jamais à la place de l'action :
    une panne du journal ne doit pas empêcher d'offrir un mois ou de débloquer
@@ -684,6 +800,39 @@ async function api(request, env, url, ctx) {
     });
   }
 
+  /* Rapprochement automatique : Wave, Orange Money ou un agrégateur appellent
+     ici après un transfert. La signature partage PAY_HOOK_SECRET, le montant
+     doit couvrir la demande, et une référence ne s'ouvre qu'une fois. */
+  if (path === '/api/payments/hook' && request.method === 'POST') {
+    const secret = String(env.PAY_HOOK_SECRET || '');
+    if (!secret) return json({ error: 'notconfigured' }, 503);
+    const raw = await request.text();
+    const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const expected = hex(await crypto.subtle.sign('HMAC', key, enc.encode(raw)));
+    if (!same(String(request.headers.get('x-pay-signature') || ''), expected)) return json({ error: 'signature' }, 401);
+    let body = {};
+    try { body = JSON.parse(raw); } catch { return json({ error: 'body' }, 400); }
+    const ref = String(body.ref || '').trim().toUpperCase();
+    const amount = Math.round(Number(body.amount) || 0);
+    const provider = String(body.provider || 'wave').slice(0, 20);
+    const pay = await env.DB.prepare('SELECT * FROM payments WHERE ref = ? ORDER BY created DESC LIMIT 1').bind(ref).first();
+    if (!pay) return json({ error: 'ref' }, 404);
+    if (pay.status === 'paid') return json({ ok: true, duplicate: true });
+    if (pay.status !== 'pending') return json({ error: 'closed' }, 409);
+    if (amount < Number(pay.amount)) return json({ error: 'amount' }, 400);
+    const claim = await env.DB.prepare("UPDATE payments SET status = 'paid', paid_at = ?, actor = ?, note = ? WHERE id = ? AND status = 'pending'")
+      .bind(Date.now(), provider, 'rapprochement automatique', pay.id).run();
+    if (!claim.meta || !claim.meta.changes) return json({ ok: true, duplicate: true });
+    const months = Math.max(1, Math.min(12, Number(pay.months) || 1));
+    await env.DB.prepare('UPDATE users SET premium_until = MAX(?, COALESCE(premium_until, 0)) + ?, premium_reminded = 0 WHERE id = ?')
+      .bind(Date.now(), months * PREMIUM_MONTH_MS, pay.user_id).run();
+    const fresh = await env.DB.prepare('SELECT premium_until, email, phone FROM users WHERE id = ?').bind(pay.user_id).first();
+    const until = Number(fresh && fresh.premium_until) || 0;
+    const mailed = await sendReceiptMail(env, fresh && fresh.email, { shop: '', months, amount: Number(pay.amount) || 0, ref, until });
+    await adminLog(env, provider, 'payment', (fresh && (fresh.email || fresh.phone)) || pay.user_id, `${months} mois · ${pay.amount} FCFA · ${ref} · automatique`);
+    return json({ ok: true, months, premiumUntil: until, mail: mailed });
+  }
+
   /* Stripe appelle ici sans cookie ni origine : sa signature fait foi. La
      réponse est toujours 200 quand l'événement est authentique, même s'il ne
      concerne pas nos comptes, sinon Stripe réessaie sans fin. */
@@ -713,6 +862,8 @@ async function api(request, env, url, ctx) {
               env.DB.prepare("INSERT INTO payments (id, ref, user_id, months, amount, method, status, created, paid_at, actor, note) VALUES (?, ?, ?, ?, ?, 'card', 'paid', ?, ?, 'Stripe', ?)")
                 .bind(eventId, String(obj.id || ''), userId, months, Math.round(Number(obj.amount_total) || 0), Date.now(), Date.now(), 'carte'),
             ]);
+            const paidRow = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(userId).first();
+            await sendReceiptMail(env, row.email, { shop: '', months, amount: Math.round(Number(obj.amount_total) || 0), ref: String(obj.id || eventId), until: Number(paidRow && paidRow.premium_until) || 0 });
             await adminLog(env, 'Stripe', 'payment', row.email || userId, `${months} mois par carte · ${Math.round(Number(obj.amount_total) || 0)} FCFA`);
           }
         }
@@ -899,12 +1050,15 @@ async function api(request, env, url, ctx) {
     /* Le code est comparé par empreintes : même longueur, même temps, et
        aucune trace du vrai code dans la réponse. */
     const expectedCode = codeForAdmin(env, email);
+    /* Deux serrures quand ADMIN_TOTP est posé pour cette personne : le code
+       d'administration, puis les six chiffres de son téléphone. */
+    const second = await totpOk(env, email, body.totp);
     const ok = adminEmailOk(email, list) && !!expectedCode
-      && same(await sha256(code), await sha256(expectedCode));
+      && same(await sha256(code), await sha256(expectedCode)) && second;
     if (!ok) {
       await tooMany(env, ipKey, 20, 15 * 60000);
       await tooMany(env, mailKey, 8, 15 * 60000);
-      await adminLog(env, email || '—', 'login-fail', null, 'code refusé');
+      await adminLog(env, email || '—', 'login-fail', null, second ? 'code refusé' : 'code à 6 chiffres refusé');
       return json({ error: 'credentials' }, 401);
     }
     const expires = Date.now() + ADMIN_SESSION_MS;
@@ -990,7 +1144,12 @@ async function api(request, env, url, ctx) {
        WHERE u.owner_id IS NULL ORDER BY u.created DESC LIMIT 100`,
     ).all();
     return json({
-      counts: { ...counts, locked: (shops.results || []).filter((r) => isLocked(r.email, r.phone)).length },
+      counts: {
+        ...counts,
+        locked: (shops.results || []).filter((r) => isLocked(r.email, r.phone)).length,
+        pendingPayments: await one("SELECT COUNT(*) AS n FROM payments WHERE status = 'pending'"),
+        stalePayments: await one("SELECT COUNT(*) AS n FROM payments WHERE status = 'pending' AND created < ?", now - 86400000),
+      },
       signups,
       countries: (countryRows.results || []).map((r) => ({ country: String(r.country || '—'), n: Number(r.n) || 0 })),
       channels: (channelRows.results || []).map((r) => ({ src: String(r.src || 'direct'), n: Number(r.n) || 0 })),
@@ -1011,6 +1170,13 @@ async function api(request, env, url, ctx) {
       /* Session en cours : l'écran affiche l'e-mail et l'heure de fin, pour
          qu'un poste laissé ouvert se voie avant de surprendre. */
       admin: admin ? { email: admin.email, expires: admin.expires } : null,
+      /* Ce qui est branché, jamais la valeur des secrets. */
+      hooks: {
+        pay: !!env.PAY_HOOK_SECRET,
+        card: !!env.STRIPE_SECRET_KEY,
+        totp: adminTotps(env).size,
+        mail: !!env.RESEND_API_KEY,
+      },
     });
   }
 
@@ -1184,7 +1350,7 @@ async function api(request, env, url, ctx) {
      lignes réglées. La validation est le seul geste qui ouvre un mois. */
   if (path === '/api/admin/payments' && request.method === 'GET') {
     const rows = await env.DB.prepare(
-      `SELECT p.id, p.ref, p.months, p.amount, p.method, p.status, p.created, p.paid_at, p.actor, p.note,
+      `SELECT p.id, p.ref, p.months, p.amount, p.method, p.status, p.created, p.paid_at, p.actor, p.note, p.notified,
         u.email, u.phone, COALESCE(json_extract(s.json,'$.shop'), '') AS shop
        FROM payments p LEFT JOIN users u ON u.id = p.user_id LEFT JOIN state s ON s.user_id = p.user_id
        ORDER BY p.created DESC LIMIT 40`,
@@ -1193,7 +1359,7 @@ async function api(request, env, url, ctx) {
       payments: (rows.results || []).map((r) => ({
         id: String(r.id), ref: String(r.ref || ''), months: Number(r.months) || 1, amount: Number(r.amount) || 0,
         method: String(r.method || ''), status: String(r.status || ''), created: Number(r.created) || 0,
-        paidAt: Number(r.paid_at) || 0, actor: r.actor || null, note: r.note || null,
+        paidAt: Number(r.paid_at) || 0, actor: r.actor || null, note: r.note || null, notified: Number(r.notified) || 0,
         email: r.email || null, phone: r.phone || null, shop: String(r.shop || ''),
       })),
     });
@@ -1221,12 +1387,96 @@ async function api(request, env, url, ctx) {
         .bind(Date.now(), months * PREMIUM_MONTH_MS, target.id).run();
       const fresh = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(target.id).first();
       const until = Number(fresh && fresh.premium_until) || 0;
-      await adminLog(env, admin.email, 'payment', label, `${months} mois · ${pay.amount} FCFA · ${pay.ref}`);
-      return json({ ok: true, premiumUntil: until });
+      const who = await env.DB.prepare("SELECT COALESCE(json_extract(s.json,'$.shop'), '') AS shop FROM state s WHERE s.user_id = ?").bind(target.id).first();
+      const mailed = await sendReceiptMail(env, target.email, { shop: String((who && who.shop) || ''), months, amount: Number(pay.amount) || 0, ref: pay.ref, until });
+      await adminLog(env, admin.email, 'payment', label, `${months} mois · ${pay.amount} FCFA · ${pay.ref}${mailed ? ' · reçu envoyé' : ''}`);
+      return json({ ok: true, premiumUntil: until, mail: mailed });
     }
     await env.DB.prepare("UPDATE payments SET status = 'rejected', actor = ?, note = ? WHERE id = ?").bind(admin.email, note, id).run();
     await adminLog(env, admin.email, 'payment-reject', label, `${pay.ref}${note ? ' · ' + note : ''}`);
     return json({ ok: true });
+  }
+
+  /* Remboursement : le mois retiré, la ligne gardée en « refunded ». On ne
+     supprime jamais un paiement — une comptabilité se relit. */
+  if (path === '/api/admin/refund' && request.method === 'POST') {
+    const body = await readBody(request);
+    const id = String(body.id || '');
+    const pay = await env.DB.prepare('SELECT * FROM payments WHERE id = ?').bind(id).first();
+    if (!pay) return json({ error: 'notfound' }, 404);
+    if (pay.status === 'refunded') return json({ error: 'done' }, 409);
+    if (pay.status !== 'paid') return json({ error: 'unpaid' }, 409);
+    const claim = await env.DB.prepare("UPDATE payments SET status = 'refunded', note = ? WHERE id = ? AND status = 'paid'")
+      .bind(String(body.note || '').slice(0, 120) || 'remboursé', id).run();
+    if (!claim.meta || !claim.meta.changes) return json({ error: 'done' }, 409);
+    const months = Math.max(1, Number(pay.months) || 1);
+    await env.DB.prepare('UPDATE users SET premium_until = MAX(?, COALESCE(premium_until, 0) - ?) WHERE id = ?')
+      .bind(Date.now(), months * PREMIUM_MONTH_MS, pay.user_id).run();
+    const fresh = await env.DB.prepare('SELECT premium_until, email, phone FROM users WHERE id = ?').bind(pay.user_id).first();
+    const until = Number(fresh && fresh.premium_until) || 0;
+    await adminLog(env, admin.email, 'refund', (fresh && (fresh.email || fresh.phone)) || pay.user_id, `${months} mois retirés · ${pay.ref}`);
+    return json({ ok: true, premiumUntil: until });
+  }
+
+  /* Relance à la main d'une demande en attente : e-mail si possible, et le
+     lien WhatsApp pour que le support double le message. */
+  if (path === '/api/admin/payment-remind' && request.method === 'POST') {
+    const body = await readBody(request);
+    const pay = await env.DB.prepare("SELECT * FROM payments WHERE id = ? AND status = 'pending'").bind(String(body.id || '')).first();
+    if (!pay) return json({ error: 'notfound' }, 404);
+    const u = await env.DB.prepare('SELECT email, phone FROM users WHERE id = ?').bind(pay.user_id).first();
+    const text = `Bonjour,\n\nVotre demande Premium ${pay.ref} (${pay.months} mois, ${pay.amount} FCFA) est toujours en attente.\n\nSi vous avez déjà transféré, envoyez-nous la preuve sur WhatsApp. Sinon, vous pouvez annuler et recommencer depuis l'application.`;
+    const mailed = await sendTextMail(env, u && u.email, 'Assistant Commercial : paiement en attente', text);
+    await env.DB.prepare('UPDATE payments SET notified = 1 WHERE id = ?').bind(pay.id).run();
+    await adminLog(env, admin.email, 'payment-remind', (u && (u.email || u.phone)) || pay.user_id, `${pay.ref}${mailed ? ' · e-mail envoyé' : ' · e-mail indisponible'}`);
+    return json({ ok: true, mail: mailed, message: text, phone: digitsOf(u && u.phone) });
+  }
+
+  /* Export comptable : deux fichiers, paiements et journal. Le BOM et les
+     guillemets sont posés dans csvOf pour qu'Excel ne casse rien. */
+  if (path === '/api/admin/export' && request.method === 'GET') {
+    const kind = url.searchParams.get('type') === 'log' ? 'log' : 'payments';
+    let rows;
+    let name;
+    if (kind === 'log') {
+      const r = await env.DB.prepare('SELECT at, actor, action, target, detail FROM admin_log ORDER BY id DESC LIMIT 5000').all();
+      rows = [['date', 'acteur', 'action', 'cible', 'detail']];
+      for (const x of r.results || []) rows.push([new Date(Number(x.at) || 0).toISOString(), x.actor, x.action, x.target || '', x.detail || '']);
+      name = 'journal-admin.csv';
+    } else {
+      const r = await env.DB.prepare(
+        `SELECT p.ref, p.created, p.paid_at, p.status, p.method, p.months, p.amount, p.actor, p.note, u.email, u.phone
+         FROM payments p LEFT JOIN users u ON u.id = p.user_id ORDER BY p.created DESC LIMIT 5000`,
+      ).all();
+      rows = [['reference', 'cree_le', 'paye_le', 'statut', 'moyen', 'mois', 'montant_fcfa', 'acteur', 'note', 'email', 'telephone']];
+      for (const x of r.results || []) {
+        rows.push([
+          x.ref, x.created ? new Date(Number(x.created)).toISOString() : '', x.paid_at ? new Date(Number(x.paid_at)).toISOString() : '',
+          x.status, x.method, x.months, x.amount, x.actor || '', x.note || '', x.email || '', x.phone || '',
+        ]);
+      }
+      name = 'paiements.csv';
+    }
+    return new Response(csvOf(rows), {
+      headers: {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename="${name}"`,
+        'cache-control': 'no-store',
+        'x-robots-tag': 'noindex',
+      },
+    });
+  }
+
+  /* Purge : au-delà de treize mois, les paiements réglés et le journal
+     s'effacent. Une demande encore en attente n'est jamais supprimée. */
+  if (path === '/api/admin/purge' && request.method === 'POST') {
+    const cutoff = Date.now() - 400 * 86400000;
+    const a = await env.DB.prepare("DELETE FROM payments WHERE created < ? AND status <> 'pending'").bind(cutoff).run();
+    const b = await env.DB.prepare('DELETE FROM admin_log WHERE at < ?').bind(cutoff).run();
+    const pays = Number((a.meta && a.meta.changes) || 0);
+    const lines = Number((b.meta && b.meta.changes) || 0);
+    await adminLog(env, admin.email, 'purge', null, `${pays} paiement(s) · ${lines} ligne(s) de journal`);
+    return json({ ok: true, payments: pays, log: lines });
   }
 
   /* D'où viennent les installations : agregat par canal, sans aucune donnée
@@ -1742,7 +1992,7 @@ export default {
       await ensureSchema(env);
       /* Stripe n'envoie ni cookie ni origine : c'est sa signature qui protège
          le webhook, pas le contrôle d'origine. */
-      const isHook = url.pathname === '/api/stripe/webhook';
+      const isHook = url.pathname === '/api/stripe/webhook' || url.pathname === '/api/payments/hook';
       if (request.method !== 'GET' && !isHook && !sameOrigin(request, url)) {
         return json({ error: 'origin' }, 403);
       }

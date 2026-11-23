@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, adminTotps, csvOf };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, adminTotps, csvOf } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -347,6 +347,37 @@ test('chaque personne du support peut avoir son propre code', () => {
   assert.equal(adminCodes(env).size, 1);
   assert.equal(adminSigningKey({ ADMIN_CODES: 'c@test.ci:solo' }), 'solo', 'sans ADMIN_CODE, le premier code signe');
   assert.equal(adminSigningKey({}), '', 'aucun code : rien n’est signé');
+});
+
+/* Second facteur : les vecteurs de la RFC 6238, puis une vérification réelle
+   avec la fenêtre de dérive. */
+test('le code à 6 chiffres suit la RFC 6238', async () => {
+  const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'; // « 12345678901234567890 »
+  /* Vecteurs de l'annexe B, tronqués à six chiffres : 94287082, 07081804,
+     89005924, 69279037. */
+  assert.equal(await totpAt(secret, 59 * 1000), '287082');
+  assert.equal(await totpAt(secret, 1111111109 * 1000), '081804');
+  assert.equal(await totpAt(secret, 1234567890 * 1000), '005924');
+  assert.equal(await totpAt(secret, 2000000000 * 1000), '279037');
+  const env = { ADMIN_TOTP: `boss@test.ci:${secret}` };
+  const now = Date.now();
+  assert.equal(await totpOk(env, 'BOSS@test.ci', await totpAt(secret, now)), true, 'code du moment');
+  assert.equal(await totpOk(env, 'boss@test.ci', await totpAt(secret, now - 30000)), true, 'fenêtre précédente');
+  assert.equal(await totpOk(env, 'boss@test.ci', '000000'), false, 'mauvais code');
+  assert.equal(await totpOk(env, 'boss@test.ci', ''), false, 'sans code');
+  assert.equal(await totpOk(env, 'autre@test.ci', ''), true, 'sans secret : pas de second facteur');
+  assert.equal(adminTotps(env).size, 1);
+  assert.equal(adminTotps({ ADMIN_TOTP: 'sans-deux-points' }).size, 0);
+});
+
+/* L'export comptable doit rester lisible par Excel, même avec des virgules. */
+test('le CSV échappe virgules, guillemets et sauts de ligne', () => {
+  const csv = csvOf([['ref', 'note'], ['AC-1', 'a,b'], ['AC-2', 'dit "ok"'], ['AC-3', 'deux\nlignes']]);
+  assert.ok(csv.startsWith('\ufeff'), 'BOM UTF-8');
+  assert.ok(csv.includes('"a,b"'));
+  assert.ok(csv.includes('"dit ""ok"""'));
+  assert.ok(csv.includes('"deux\nlignes"'));
+  assert.equal(csv.split('\r\n')[0], '\ufeffref,note');
 });
 
 /* Débloquer une boutique ne doit pas débloquer une autre dont l'e-mail finit
