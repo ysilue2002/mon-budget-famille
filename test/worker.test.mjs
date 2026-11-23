@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -335,6 +335,36 @@ test('la connexion administrateur exige un e-mail autorisé et le bon code', asy
   assert.equal(await adminFromToken(env, await adminToken(env, 'ysilue2002@gmail.com', Date.now() - 1000)), null, 'session expirée : refusée');
   assert.equal(await adminFromToken({ ...env, ADMIN_CODE: 'autre-code' }, token), null, 'autre code : refusé');
   assert.equal(await adminToken({ ADMIN_EMAILS: env.ADMIN_EMAILS }, 'ysilue2002@gmail.com', future), '', 'sans code, rien n’est signé');
+});
+
+/* Chaque personne du support peut avoir son code : le journal dit alors qui a
+   agi, et retirer une personne ne touche pas au code des autres. */
+test('chaque personne du support peut avoir son propre code', () => {
+  const env = { ADMIN_EMAILS: 'a@test.ci,b@test.ci', ADMIN_CODE: 'commun', ADMIN_CODES: 'b@test.ci:secret-b' };
+  assert.equal(codeForAdmin(env, 'a@test.ci'), 'commun', 'sans code personnel : le code commun');
+  assert.equal(codeForAdmin(env, 'B@TEST.CI'), 'secret-b', 'code personnel, casse ignorée');
+  assert.equal(codeForAdmin(env, 'inconnu@test.ci'), 'commun');
+  assert.equal(adminCodes(env).size, 1);
+  assert.equal(adminSigningKey({ ADMIN_CODES: 'c@test.ci:solo' }), 'solo', 'sans ADMIN_CODE, le premier code signe');
+  assert.equal(adminSigningKey({}), '', 'aucun code : rien n’est signé');
+});
+
+/* La carte bancaire passe par Stripe : un webhook non signé ne doit jamais
+   ouvrir un mois de Premium. */
+test('la signature Stripe est vérifiée, horodatage compris', async () => {
+  const { createHmac } = await import('node:crypto');
+  const secret = 'whsec_test';
+  const raw = JSON.stringify({ id: 'evt_1', type: 'checkout.session.completed' });
+  const ts = Math.floor(Date.now() / 1000);
+  const sig = createHmac('sha256', secret).update(`${ts}.${raw}`).digest('hex');
+  const env = { STRIPE_WEBHOOK_SECRET: secret };
+  assert.ok(await stripeEvent(env, raw, `t=${ts},v1=${sig}`), 'signature valide acceptée');
+  assert.ok(await stripeEvent(env, raw, `t=${ts},v1=0000,v1=${sig}`), 'une signature valide suffit');
+  assert.equal(await stripeEvent(env, raw, `t=${ts},v1=${'0'.repeat(64)}`), null, 'signature fausse refusée');
+  assert.equal(await stripeEvent(env, raw, `t=${ts - 3600},v1=${sig}`), null, 'rejeu ancien refusé');
+  assert.equal(await stripeEvent(env, `${raw} `, `t=${ts},v1=${sig}`), null, 'corps modifié refusé');
+  assert.equal(await stripeEvent(env, raw, ''), null, 'sans en-tête refusé');
+  assert.equal(await stripeEvent({}, raw, `t=${ts},v1=${sig}`), null, 'sans secret refusé');
 });
 
 test('un mois de Premium s’ajoute sans écraser une date encore à venir', () => {

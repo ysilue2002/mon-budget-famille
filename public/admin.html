@@ -124,6 +124,8 @@
   <button type="button" data-tab="overview" aria-current="page">Vue d'ensemble</button>
   <button type="button" data-tab="shops">Boutiques <span class="n" id="tabShops">0</span></button>
   <button type="button" data-tab="premium">Premium <span class="n" id="tabPremium">0</span></button>
+  <button type="button" data-tab="payments">Paiements <span class="n" id="tabPay">0</span></button>
+  <button type="button" data-tab="log">Journal</button>
   <button type="button" data-tab="settings">Réglages</button>
 </nav>
 <main>
@@ -213,11 +215,34 @@
         <p class="hint" style="margin-top:0">Touchez un code pour le copier.</p>
         <button class="btn small" id="codesCopyAll" type="button" hidden style="margin-bottom:8px">Copier tous les codes valables</button>
         <div id="codes"><p class="empty">—</p></div>
+        <p class="hint" id="codesStale"></p>
       </div>
       <div class="card">
         <h3>Qui a activé</h3>
         <div id="codeHistory"><p class="empty">—</p></div>
         <p class="hint" id="usedMsg"></p>
+      </div>
+    </section>
+
+    <section id="p-payments" class="panel" aria-labelledby="t-payments" hidden>
+      <h2 id="t-payments">Paiements</h2>
+      <p class="lead">Demandes Wave et Orange Money. Vérifiez le transfert, puis ouvrez le mois d'un clic.</p>
+      <div class="card">
+        <h3>En attente <span class="badge warn" id="payPending">0</span></h3>
+        <div id="payList"><p class="empty">—</p></div>
+        <p class="hint" id="payMsg"></p>
+      </div>
+      <div class="card">
+        <h3>Derniers paiements</h3>
+        <div id="payHistory"><p class="empty">—</p></div>
+      </div>
+    </section>
+
+    <section id="p-log" class="panel" aria-labelledby="t-log" hidden>
+      <h2 id="t-log">Journal</h2>
+      <p class="lead">Qui a offert un mois, créé un lot, changé un réglage ou débloqué un compte. Conservé un peu plus d'un an.</p>
+      <div class="card">
+        <div id="logList"><p class="empty">—</p></div>
       </div>
     </section>
 
@@ -235,6 +260,28 @@
         <h3>E-mails de réinitialisation</h3>
         <p class="hint" style="margin-top:0">Le commerçant demande un code depuis « Mot de passe oublié ? » et le reçoit par e-mail. Sans e-mail configuré, vous donnez le code par WhatsApp depuis l'onglet Boutiques.</p>
         <p id="mailState" class="hint"></p>
+      </div>
+      <div class="card">
+        <h3>Paiement du Premium</h3>
+        <p class="hint" style="margin-top:0">Le commerçant choisit un nombre de mois, paie par Wave, Orange Money ou carte, puis vous validez le transfert dans l'onglet Paiements. Prix vide (0) : seul le code d'activation reste.</p>
+        <label for="priceMonth">Prix d’un mois (FCFA)</label>
+        <input id="priceMonth" type="text" inputmode="numeric" value="0">
+        <div class="row2">
+          <div>
+            <label for="payWave">Numéro Wave</label>
+            <input id="payWave" type="text" inputmode="tel" placeholder="+225 07 00 00 00 00" autocomplete="off">
+          </div>
+          <div>
+            <label for="payOm">Numéro Orange Money</label>
+            <input id="payOm" type="text" inputmode="tel" placeholder="+225 07 00 00 00 00" autocomplete="off">
+          </div>
+        </div>
+        <p class="hint" id="payState"></p>
+      </div>
+      <div class="card">
+        <h3>Chaque personne son code</h3>
+        <p class="hint" style="margin-top:0">Ajoutez le secret <b>ADMIN_CODES</b> au format <b>email:code,email:code</b> (Sites → Secrets), puis redéployez. Chacun entre avec son propre code et le journal note qui a agi. Sans ce secret, le code commun <b>ADMIN_CODE</b> continue de marcher.</p>
+        <p class="hint" id="remindState"></p>
       </div>
       <div class="card">
         <h3>Support WhatsApp</h3>
@@ -395,6 +442,17 @@
     document.getElementById('mailState').innerHTML = data.mail
       ? '<span class="badge on">Actifs</span> Les codes partent par e-mail.'
       : '<span class="badge warn">Non configurés</span> Ajoutez les secrets <b>RESEND_API_KEY</b> et <b>MAIL_FROM</b> (Sites → Secrets), puis redéployez. En attendant, donnez les codes par WhatsApp.';
+    document.getElementById('priceMonth').value = String(cfg.priceMonth || 0);
+    document.getElementById('payWave').value = cfg.payWave || '';
+    document.getElementById('payOm').value = cfg.payOm || '';
+    document.getElementById('payState').textContent = cfg.priceMonth
+      ? `Le commerçant voit ${num(cfg.priceMonth)} FCFA par mois. ${cfg.payWave ? 'Wave : ' + cfg.payWave + '. ' : ''}${cfg.payOm ? 'Orange Money : ' + cfg.payOm + '. ' : ''}${cfg.payWave || cfg.payOm ? '' : 'Aucun numéro : seuls la carte et WhatsApp restent.'}`
+      : 'Prix à 0 : l’écran de renouvellement propose seulement le code ou WhatsApp.';
+    document.getElementById('remindState').textContent = data.reminderDay
+      ? `Rappels J-7 : dernier envoi le ${data.reminderDay.split('-').reverse().join('/')}.`
+      : 'Rappels J-7 : pas encore envoyés (il faut RESEND_API_KEY, et une boutique à moins de 7 jours).';
+    document.getElementById('payPending').textContent = num((data.counts || {}).pendingPayments || 0);
+    document.getElementById('tabPay').textContent = num((data.counts || {}).pendingPayments || 0);
   }
 
   function filteredShops() {
@@ -423,11 +481,13 @@
         <div class="s">${esc(s.email || s.phone || s.id)} · ${esc(s.country || 'pays ?')} · ${num(s.sales)} vente${Number(s.sales) === 1 ? '' : 's'} · ${num(s.docs)} doc${Number(s.docs) === 1 ? '' : 's'}</div>
         <div class="s">Inscrite le ${day(s.created)} · ${Number(s.updated) > 1000000000000 ? 'vue le ' + day(s.updated) : 'jamais ouverte'}${s.src ? ' · ' + esc(s.src) : ''}</div>
       </div>
-      <div><span class="badge ${premiumOn(s.premiumUntil) ? (daysLeft(s.premiumUntil) <= 7 ? 'warn' : 'on') : 'off'}">${premiumLabel(s.premiumUntil)}</span></div>
+      <div><span class="badge ${premiumOn(s.premiumUntil) ? (daysLeft(s.premiumUntil) <= 7 ? 'warn' : 'on') : 'off'}">${premiumLabel(s.premiumUntil)}</span>${s.locked ? ' <span class="badge warn">Bloqué</span>' : ''}</div>
       <div class="acts2">
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="1">+1 mois</button>
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="0" ${premiumOn(s.premiumUntil) ? '' : 'disabled'}>Retirer</button>
         <button class="btn small" type="button" data-reset="${esc(s.id)}" data-phone="${esc(String(s.phone || '').replace(/\D/g, ''))}">Code de passe</button>
+        <button class="btn small" type="button" data-code="${esc(s.id)}" data-phone="${esc(String(s.phone || '').replace(/\D/g, ''))}">Code Premium</button>
+        ${s.locked ? `<button class="btn small" type="button" data-unlock="${esc(s.id)}">Débloquer</button>` : ''}
       </div>
     </div>`).join('');
     const more = document.getElementById('shopsMore');
@@ -490,6 +550,56 @@
   /* Code de réinitialisation remis à la main : l'assistance le lit au
      téléphone ou l'envoie sur WhatsApp, sans attendre les e-mails. */
   document.getElementById('shops').addEventListener('click', async (e) => {
+    /* Code Premium nominatif : il ne servira qu'à cette boutique, donc un code
+       revendu à un tiers ne s'active pas chez lui. */
+    const cb = e.target.closest('button[data-code]');
+    if (cb) {
+      cb.disabled = true;
+      try {
+        const r = await fetch('/api/admin/codes', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ userId: cb.dataset.code, months: 1, days: 30 }),
+        });
+        if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        const code = (d.codes && d.codes[0]) || d.code || '';
+        const phone = String(cb.dataset.phone || '').replace(/\D/g, '');
+        const text = `Bonjour, votre code Premium Assistant Commercial (1 mois) : ${code}. Il ne fonctionne que dans votre boutique.`;
+        const box = document.createElement('div');
+        box.className = 'acts2';
+        box.style.marginTop = '4px';
+        box.innerHTML = `<b style="font-family:ui-monospace,Consolas,monospace;letter-spacing:2px;font-size:18px">${esc(code)}</b>
+          <button class="btn small" type="button" data-copy="${esc(code)}">Copier</button>
+          ${phone ? `<a class="btn small" style="display:inline-flex;align-items:center;text-decoration:none" href="https://wa.me/${phone}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+          <span class="hint" style="margin:0">Réservé à cette boutique · valable 30 jours.</span>`;
+        cb.replaceWith(box);
+        box.querySelector('button[data-copy]').onclick = () => copyText(code);
+      } catch {
+        cb.disabled = false;
+        toast('Code non créé. Réessayez.');
+      }
+      return;
+    }
+    /* Débloquer un compte : efface les compteurs d'essais sans attendre. */
+    const ub = e.target.closest('button[data-unlock]');
+    if (ub) {
+      ub.disabled = true;
+      try {
+        const r = await fetch('/api/admin/unlock', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: ub.dataset.unlock }),
+        });
+        if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+        if (!r.ok) throw new Error();
+        toast('Compte débloqué.');
+        await load(true);
+      } catch {
+        ub.disabled = false;
+        toast('Déblocage impossible. Réessayez.');
+      }
+      return;
+    }
     const rb = e.target.closest('button[data-reset]');
     if (rb) {
       rb.disabled = true;
@@ -587,11 +697,17 @@
           const exp = Number(c.expires) || 0;
           const expired = exp && exp <= now;
           const when = exp ? `${expired ? 'expiré le' : 'valable jusqu’au'} ${day(exp)}` : 'sans date de fin';
-          return `<div class="code${expired ? ' expired' : ''}"><div><b>${esc(c.code)}</b><div class="hint" style="margin:0">${num(c.months)} mois · ${when}</div></div>
+          return `<div class="code${expired ? ' expired' : ''}"><div><b>${esc(c.code)}</b><div class="hint" style="margin:0">${num(c.months)} mois · ${when}${c.for ? ' · pour ' + esc(c.for) : ''}</div></div>
             <button class="btn small" type="button" data-copy="${esc(c.code)}" ${expired ? 'disabled' : ''}>${expired ? 'Expiré' : 'Copier'}</button></div>`;
         }).join('')
         : '<p class="empty">Aucun code disponible. Créez-en un après un paiement.</p>';
       box.querySelectorAll('button[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy); });
+      /* Un code qui dort depuis un mois est souvent un code jamais transmis :
+         le dire ici évite de le redonner à quelqu'un d'autre par erreur. */
+      const stale = codes.filter((c) => now - (Number(c.created) || 0) > 30 * 86400000);
+      document.getElementById('codesStale').textContent = stale.length
+        ? `${num(stale.length)} code${stale.length === 1 ? '' : 's'} jamais utilisé${stale.length === 1 ? '' : 's'} depuis plus de 30 jours : vérifiez qu'il a bien été transmis.`
+        : '';
 
       const h = d.history || [];
       const hist = document.getElementById('codeHistory');
@@ -644,6 +760,87 @@
     btn.disabled = false;
   };
 
+  const ACTION_LABEL = {
+    login: 'Connexion', 'login-fail': 'Code refusé', premium: 'Premium', redeem: 'Code activé',
+    'reset-code': 'Code de passe', codes: 'Codes créés', config: 'Réglages', unlock: 'Compte débloqué',
+    payment: 'Paiement validé', 'payment-reject': 'Paiement refusé', 'pay-request': 'Demande de paiement',
+  };
+  const when = (ms) => (ms ? new Date(Number(ms)).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
+
+  async function loadLog() {
+    const box = document.getElementById('logList');
+    try {
+      const r = await fetch('/api/admin/log', { cache: 'no-store', credentials: 'same-origin' });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+      if (!r.ok) { box.innerHTML = '<p class="empty">—</p>'; return; }
+      const d = await r.json();
+      const entries = d.entries || [];
+      box.innerHTML = entries.length
+        ? entries.map((e) => `<div class="hist"><div><b>${esc(ACTION_LABEL[e.action] || e.action)}</b><div class="hint" style="margin:0">${esc(e.target || '—')}${e.detail ? ' · ' + esc(e.detail) : ''}</div></div><div class="hint who" style="margin:0">${esc(e.actor)}<br>${when(e.at)}</div></div>`).join('')
+        : '<p class="empty">Rien encore.</p>';
+    } catch { box.innerHTML = '<p class="empty">—</p>'; }
+  }
+
+  async function loadPayments() {
+    const box = document.getElementById('payList');
+    try {
+      const r = await fetch('/api/admin/payments', { cache: 'no-store', credentials: 'same-origin' });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+      if (!r.ok) { box.innerHTML = '<p class="empty">—</p>'; return; }
+      const d = await r.json();
+      const all = d.payments || [];
+      const pending = all.filter((p) => p.status === 'pending');
+      const done = all.filter((p) => p.status !== 'pending');
+      document.getElementById('payPending').textContent = num(pending.length);
+      document.getElementById('tabPay').textContent = num(pending.length);
+      box.innerHTML = pending.length
+        ? pending.map((p) => `<div class="shop">
+          <div>
+            <div class="t">${esc(p.shop || p.email || p.phone || '—')}</div>
+            <div class="s">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'} · réf. <b>${esc(p.ref)}</b></div>
+            <div class="s">Demandé le ${when(p.created)}</div>
+          </div>
+          <div></div>
+          <div class="acts2">
+            <button class="btn small solid" type="button" data-pay-ok="${esc(p.id)}">Paiement reçu</button>
+            <button class="btn small" type="button" data-pay-no="${esc(p.id)}">Refuser</button>
+          </div>
+        </div>`).join('')
+        : '<p class="empty">Aucune demande en attente.</p>';
+      document.getElementById('payHistory').innerHTML = done.length
+        ? done.slice(0, 12).map((p) => `<div class="hist"><div><b>${esc(p.ref)}</b><div class="hint" style="margin:0">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'}</div></div><div class="hint who" style="margin:0">${esc(p.shop || p.email || p.phone || '—')}<br>${when(p.paidAt || p.created)} · ${p.status === 'paid' ? 'validé' : 'refusé'}</div></div>`).join('')
+        : '<p class="empty">—</p>';
+    } catch { box.innerHTML = '<p class="empty">—</p>'; }
+  }
+
+  document.getElementById('payList').addEventListener('click', async (e) => {
+    const ok = e.target.closest('button[data-pay-ok]');
+    const no = e.target.closest('button[data-pay-no]');
+    const b = ok || no;
+    if (!b) return;
+    const msg = document.getElementById('payMsg');
+    b.disabled = true;
+    msg.className = 'hint';
+    msg.textContent = 'Enregistrement…';
+    try {
+      const r = await fetch('/api/admin/payment', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: ok ? ok.dataset.payOk : no.dataset.payNo, ok: !!ok }),
+      });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+      if (!r.ok) throw new Error();
+      msg.className = 'hint ok';
+      msg.textContent = ok ? 'Paiement validé, mois ouvert.' : 'Demande refusée.';
+      toast(ok ? 'Mois ouvert.' : 'Demande refusée.');
+      await load(true);
+      await loadPayments();
+    } catch {
+      b.disabled = false;
+      msg.className = 'hint err';
+      msg.textContent = 'Non enregistré. Réessayez.';
+    }
+  });
+
   async function load(keep) {
     if (!keep) message('<h2>Chargement…</h2>');
     let r;
@@ -671,6 +868,8 @@
     document.getElementById('adOut').hidden = false;
     paint();
     loadCodes();
+    loadPayments();
+    loadLog();
   }
 
   document.getElementById('reload')?.addEventListener('click', () => load());
@@ -722,6 +921,9 @@
           adsBottom: document.getElementById('adsBottom').value.trim(),
           supportWa: document.getElementById('supportWa').value.trim(),
           officialUrl: document.getElementById('officialUrl').value.trim(),
+          priceMonth: document.getElementById('priceMonth').value.trim(),
+          payWave: document.getElementById('payWave').value.trim(),
+          payOm: document.getElementById('payOm').value.trim(),
         }),
       });
       if (!r.ok) {
@@ -731,7 +933,8 @@
           : j.error === 'client' ? 'Identifiant AdSense invalide (ca-pub-…).'
           : j.error === 'slot' ? 'Emplacement invalide : chiffres seulement.'
             : j.error === 'support' ? 'Numéro WhatsApp invalide (8 à 15 chiffres, indicatif compris).'
-              : 'Non enregistré. Réessayez.';
+              : j.error === 'pay' ? 'Numéro Wave ou Orange Money invalide (8 à 15 chiffres).'
+                : 'Non enregistré. Réessayez.';
         return;
       }
       msg.className = 'hint ok';

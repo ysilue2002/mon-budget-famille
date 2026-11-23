@@ -3243,6 +3243,7 @@ function settingsModal() {
     <div class="row"><div><div class="t">${isPremium() ? T('premiumActive') : T('premiumFreeTag')}</div>
       <div class="s">${isPremium() ? `${T('premiumUntilOn')} ${dayFR(premiumDate())}` : T('premiumPrice')}</div></div>
       <div class="right">${isPremium() ? '<span class="tag ok">Premium</span>' : `<span class="tag warn">${T('premium')}</span>`}</div></div>
+    <button class="btn" id="premPay">${T('payBtn')}</button>
     ${isPremium()
       ? (SUPPORT.wa ? `<button class="btn whats" id="supGo">${T('supportTitle')}</button>` : `<p class="hint">${T('supportOff')}</p>`)
       : `<label>${T('premiumCode')}</label>
@@ -3396,6 +3397,8 @@ function settingsModal() {
     d.remove(); render(); settingsModal();
     alert(`${T('premiumCodeOk')} ${dayFR(premiumDate())}`);
   };
+  const premPay = d.querySelector('#premPay');
+  if (premPay) premPay.onclick = () => { d.remove(); openPay(); };
   const premAsk = d.querySelector('#premAsk');
   if (premAsk) premAsk.onclick = () => {
     if (!SUPPORT.wa) { alert(T('supportOff')); return; }
@@ -3768,12 +3771,86 @@ function premiumWarning() {
     <button class="btn out" type="button" data-premium-renew>${T('premiumRenew')}</button></div>`;
 }
 function renewPremium() {
-  if (SUPPORT.wa) {
-    const text = T('premiumRenewMsg') + (db.shop ? ' — ' + db.shop : '');
-    window.open(`https://wa.me/${SUPPORT.wa}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+  openPay();
+}
+
+/* Paiement du Premium : Wave, Orange Money ou carte. Le serveur donne une
+   référence pour les transferts ; la carte passe par Stripe quand les clés
+   sont posées. Sans tarif réglé, on renvoie vers WhatsApp plutôt que
+   d'afficher un prix inventé. */
+const PAY = { priceMonth: 0, payWave: '', payOm: '', card: false };
+let payMonths = 1;
+async function openPay() {
+  const wait = modal(`<div class="sheetHead"><h2>${T('payTitle')}</h2></div><p class="hint">${T('syncing')}</p>`);
+  const r = await api('/api/premium/offer');
+  if (r.ok && r.data) {
+    PAY.priceMonth = Number(r.data.priceMonth) || 0;
+    PAY.payWave = String(r.data.payWave || '');
+    PAY.payOm = String(r.data.payOm || '');
+    PAY.card = !!r.data.card;
+  }
+  wait.remove();
+  payModal();
+}
+function payModal() {
+  const price = Number(PAY.priceMonth) || 0;
+  const amount = price * payMonths;
+  const d = modal(`<div class="sheetHead"><h2>${T('payTitle')}</h2></div><div id="payBody"></div>`);
+  const body = d.querySelector('#payBody');
+  const waText = T('premiumWaMsg').replace('[Boutique]', db.shop || T('app')).replace('[Compte]', (me && (me.email || me.phone || me.id)) || '');
+  if (!price) {
+    body.innerHTML = `<p class="hint">${T('payNoPrice')}</p>
+      ${SUPPORT.wa ? `<button class="btn whats" id="payWa">${T('premiumRenew')}</button>` : ''}
+      <button class="btn out" id="payClose">${T('close')}</button>`;
+    const wa = body.querySelector('#payWa');
+    if (wa) wa.onclick = () => waOpen(SUPPORT.wa, waText);
+    body.querySelector('#payClose').onclick = () => d.remove();
     return;
   }
-  settingsModal();
+  const methods = [];
+  if (PAY.payWave) methods.push(['wave', T('payWave')]);
+  if (PAY.payOm) methods.push(['om', T('payOm')]);
+  if (PAY.card) methods.push(['card', T('payCard')]);
+  body.innerHTML = `<div class="card">
+      <div class="row"><div><div class="t">${T('payMonths')}</div><div class="s">${money(amount)}</div></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        ${[1, 3, 6, 12].map((n) => `<button class="btn ${n === payMonths ? '' : 'out'}" type="button" data-months="${n}" style="min-width:64px">${n}</button>`).join('')}
+      </div>
+      <p class="hint">${T('payTotal')} <b>${money(amount)}</b></p>
+    </div>
+    <div id="payStep"></div>`;
+  body.querySelectorAll('[data-months]').forEach((b) => {
+    b.onclick = () => { payMonths = Number(b.dataset.months) || 1; d.remove(); payModal(); };
+  });
+  const step = body.querySelector('#payStep');
+  step.innerHTML = methods.length
+    ? methods.map(([k, label]) => `<button class="btn" type="button" data-method="${k}" style="margin-top:8px">${label}</button>`).join('')
+    : `<p class="hint">${T('payUnavailable')}</p>`;
+  step.querySelectorAll('[data-method]').forEach((b) => {
+    b.onclick = () => payGo(b.dataset.method, step);
+  });
+}
+async function payGo(method, step) {
+  step.innerHTML = `<p class="hint">${T('syncing')}</p>`;
+  if (method === 'card') {
+    const r = await api('/api/stripe/checkout', 'POST', { months: payMonths });
+    if (r.ok && r.data && r.data.url) { window.location.href = r.data.url; return; }
+    step.innerHTML = `<p class="hint">${T('payCardOff')}</p>`;
+    return;
+  }
+  const r = await api('/api/premium/request', 'POST', { months: payMonths, method });
+  if (!r.ok || !r.data) {
+    step.innerHTML = `<p class="hint">${T('payUnavailable')}</p>`;
+    return;
+  }
+  const p = r.data;
+  const text = `${T('payTitle')} — ${p.months} mois · ${money(p.amount)} · ${T('payRef')} ${p.ref}`;
+  step.innerHTML = `<div class="card">
+    <div class="t">${T('payRef')} <b>${esc(p.ref)}</b></div>
+    <p class="hint">${T('payHow').replace('{amount}', money(p.amount)).replace('{number}', esc(p.number))}</p>
+    ${SUPPORT.wa ? `<a class="btn whats" href="https://wa.me/${SUPPORT.wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">${T('payProof')}</a>` : ''}
+    <p class="hint ok">${T('paySent')}</p>
+  </div>`;
 }
 /* Rien de sensible ne reste dans le stockage local d'un vendeur : un appareil
    qui a synchronisé avant le masquage serveur garderait sinon les prix d'achat
