@@ -367,8 +367,9 @@ function isAdmin(user, list) {
   const digits = digitsOf(user.phone || '');
   return list.some((v) => (v.includes('@') ? v === email : digits.length > 0 && digitsOf(v) === digits));
 }
-/* Réglages communs à toute l'application : publicité et emplacements. */
-const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '' };
+/* Réglages communs à toute l'application : publicité, emplacements et numéro
+   WhatsApp du support (activation Premium et aide). */
+const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '', supportWa: '' };
 async function readConfig(env) {
   const rows = await env.DB.prepare('SELECT key, value FROM app_config').all();
   const map = {};
@@ -378,16 +379,20 @@ async function readConfig(env) {
     adsClient: map.adsClient || '',
     adsTop: map.adsTop || '',
     adsBottom: map.adsBottom || '',
+    supportWa: map.supportWa || '',
   };
 }
 async function saveConfig(env, cfg) {
-  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom]];
+  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom], ['supportWa', cfg.supportWa || '']];
   await env.DB.batch(pairs.map(([k, v]) => env.DB.prepare(
     'INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   ).bind(k, v)));
 }
 const ADMIN_REF = /^ca-pub-\d{10,20}$/;
 const ADMIN_SLOT = /^\d{6,20}$/;
+/* Numéro du support : 8 à 15 chiffres, indicatif compris. Un numéro local
+   (07 00…) est accepté tel quel, wa.me s'en accommode. */
+const validSupportWa = (v) => /^\d{8,15}$/.test(digitsOf(v));
 
 /* 20 inscriptions par heure et par adresse IP : un patron et ses vendeurs
    partagent souvent le même Wi-Fi, et 10 les bloquait au milieu d'une mise en
@@ -628,10 +633,14 @@ async function api(request, env, url) {
     const client = String(body.adsClient || '').trim();
     const top = String(body.adsTop || '').trim();
     const bottom = String(body.adsBottom || '').trim();
+    /* Le numéro du support part tel quel vers wa.me : uniquement des chiffres,
+       indicatif compris, sinon le bouton enverrait vers un lien cassé. */
+    const supportWa = digitsOf(body.supportWa).slice(0, 15);
+    if (String(body.supportWa || '').trim() && !validSupportWa(body.supportWa)) return json({ error: 'support' }, 400);
     if (client && !ADMIN_REF.test(client)) return json({ error: 'client' }, 400);
     if (top && !ADMIN_SLOT.test(top)) return json({ error: 'slot' }, 400);
     if (bottom && !ADMIN_SLOT.test(bottom)) return json({ error: 'slot' }, 400);
-    const cfg = { ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom };
+    const cfg = { ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom, supportWa };
     await saveConfig(env, cfg);
     return json({ ok: true, config: cfg });
   }
@@ -962,6 +971,11 @@ function publicDocHtml(text, nonce) {
      sinon le lien ne s'affiche pas (mieux vaut aucun bouton qu'un lien cassé). */
   const wa = String(s.wa || '').replace(/\D/g, '').slice(0, 15);
   const waText = String(s.waText || '').slice(0, 200);
+  /* Même logo que sur le papier, réduit à l'envoi. Seule une image PNG ou JPEG
+     en data-URL passe : une adresse distante ne doit pas charger un tiers sur
+     la facture du client. */
+  const logo = /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]{100,16000}$/.test(String(s.logo || ''))
+    ? String(s.logo) : '';
   return `<!doctype html>
 <html lang="${lang}" dir="${s.rtl ? 'rtl' : 'ltr'}">
 <head>
@@ -974,6 +988,7 @@ function publicDocHtml(text, nonce) {
 *{box-sizing:border-box}
 body{margin:0;padding:18px;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Tahoma,sans-serif;color:#14261b;background:#f7f4ea;font-size:17px;line-height:1.5}
 .sheet{max-width:760px;margin:0 auto;background:#fff;border:1px solid #d9e5db;border-radius:14px;padding:22px}
+.mark{display:block;max-height:90px;max-width:220px;margin:0 auto 12px}
 .bar{height:6px;background:#14532d;border-radius:4px;margin-bottom:16px}
 h1{font-size:24px;margin:0 0 4px;color:#14532d;text-transform:uppercase;letter-spacing:1px}
 .num{font-size:19px;font-weight:700}
@@ -998,6 +1013,7 @@ footer{margin-top:16px;padding-top:12px;border-top:1px solid #e6ece7;font-size:1
 <body>
 <main class="sheet">
 <div class="bar"></div>
+${logo ? `<img class="mark" src="${logo}" alt="">` : ''}
 <h1>${escHtml(s.title)}</h1>
 <div class="num">N° ${escHtml(s.number)}</div>
 <div class="meta">${escHtml(s.date || '')}</div>

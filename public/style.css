@@ -144,9 +144,9 @@ body.adsOn{padding-bottom:196px}
 .docPreview .tot{display:flex;justify-content:space-between;font-weight:800;margin-top:6px}
 .docPreview .small{font-size:11px;color:#444}
 .docPreview hr{border:0;border-top:1px solid #ddd;margin:8px 0}
-.docPreview .docLogo{max-height:60px;max-width:160px;display:block;margin-bottom:6px}
+.docPreview .docLogo{max-height:60px;max-width:160px;display:block;margin:0 auto 6px}
 .logoPrev{max-height:90px;max-width:180px;border:2px solid #d8e6da;border-radius:10px;padding:4px;background:#fff}
-#printArea .docLogo{max-height:22mm;max-width:65mm;display:block;margin-bottom:4mm}
+#printArea .docLogo{max-height:22mm;max-width:65mm;display:block;margin:0 auto 4mm}
 #printArea.ticket .docLogo{max-height:14mm;max-width:45mm}
 .qrbox{display:flex;justify-content:center;margin:14px 0;padding:10px;background:#fff;border:2px solid #d8e6da;border-radius:14px}
 .qrbox svg{width:220px;height:220px}

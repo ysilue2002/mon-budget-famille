@@ -28,7 +28,7 @@ const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f 
 const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], mailLog: [], log: [], tomb: [],
   seq: { DEV: 0, FAC: 0 },
-  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, invRemindDays: 7, autoRemind: false, autoRemindDay: '', autoRemindInfo: null, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30 },
+  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, invRemindDays: 7, autoRemind: false, autoRemindDay: '', autoRemindInfo: null, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30, inactiveDays: 30 },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
 /* Garde-fou de taille : le serveur refuse au-delà de 2 Mo (worker.js). Prévenir
@@ -59,6 +59,9 @@ let draft = null;
    d'éditeur (ca-pub-…) et les deux identifiants d'emplacement créés dans
    AdSense. Sans identifiant, aucune requête ne part vers Google. */
 const ADS = { client: '', top: '', bottom: '' };
+/* Numéro WhatsApp de l'équipe, réglé dans /admin : sans lui, ni demande
+   d'activation ni bouton de support. Aucun numéro n'est écrit dans le code. */
+const SUPPORT = { wa: '' };
 
 /* Consentement aux cookies publicitaires. « yes » seulement après un clic sur
    Accepter : sans choix, ou après un refus, aucune annonce n'est chargée. */
@@ -261,6 +264,34 @@ function lateByParty() {
     m.set(k, cur);
   });
   return [...m.values()].sort((a, b) => b.days - a.days);
+}
+/* Clients qui n'ont plus rien acheté depuis un moment : une relance douce, à
+   la main, qui ne coûte rien et ne part jamais toute seule. Le seuil se règle
+   dans Réglages ; la relance n'existe que pour un client joignable, donc avec
+   un numéro enregistré. */
+const DEFAULTS_INACTIVE = 30;
+const inactiveDays = () => Math.max(7, Math.round(Number(db.settings.inactiveDays) || DEFAULTS_INACTIVE));
+function inactiveClients() {
+  const last = new Map();
+  db.sales.forEach((s) => {
+    const name = String(s.party || '').trim();
+    if (!name || name === '—') return;
+    if (!last.has(name) || s.date > last.get(name)) last.set(name, s.date);
+  });
+  return [...last.entries()]
+    .map(([name, date]) => ({
+      name, date, days: daysSince(date),
+      phone: String((db.parties.find((p) => p.name === name) || {}).phone || '').trim(),
+    }))
+    .filter((x) => x.days >= inactiveDays())
+    .sort((a, b) => b.days - a.days)
+    .slice(0, 40);
+}
+function inactiveText(x) {
+  return T('inactiveMsg')
+    .replace('[Client]', x.name)
+    .replace('[Boutique]', db.shop || T('app'))
+    .replace('[Jours]', x.days);
 }
 const stockValue = () => db.products.reduce((a, p) => a + qtyOf(p) * p.buy, 0);
 const num = (kind) => {
@@ -491,6 +522,11 @@ function clients() {
       <div class="card"><h3>${T('lateClients')}</h3>
         <p class="hint">${T('overDays')} ${remindDays()} ${T('days')}</p>
         ${lateByParty().map((x) => `<div class="row"><div><div class="t">${esc(x.name)}</div><div class="s">${money(x.sum)} · ${T('since')} ${dayFR(x.since)}</div></div><div class="right"><span class="tag bad">${x.days} ${T('days')}</span><br><button class="btn small whats" data-act="wa" data-name="${esc(x.name)}">${T('remind')}</button></div></div>`).join('') || `<p class="empty">${T('noLate')}</p>`}
+      </div>
+      <div class="card"><h3>${T('inactiveTitle')}</h3>
+        <p class="hint">${T('inactiveHint')} ${inactiveDays()} ${T('days')}</p>
+        ${inactiveClients().map((x) => `<div class="row"><div><div class="t">${esc(x.name)}</div><div class="s">${dayFR(x.date)} · ${x.days} ${T('days')}</div></div><div class="right">
+          ${x.phone ? `<button class="btn small whats" data-act="waInactive" data-name="${esc(x.name)}">${T('remind')}</button>` : `<span class="tag">${x.days} ${T('days')}</span>`}</div></div>`).join('') || `<p class="empty">${T('noInactive')}</p>`}
       </div>
       <div class="card"><h3>${T('clientList')}</h3>
         ${db.parties.map((p) => `<div class="row"><div><div class="t">${esc(p.name)}</div><div class="s">${[p.phone, p.address].filter(Boolean).map(esc).join(' · ') || '—'}</div></div><div class="right">
@@ -2382,6 +2418,9 @@ const accountKey = () => String((me && (me.ownerId || me.id)) || 'anonyme');
    la boutique, comme avant. */
 async function docLink(d) {
   const snapshot = docSnapshot(d);
+  /* Même logo que sur le papier : réduit à 180 px pour tenir dans la copie
+     publiée, et montré seulement s'il reste une vraie image. */
+  snapshot.logo = await logoForDoc();
   const json = JSON.stringify(snapshot);
   const key = accountKey() + '|' + d.number;
   const hit = pubCache.get(key);
@@ -2761,6 +2800,10 @@ document.addEventListener('click', async (e) => {
     const name = b.dataset.name;
     waOpen((db.parties.find((p) => p.name === name) || {}).phone, reminderText(name));
   }
+  if (act === 'waInactive') {
+    const x = inactiveClients().find((c) => c.name === b.dataset.name);
+    if (x) waOpen(x.phone, inactiveText(x));
+  }
   if (act === 'newDoc') { draft = { party: '', phone: '', email: '', address: '', vat: db.settings.vat || 0, cost: 0, lines: [{ label: '', qty: 1, price: 0 }] }; render(); }
   if (act === 'addLine') { syncDraft(); draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
   if (act === 'delLine') { syncDraft(); draft.lines.splice(+b.dataset.i, 1); if (!draft.lines.length) draft.lines.push({ label: '', qty: 1, price: 0 }); render(); }
@@ -2944,6 +2987,35 @@ function syncDraft() {
 }
 
 /* ---------------- réglages ---------------- */
+/* Le logo des documents publics : 180 px suffisent pour l'écran, et la copie
+   reste petite. Résultat gardé en mémoire, sinon chaque facture recalculerait
+   l'image. Au-delà de 12 000 signes, la copie publiée serait trop lourde :
+   mieux vaut aucun logo qu'une facture qui ne se publie pas. */
+let logoDocCache = { src: '', out: '' };
+function logoForDoc() {
+  const src = (db.settings && db.settings.logo) || '';
+  if (!src) return Promise.resolve('');
+  if (logoDocCache.src === src) return Promise.resolve(logoDocCache.out);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const max = 180;
+        const scale = Math.min(1, max / Math.max(img.width || 1, img.height || 1));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round((img.width || 1) * scale));
+        c.height = Math.max(1, Math.round((img.height || 1) * scale));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        const out = c.toDataURL('image/jpeg', 0.7);
+        const small = out.length <= 12000 ? out : '';
+        logoDocCache = { src, out: small };
+        resolve(small);
+      } catch { resolve(''); }
+    };
+    img.onerror = () => resolve('');
+    img.src = src;
+  });
+}
 function readLogo(file, cb) {
   const reader = new FileReader();
   reader.onload = () => {
@@ -3156,10 +3228,19 @@ function loadReferral() {
 function settingsModal() {
   let logoDraft = db.settings.logo || '';
   const d = modal(`<div class="sheetHead"><h2>${T('settings')}</h2></div>
+    <div class="card">
     <div class="row"><div><div class="t">${isPremium() ? T('premiumActive') : T('premiumFreeTag')}</div>
       <div class="s">${isPremium() ? `${T('premiumUntilOn')} ${dayFR(premiumDate())}` : T('premiumPrice')}</div></div>
       <div class="right">${isPremium() ? '<span class="tag ok">Premium</span>' : `<span class="tag warn">${T('premium')}</span>`}</div></div>
-    ${isPremium() ? '' : `<p class="hint">${T('premiumAsk')}</p>`}
+    ${isPremium()
+      ? (SUPPORT.wa
+        ? `<button class="btn whats" id="supGo">${T('supportTitle')}</button><p class="hint">${T('supportHint')}</p>`
+        : `<p class="hint">${T('supportOff')}</p>`)
+      : `<p class="hint">${T('premiumAsk')}</p>
+        <p class="hint">${T('premiumActivateHint')}</p>
+        <button class="btn" id="premGo">${T('premiumActivate')}</button>
+        <button class="btn out" id="premCheck">${T('premiumCheck')}</button>`}
+    </div>
     <label>${T('language')}</label>
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.id === 'en' ? 'English' : 'Français'}</option>`).join('')}</select>
     <details data-owner><summary>${T('secShop')}</summary>
@@ -3178,6 +3259,7 @@ function settingsModal() {
     <p class="hint">${T('vatHint')}</p>
     <label>${T('remindDays')}</label><input id="setRemindDays" inputmode="numeric" value="${esc(db.settings.remindDays == null ? 30 : db.settings.remindDays)}">
     <p class="hint">${T('remindHint')}</p>
+    <label>${T('inactiveDays')}</label><input id="setInactive" inputmode="numeric" value="${esc(db.settings.inactiveDays == null ? 30 : db.settings.inactiveDays)}">
     <label>${T('waveNumber')}</label><input id="setWave" inputmode="tel" placeholder="+225 01 00 00 00 00" value="${esc(db.settings.wave || '')}">
     <label>${T('omNumber')}</label><input id="setOm" inputmode="tel" placeholder="+225 07 00 00 00 00" value="${esc(db.settings.om || '')}">
     <p class="hint">${T('payNumbersHint')}</p>
@@ -3281,6 +3363,26 @@ function settingsModal() {
       if (s) s.textContent = `${s.textContent} — ${T('teamOwnerOnly')}`;
     });
   }
+  const premGo = d.querySelector('#premGo');
+  if (premGo) premGo.onclick = () => {
+    if (!SUPPORT.wa) { alert(T('supportOff')); return; }
+    const account = (me && (me.email || me.phone || me.id)) || '';
+    waOpen(SUPPORT.wa, T('premiumWaMsg').replace('[Boutique]', db.shop || T('app')).replace('[Compte]', account));
+  };
+  /* L'admin active le mois ; ce bouton relit le compte sans reconnexion, sinon
+     le commerçant croirait son paiement perdu jusqu'au lendemain. */
+  const premCheck = d.querySelector('#premCheck');
+  if (premCheck) premCheck.onclick = async () => {
+    const u = await refreshMe();
+    if (u && Number(u.premiumUntil) > Date.now()) {
+      d.remove(); render(); settingsModal(); alert(T('premiumThanks'));
+    } else alert(T('premiumNotYet'));
+  };
+  const supGo = d.querySelector('#supGo');
+  if (supGo) supGo.onclick = () => {
+    if (!SUPPORT.wa) { alert(T('supportOff')); return; }
+    waOpen(SUPPORT.wa, T('supportMsg').replace('[Boutique]', db.shop || T('app')));
+  };
   loadTeam(d.querySelector('#teamBox'));
   const ckState = d.querySelector('#ckState');
   if (ckState) {
@@ -3379,6 +3481,7 @@ function settingsModal() {
     db.settings.wa = wa;
     db.settings.vat = Math.max(0, Math.round(+d.querySelector('#setVat').value || 0));
     db.settings.remindDays = Math.min(365, Math.max(1, Math.round(+d.querySelector('#setRemindDays').value || 30)));
+    db.settings.inactiveDays = Math.min(365, Math.max(7, Math.round(+d.querySelector('#setInactive').value || 30)));
     db.settings.logo = logoDraft;
     db.settings.legal = {
       name: d.querySelector('#lgName').value.trim(),
@@ -3720,7 +3823,7 @@ function storedMe() {
 }
 function rememberMe(user) {
   try {
-    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, name: user.name || null, role: user.role || 'owner', ownerId: user.ownerId || null, perms: user.perms || null }));
+    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, name: user.name || null, role: user.role || 'owner', ownerId: user.ownerId || null, perms: user.perms || null, premiumUntil: Number(user.premiumUntil) || 0 }));
     else localStorage.removeItem(KEY + '.me');
   } catch {}
 }
@@ -4238,7 +4341,10 @@ function setupServiceWorker() {
    AdSense réel, rien n'est demandé à Google et l'option reste invisible. */
 async function loadAppConfig() {
   const r = await api('/api/config');
-  if (!r.ok || !r.data || !r.data.ads || !r.data.adsClient) return;
+  if (!r.ok || !r.data) return;
+  /* Le support se lit même quand la publicité est vide. */
+  SUPPORT.wa = String(r.data.supportWa || '').replace(/\D/g, '').slice(0, 15);
+  if (!r.data.ads || !r.data.adsClient) return;
   ADS.client = String(r.data.adsClient);
   ADS.top = String(r.data.adsTop || '');
   ADS.bottom = String(r.data.adsBottom || '');

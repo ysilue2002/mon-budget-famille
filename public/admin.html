@@ -96,7 +96,11 @@
       <input id="adsTop" type="text" inputmode="numeric" placeholder="1234567890" autocomplete="off">
       <label for="adsBottom">Emplacement du bas</label>
       <input id="adsBottom" type="text" inputmode="numeric" placeholder="0987654321" autocomplete="off">
-      <button class="btn solid" id="adsSave" type="button">Enregistrer la publicité</button>
+      <h2 style="margin-top:18px">Support WhatsApp</h2>
+      <p class="hint">Le bouton « Support WhatsApp » des comptes Premium et la demande d'activation Premium arrivent sur ce numéro. Laissez vide pour masquer le bouton.</p>
+      <label for="supportWa">Numéro WhatsApp du support (indicatif compris)</label>
+      <input id="supportWa" type="text" inputmode="tel" placeholder="+225 07 00 00 00 00" autocomplete="off">
+      <button class="btn solid" id="adsSave" type="button">Enregistrer</button>
       <p class="hint" id="adsMsg"></p>
     </section>
   </div>
@@ -169,6 +173,7 @@
     document.getElementById('adsClient').value = cfg.adsClient || '';
     document.getElementById('adsTop').value = cfg.adsTop || '';
     document.getElementById('adsBottom').value = cfg.adsBottom || '';
+    document.getElementById('supportWa').value = cfg.supportWa || '';
   }
 
   function renderShops() {
@@ -260,6 +265,7 @@
           adsClient: document.getElementById('adsClient').value.trim(),
           adsTop: document.getElementById('adsTop').value.trim(),
           adsBottom: document.getElementById('adsBottom').value.trim(),
+          supportWa: document.getElementById('supportWa').value.trim(),
         }),
       });
       if (!r.ok) {
@@ -267,11 +273,12 @@
         msg.className = 'err';
         msg.textContent = j.error === 'client' ? 'Identifiant AdSense invalide (ca-pub-…).'
           : j.error === 'slot' ? 'Emplacement invalide : chiffres seulement.'
+          : j.error === 'support' ? 'Numéro WhatsApp invalide (8 à 15 chiffres, indicatif compris).'
           : 'Non enregistré. Réessayez.';
         return;
       }
       msg.className = 'ok';
-      msg.textContent = 'Publicité enregistrée.';
+      msg.textContent = 'Réglages enregistrés.';
       await load(true);
     } catch {
       msg.className = 'err';

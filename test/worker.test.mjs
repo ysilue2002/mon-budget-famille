@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -230,6 +230,27 @@ test('la facture publique permet d’écrire à la boutique, sans lien cassé', 
   assert.ok(!none.includes('wa.me/'), 'sans numéro : aucun bouton');
   const dirty = publicDocHtml(JSON.stringify({ ...base, wa: 'abc"><script>', waText: 'x' }));
   assert.ok(!dirty.includes('wa.me/'), 'numéro invalide : aucun bouton');
+});
+
+test('le numéro du support n’accepte que des chiffres utilisables', () => {
+  assert.equal(validSupportWa('+225 07 00 00 00 00'), true);
+  assert.equal(validSupportWa('22507000000'), true);
+  assert.equal(validSupportWa('abc'), false);
+  assert.equal(validSupportWa('+225 07'), false);
+  assert.equal(validSupportWa('1234567890123456'), false);
+  assert.equal(validSupportWa(''), false);
+});
+
+test('la facture publique reprend le logo, jamais une image distante', () => {
+  const base = { kind: 'FAC', title: 'Facture', number: 'FAC-2026-001', shop: 'B', lines: [], ht: '', ttc: '', labels: {} };
+  const png = 'data:image/png;base64,' + 'A'.repeat(400);
+  const withLogo = publicDocHtml(JSON.stringify({ ...base, logo: png }));
+  assert.ok(withLogo.includes('class="mark"'), 'logo affiché');
+  assert.ok(withLogo.includes(png), 'même image que sur le papier');
+  const remote = publicDocHtml(JSON.stringify({ ...base, logo: 'https://exemple.test/logo.png' }));
+  assert.ok(!remote.includes('class="mark"'), 'aucune image distante');
+  const svg = publicDocHtml(JSON.stringify({ ...base, logo: 'data:image/svg+xml;base64,' + 'A'.repeat(400) }));
+  assert.ok(!svg.includes('class="mark"'), 'seulement PNG ou JPEG');
 });
 
 test('le code de parrainage est court, lisible et devient un canal', () => {
