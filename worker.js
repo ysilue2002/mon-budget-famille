@@ -393,12 +393,86 @@ async function expireStalePayments(env, now) {
     ).bind(cutoff).run();
     const n = Number((r.meta && r.meta.changes) || 0);
     if (n) await adminLog(env, 'systeme', 'request-expire', null, `${n} demande(s) sans transfert`);
-    /* Un premier accord sur une demande expirée ne doit pas survivre. */
+    /* Les jetons d'accord, d'avertissement et de relance d'une demande qui
+       n'est plus en attente ne servent plus à rien. */
     await env.DB.prepare(
-      "DELETE FROM app_config WHERE key LIKE 'payok:%' AND substr(key, 7) NOT IN (SELECT id FROM payments WHERE status = 'pending')",
+      "DELETE FROM app_config WHERE (key LIKE 'payok:%' OR key LIKE 'paywarn:%' OR key LIKE 'paywait:%') AND substr(key, instr(key, ':') + 1) NOT IN (SELECT id FROM payments WHERE status = 'pending')",
     ).run().catch(() => {});
     return n;
   } catch { return 0; }
+}
+
+/* La boutique est prévenue trois jours avant l'expiration : elle a encore le
+   temps de payer, ou d'annuler et de recommencer. Un seul avertissement par
+   demande, celui qui a réellement pu partir. */
+const PAY_WARN_DAYS = 3;
+const needsExpiryWarning = (created, now) => {
+  const age = (Number(now) || Date.now()) - (Number(created) || 0);
+  return age >= (PENDING_DAYS - PAY_WARN_DAYS) * 86400000 && age < PENDING_DAYS * 86400000;
+};
+async function warnExpiringPayments(env, now) {
+  const at = Number(now) || Date.now();
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT p.id, p.ref, p.months, p.amount, u.email FROM payments p JOIN users u ON u.id = p.user_id WHERE p.status = 'pending' AND p.created >= ? AND p.created < ? LIMIT 50",
+    ).bind(at - PENDING_DAYS * 86400000, at - (PENDING_DAYS - PAY_WARN_DAYS) * 86400000).all();
+    let n = 0;
+    for (const r of rows.results || []) {
+      const key = 'paywarn:' + r.id;
+      const done = await env.DB.prepare('SELECT value FROM app_config WHERE key = ?').bind(key).first().catch(() => null);
+      if (done) continue;
+      const text = `Bonjour,\n\nVotre demande Premium ${r.ref} (${r.months} mois, ${r.amount} FCFA) expire dans ${PAY_WARN_DAYS} jours.\n\nSi vous avez déjà transféré, envoyez-nous la preuve sur WhatsApp. Sinon, annulez-la et recommencez depuis l'application.`;
+      const mailed = await sendTextMail(env, r.email, 'Assistant Commercial : votre demande expire bientôt', text);
+      if (!mailed) continue;
+      await env.DB.prepare('INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, String(at)).run();
+      n += 1;
+    }
+    if (n) await adminLog(env, 'systeme', 'request-warn', null, `${n} boutique(s) prévenue(s) avant expiration`);
+    return n;
+  } catch { return 0; }
+}
+
+/* Un premier accord qui attend depuis quarante-huit heures est relancé auprès
+   de celui qui l'a donné : sans cela, le mois reste fermé sans que personne
+   ne s'en aperçoive. */
+const APPROVAL_ALERT_HOURS = 48;
+const needsApprovalAlert = (at, now) => {
+  const since = (Number(now) || Date.now()) - (Number(at) || 0);
+  return Number(at) > 0 && since >= APPROVAL_ALERT_HOURS * 3600000;
+};
+async function alertStaleApprovals(env, now) {
+  const at = Number(now) || Date.now();
+  try {
+    const rows = await env.DB.prepare("SELECT key, value FROM app_config WHERE key LIKE 'payok:%'").all();
+    let n = 0;
+    for (const r of rows.results || []) {
+      let appr;
+      try { appr = JSON.parse(String(r.value)); } catch { continue; }
+      if (!appr || !appr.by || !needsApprovalAlert(appr.at, at)) continue;
+      const id = String(r.key).slice(6);
+      const done = await env.DB.prepare('SELECT value FROM app_config WHERE key = ?').bind('paywait:' + id).first().catch(() => null);
+      if (done) continue;
+      const pay = await env.DB.prepare("SELECT ref, months, amount FROM payments WHERE id = ? AND status = 'pending'").bind(id).first().catch(() => null);
+      if (!pay) continue;
+      const text = `Bonjour,\n\nVotre accord sur ${pay.ref} (${pay.months} mois, ${pay.amount} FCFA) attend toujours un second administrateur. Ouvrez Administration, onglet Paiements, pour le faire confirmer.\n\nAucun mois n'est ouvert tant que personne n'a confirmé.`;
+      const mailed = await sendTextMail(env, appr.by, 'Assistant Commercial : un second accord est attendu', text);
+      if (!mailed) continue;
+      await env.DB.prepare('INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind('paywait:' + id, String(at)).run();
+      n += 1;
+    }
+    if (n) await adminLog(env, 'systeme', 'payment-approval-alert', null, `${n} premier(s) accord(s) relancé(s)`);
+    return n;
+  } catch { return 0; }
+}
+
+/* Un seul balayage, à chaque lecture des demandes : expiration, avertissement
+   avant échéance, relance d'un accord oublié. Aucun envoi n'est bloquant. */
+async function sweepPayments(env) {
+  const now = Date.now();
+  const expired = await expireStalePayments(env, now);
+  await warnExpiringPayments(env, now);
+  await alertStaleApprovals(env, now);
+  return expired;
 }
 
 /* Reçu de paiement : au commerçant, et en copie au support s'il est réglé.
@@ -1474,8 +1548,9 @@ async function api(request, env, url, ctx) {
   /* Paiements : les demandes Wave / Orange Money en attente, et les dernières
      lignes réglées. La validation est le seul geste qui ouvre un mois. */
   if (path === '/api/admin/payments' && request.method === 'GET') {
-    /* Les demandes sans transfert n'encombrent plus la liste. */
-    await expireStalePayments(env);
+    /* Les demandes sans transfert n'encombrent plus la liste, celles qui vont
+       expirer sont signalées et les accords oubliés relancés. */
+    await sweepPayments(env);
     const rows = await env.DB.prepare(
       `SELECT p.id, p.ref, p.months, p.amount, p.method, p.status, p.created, p.paid_at, p.actor, p.note, p.notified,
         u.email, u.phone, COALESCE(json_extract(s.json,'$.shop'), '') AS shop
@@ -1488,7 +1563,7 @@ async function api(request, env, url, ctx) {
     for (const r of apprRows.results || []) {
       try {
         const v = JSON.parse(String(r.value));
-        if (v && v.by) approved.set(String(r.key).slice(6), String(v.by));
+        if (v && v.by) approved.set(String(r.key).slice(6), { by: String(v.by), at: Number(v.at) || 0 });
       } catch { /* ligne illisible : ignorée */ }
     }
     return json({
@@ -1497,7 +1572,8 @@ async function api(request, env, url, ctx) {
         method: String(r.method || ''), status: String(r.status || ''), created: Number(r.created) || 0,
         paidAt: Number(r.paid_at) || 0, actor: r.actor || null, note: r.note || null, notified: Number(r.notified) || 0,
         email: r.email || null, phone: r.phone || null, shop: String(r.shop || ''),
-        approvedBy: approved.get(String(r.id)) || null,
+        approvedBy: (approved.get(String(r.id)) || {}).by || null,
+        approvedAt: (approved.get(String(r.id)) || {}).at || 0,
       })),
     });
   }
@@ -1744,8 +1820,8 @@ async function api(request, env, url, ctx) {
   /* Demande en attente côté commerçant : il voit sa référence et peut
      l'annuler s'il s'est trompé de moyen ou de durée. */
   if (path === '/api/premium/request' && request.method === 'GET') {
-    /* Une demande trop vieille disparaît : plus de carte bloquante. */
-    await expireStalePayments(env);
+    /* Une demande trop vieille disparaît, une qui va expirer est signalée. */
+    await sweepPayments(env);
     const row = await env.DB.prepare(
       "SELECT id, ref, months, amount, method, created FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created DESC LIMIT 1",
     ).bind(user.id).first();

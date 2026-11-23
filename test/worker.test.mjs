@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -562,4 +562,29 @@ test('un code de secours ne sert qu’une fois', async () => {
   assert.equal(await backupCodesLeft(env, 'boss@test.ci'), 8, 'une nouvelle liste remplace l’ancienne');
   assert.equal(await useBackupCode(env, 'boss@test.ci', codes[0]), false, 'les anciens codes ne marchent plus');
   assert.equal(await useBackupCode(env, 'boss@test.ci', fresh[0]), true);
+});
+
+/* Les deux rappels automatiques doivent tomber dans une fenêtre précise :
+   trois jours avant l'expiration, jamais après, et jamais sur une demande
+   déjà expirée ; quarante-huit heures après le premier accord, pas avant. */
+test('l’avertissement avant expiration vise les trois derniers jours', () => {
+  const now = 1900000000000;
+  const d = 86400000;
+  assert.equal(PAY_WARN_DAYS, 3);
+  assert.equal(needsExpiryWarning(now - (PENDING_DAYS - PAY_WARN_DAYS) * d, now), true, 'premier jour utile');
+  assert.equal(needsExpiryWarning(now - 28 * d, now), true, 'au milieu de la fenêtre');
+  assert.equal(needsExpiryWarning(now - 26 * d, now), false, 'trop tôt');
+  assert.equal(needsExpiryWarning(now - PENDING_DAYS * d, now), false, 'déjà expirée');
+  assert.equal(needsExpiryWarning(0, now), false, 'sans date');
+});
+
+test('le premier approbateur est relancé après quarante-huit heures', () => {
+  const now = 1900000000000;
+  const h = 3600000;
+  assert.equal(APPROVAL_ALERT_HOURS, 48);
+  assert.equal(needsApprovalAlert(now - 48 * h, now), true, 'seuil atteint');
+  assert.equal(needsApprovalAlert(now - 72 * h, now), true, 'plus vieux encore');
+  assert.equal(needsApprovalAlert(now - 47 * h, now), false, 'pas encore');
+  assert.equal(needsApprovalAlert(now + h, now), false, 'date future : rien');
+  assert.equal(needsApprovalAlert(0, now), false, 'sans accord');
 });

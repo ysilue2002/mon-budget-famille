@@ -835,7 +835,7 @@
           <div>
             <div class="t">${esc(p.shop || p.email || p.phone || '—')}</div>
             <div class="s">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'} · réf. <b>${esc(p.ref)}</b></div>
-            <div class="s">Demandé le ${when(p.created)}${hoursSince(p.created) >= 24 ? ' · <b style="color:#7a4a00">en attente depuis ' + num(hoursSince(p.created)) + ' h</b>' : ''}${p.notified ? ' · relancé' : ''}${p.approvedBy ? ' · <b>1er accord : ' + esc(p.approvedBy) + '</b>' : ''}</div>
+            <div class="s">Demandé le ${when(p.created)}${hoursSince(p.created) >= 24 ? ' · <b style="color:#7a4a00">en attente depuis ' + num(hoursSince(p.created)) + ' h</b>' : ''}${p.notified ? ' · relancé' : ''}${p.approvedBy ? ' · <b>1er accord : ' + esc(p.approvedBy) + (p.approvedAt ? ' (il y a ' + num(hoursSince(p.approvedAt)) + ' h)' : '') + '</b>' : ''}</div>
           </div>
           <div>${hoursSince(p.created) >= 24 ? '<span class="badge warn">En retard</span>' : ''}</div>
           <div class="acts2">
