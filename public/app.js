@@ -3247,6 +3247,7 @@ function settingsModal() {
       <div class="s">${isPremium() ? `${T('premiumUntilOn')} ${dayFR(premiumDate())}` : T('premiumPrice')}</div></div>
       <div class="right">${isPremium() ? '<span class="tag ok">Premium</span>' : `<span class="tag warn">${T('premium')}</span>`}</div></div>
     <button class="btn" id="premPay">${T('payBtn')}</button>
+    <div id="premPending"></div>
     ${isPremium()
       ? (SUPPORT.wa ? `<button class="btn whats" id="supGo">${T('supportTitle')}</button>` : `<p class="hint">${T('supportOff')}</p>`)
       : `<label>${T('premiumCode')}</label>
@@ -3402,6 +3403,7 @@ function settingsModal() {
   };
   const premPay = d.querySelector('#premPay');
   if (premPay) premPay.onclick = () => { d.remove(); openPay(); };
+  loadPending(d.querySelector('#premPending'));
   const premAsk = d.querySelector('#premAsk');
   if (premAsk) premAsk.onclick = () => {
     if (!SUPPORT.wa) { alert(T('supportOff')); return; }
@@ -3783,17 +3785,36 @@ function renewPremium() {
    d'afficher un prix inventé. */
 const PAY = { priceMonth: 0, payWave: '', payOm: '', card: false };
 let payMonths = 1;
+let payPending = null;
+/* Demande en attente : le commerçant la voit au lieu de recommencer. */
+async function loadPending(el) {
+  const r = await api('/api/premium/request');
+  const p = r.ok && r.data ? r.data.pending : null;
+  if (el) el.innerHTML = p ? `<p class="hint ok">${T('payPending').replace('{ref}', esc(p.ref))} — ${fcfa(p.amount)}</p>` : '';
+  return p;
+}
 async function openPay() {
   const wait = modal(`<div class="sheetHead"><h2>${T('payTitle')}</h2></div><p class="hint">${T('syncing')}</p>`);
-  const r = await api('/api/premium/offer');
+  const [r, p] = await Promise.all([api('/api/premium/offer'), api('/api/premium/request')]);
   if (r.ok && r.data) {
     PAY.priceMonth = Number(r.data.priceMonth) || 0;
     PAY.payWave = String(r.data.payWave || '');
     PAY.payOm = String(r.data.payOm || '');
     PAY.card = !!r.data.card;
   }
+  payPending = p.ok && p.data ? p.data.pending : null;
   wait.remove();
   payModal();
+}
+function pendingCard(p) {
+  const when = p.created ? new Date(Number(p.created)).toLocaleDateString('fr-FR') : '';
+  return `<div class="card">
+    <div class="t">${T('payPending').replace('{ref}', esc(p.ref))}</div>
+    <p class="hint">${fcfa(p.amount)} · ${p.months} · ${esc(when)}</p>
+    <p class="hint">${T('payPendingHint')}</p>
+    ${SUPPORT.wa ? `<a class="btn whats" href="https://wa.me/${SUPPORT.wa}?text=${encodeURIComponent(T('payTitle') + ' — ' + p.ref)}" target="_blank" rel="noopener">${T('payProof')}</a>` : ''}
+    <button class="btn out" id="payCancel" type="button">${T('payCancel')}</button>
+  </div>`;
 }
 function payModal() {
   const price = Number(PAY.priceMonth) || 0;
@@ -3801,6 +3822,21 @@ function payModal() {
   const d = modal(`<div class="sheetHead"><h2>${T('payTitle')}</h2></div><div id="payBody"></div>`);
   const body = d.querySelector('#payBody');
   const waText = T('premiumWaMsg').replace('[Boutique]', db.shop || T('app')).replace('[Compte]', (me && (me.email || me.phone || me.id)) || '');
+  /* Une demande déjà en attente remplace le formulaire : la refaire ne
+     créerait rien de plus et brouillerait la vérification. */
+  if (payPending) {
+    body.innerHTML = pendingCard(payPending);
+    body.querySelector('#payCancel').onclick = async () => {
+      if (!confirm(T('payCancelAsk'))) return;
+      const r = await api('/api/premium/request/cancel', 'POST', { id: payPending.id });
+      if (!r.ok) { alert(T('payCancelFail')); return; }
+      payPending = null;
+      d.remove();
+      toast(T('payCancelled'));
+      openPay();
+    };
+    return;
+  }
   if (!price) {
     body.innerHTML = `<p class="hint">${T('payNoPrice')}</p>
       ${SUPPORT.wa ? `<button class="btn whats" id="payWa">${T('premiumRenew')}</button>` : ''}
@@ -3848,6 +3884,7 @@ async function payGo(method, step) {
   }
   const p = r.data;
   const text = `${T('payTitle')} — ${p.months} mois · ${fcfa(p.amount)} · ${T('payRef')} ${p.ref}`;
+  payPending = { id: p.id, ref: p.ref, months: p.months, amount: p.amount, method: p.method, created: p.created };
   step.innerHTML = `<div class="card">
     <div class="t">${T('payRef')} <b>${esc(p.ref)}</b></div>
     <p class="hint">${T('payHow').replace('{amount}', fcfa(p.amount)).replace('{number}', esc(p.number))}</p>

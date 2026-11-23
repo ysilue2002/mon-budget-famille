@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, adminTotps, csvOf };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, adminTotps, csvOf } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -366,6 +366,13 @@ test('le code à 6 chiffres suit la RFC 6238', async () => {
   assert.equal(await totpOk(env, 'boss@test.ci', '000000'), false, 'mauvais code');
   assert.equal(await totpOk(env, 'boss@test.ci', ''), false, 'sans code');
   assert.equal(await totpOk(env, 'autre@test.ci', ''), true, 'sans secret : pas de second facteur');
+  /* Le compteur renvoyé sert à refuser un code déjà employé : le même code
+     doit toujours donner le même compteur, et deux codes voisins différer. */
+  const t0 = 1111111109 * 1000;
+  assert.equal(await totpMatch(secret, '081804', t0), Math.floor(t0 / 30000));
+  assert.equal(await totpMatch(secret, '005924', t0), null, 'code d’un autre instant');
+  assert.equal(await totpMatch(secret, '08180', t0), null, 'cinq chiffres');
+  assert.equal(await totpMatch('', '081804', t0), null, 'sans secret');
   assert.equal(adminTotps(env).size, 1);
   assert.equal(adminTotps({ ADMIN_TOTP: 'sans-deux-points' }).size, 0);
 });

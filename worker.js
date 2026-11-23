@@ -294,18 +294,36 @@ function adminTotps(env) {
   }
   return map;
 }
+/* Renvoie le pas de temps (compteur de 30 s) qui correspond au code, ou null.
+   Le compteur sert aussi à refuser un code déjà utilisé : sans cela, six
+   chiffres lus par-dessus une épaule resteraient valables quatre-vingt-dix
+   secondes, et rejouables. */
+async function totpMatch(secret, code, now) {
+  const given = String(code || '').replace(/\D/g, '');
+  if (!secret || given.length !== 6) return null;
+  const at = Number(now) || Date.now();
+  for (const step of [-1, 0, 1]) {
+    const counter = Math.floor((at + step * 30000) / 30000);
+    if (same(given, await hotp(secret, counter))) return counter;
+  }
+  return null;
+}
 async function totpOk(env, email, code) {
   const secret = adminTotps(env).get(String(email || '').trim().toLowerCase());
   if (!secret) return true;
-  const given = String(code || '').replace(/\D/g, '');
-  if (given.length !== 6) return false;
-  const now = Date.now();
-  /* Une fenêtre de trente secondes de chaque côté : les horloges de téléphone
-     dérivent un peu, et un code tapé juste avant la bascule doit passer. */
-  for (const step of [-1, 0, 1]) {
-    if (same(given, await totpAt(secret, now + step * 30000))) return true;
-  }
-  return false;
+  return (await totpMatch(secret, code, Date.now())) !== null;
+}
+async function totpLastUsed(env, email) {
+  try {
+    const row = await env.DB.prepare('SELECT value FROM app_config WHERE key = ?').bind('totp:' + email).first();
+    return Number(row && row.value) || 0;
+  } catch { return 0; }
+}
+async function totpRemember(env, email, counter) {
+  try {
+    await env.DB.prepare("INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind('totp:' + email, String(counter)).run();
+  } catch { /* un échec mémoire ne doit pas empêcher la connexion */ }
 }
 
 /* Reçu de paiement : au commerçant, et en copie au support s'il est réglé.
@@ -314,7 +332,8 @@ async function totpOk(env, email, code) {
 async function sendReceiptMail(env, to, info) {
   if (!env.RESEND_API_KEY || !to) return false;
   const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
-  const copy = String(env.SUPPORT_EMAIL || '').trim();
+  /* Une copie mal saisie ne doit pas faire échouer le reçu du commerçant. */
+  const copy = validEmail(String(env.SUPPORT_EMAIL || '').trim()) ? String(env.SUPPORT_EMAIL).trim() : '';
   const text = `Bonjour${info.shop ? ' ' + info.shop : ''},\n\nNous avons reçu votre paiement.\n\n  ${info.months} mois de Premium · ${info.amount} FCFA\n  Référence : ${info.ref}\n  Premium valable jusqu'au ${new Date(info.until).toLocaleDateString('fr-FR')}\n\nMerci. L'équipe Assistant Commercial.`;
   try {
     const body = { from, to: [to], subject: 'Assistant Commercial : paiement reçu', text };
@@ -1051,8 +1070,12 @@ async function api(request, env, url, ctx) {
        aucune trace du vrai code dans la réponse. */
     const expectedCode = codeForAdmin(env, email);
     /* Deux serrures quand ADMIN_TOTP est posé pour cette personne : le code
-       d'administration, puis les six chiffres de son téléphone. */
-    const second = await totpOk(env, email, body.totp);
+       d'administration, puis les six chiffres de son téléphone — et chaque
+       code à six chiffres ne sert qu'une fois. */
+    const totpSecret = adminTotps(env).get(email);
+    const counter = totpSecret ? await totpMatch(totpSecret, body.totp, Date.now()) : null;
+    const lastCounter = totpSecret ? await totpLastUsed(env, email) : 0;
+    const second = totpSecret ? counter !== null && counter > lastCounter : true;
     const ok = adminEmailOk(email, list) && !!expectedCode
       && same(await sha256(code), await sha256(expectedCode)) && second;
     if (!ok) {
@@ -1063,6 +1086,7 @@ async function api(request, env, url, ctx) {
     }
     const expires = Date.now() + ADMIN_SESSION_MS;
     const token = await adminToken(env, email, expires);
+    if (counter !== null) await totpRemember(env, email, counter);
     await adminLog(env, email, 'login', null, 'session ouverte');
     /* SameSite=Strict : le cookie d'administration ne part jamais avec une
        requête venue d'un autre site, même en simple navigation. */
@@ -1377,6 +1401,13 @@ async function api(request, env, url, ctx) {
     const note = String(body.note || '').slice(0, 120) || null;
     const label = target.email || target.phone || target.id;
     if (body.ok) {
+      /* Garde : l'admin recopie la référence affichée. Sans elle, un clic
+         rapide sur la mauvaise ligne ouvrirait le mois d'une autre boutique.
+         Une demande de plus de trente jours n'ouvre qu'après confirmation. */
+      const ref = String(body.ref || '').trim().toUpperCase();
+      if (ref !== String(pay.ref).toUpperCase()) return json({ error: 'ref' }, 409);
+      if (!(Number(pay.amount) > 0)) return json({ error: 'amount' }, 409);
+      if (!body.force && Date.now() - (Number(pay.created) || 0) > 30 * 86400000) return json({ error: 'old' }, 409);
       const months = Math.max(1, Number(pay.months) || 1);
       /* Le statut est changé en premier et sous condition : deux clics
          simultanés n'ouvrent qu'un mois. */
@@ -1569,6 +1600,37 @@ async function api(request, env, url, ctx) {
       .bind(id, ref, user.id, months, amount, method, 'pending', Date.now()).run();
     await adminLog(env, 'boutique', 'pay-request', user.email || user.phone || user.id, `${months} mois · ${method} · ${ref}`);
     return json({ id, ref, amount, months, method, number: method === 'wave' ? cfg.payWave : cfg.payOm, supportWa: cfg.supportWa });
+  }
+
+  /* Demande en attente côté commerçant : il voit sa référence et peut
+     l'annuler s'il s'est trompé de moyen ou de durée. */
+  if (path === '/api/premium/request' && request.method === 'GET') {
+    const row = await env.DB.prepare(
+      "SELECT id, ref, months, amount, method, created FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created DESC LIMIT 1",
+    ).bind(user.id).first();
+    const cfg = await readConfig(env);
+    if (!row) return json({ pending: null, supportWa: cfg.supportWa });
+    return json({
+      pending: {
+        id: String(row.id), ref: String(row.ref), months: Number(row.months) || 1,
+        amount: Number(row.amount) || 0, method: String(row.method || ''),
+        created: Number(row.created) || 0,
+        number: row.method === 'wave' ? cfg.payWave : cfg.payOm,
+      },
+      supportWa: cfg.supportWa,
+    });
+  }
+
+  if (path === '/api/premium/request/cancel' && request.method === 'POST') {
+    const body = await readBody(request);
+    const id = String(body.id || '');
+    const row = await env.DB.prepare("SELECT id, ref FROM payments WHERE id = ? AND user_id = ? AND status = 'pending'")
+      .bind(id, user.id).first();
+    if (!row) return json({ error: 'notfound' }, 404);
+    const done = await env.DB.prepare("UPDATE payments SET status = 'cancelled', note = 'annulée par la boutique' WHERE id = ? AND status = 'pending'").bind(row.id).run();
+    if (!done.meta || !done.meta.changes) return json({ error: 'notfound' }, 404);
+    await adminLog(env, 'boutique', 'request-cancel', user.email || user.phone || user.id, String(row.ref));
+    return json({ ok: true });
   }
 
   /* Carte bancaire : Stripe ouvre sa page de paiement, le webhook confirme.

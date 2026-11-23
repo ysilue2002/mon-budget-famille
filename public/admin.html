@@ -820,14 +820,14 @@
           </div>
           <div>${hoursSince(p.created) >= 24 ? '<span class="badge warn">En retard</span>' : ''}</div>
           <div class="acts2">
-            <button class="btn small solid" type="button" data-pay-ok="${esc(p.id)}">Paiement reçu</button>
+            <button class="btn small solid" type="button" data-pay-ok="${esc(p.id)}" data-ref="${esc(p.ref)}" data-info="${esc(num(p.amount) + ' FCFA · ' + num(p.months) + ' mois · ' + (p.shop || p.email || p.phone || '—'))}">Paiement reçu</button>
             <button class="btn small" type="button" data-pay-remind="${esc(p.id)}">Relancer</button>
             <button class="btn small" type="button" data-pay-no="${esc(p.id)}">Refuser</button>
           </div>
         </div>`).join('')
         : '<p class="empty">Aucune demande en attente.</p>';
       document.getElementById('payHistory').innerHTML = done.length
-        ? done.slice(0, 12).map((p) => `<div class="hist"><div><b>${esc(p.ref)}</b><div class="hint" style="margin:0">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'}</div></div><div class="hint who" style="margin:0">${esc(p.shop || p.email || p.phone || '—')}<br>${when(p.paidAt || p.created)} · ${p.status === 'paid' ? 'validé' : p.status === 'refunded' ? 'remboursé' : 'refusé'}${p.status === 'paid' ? ` <button class="btn small" type="button" data-pay-refund="${esc(p.id)}">Rembourser</button>` : ''}</div></div>`).join('')
+        ? done.slice(0, 12).map((p) => `<div class="hist"><div><b>${esc(p.ref)}</b><div class="hint" style="margin:0">${num(p.months)} mois · ${num(p.amount)} FCFA · ${p.method === 'om' ? 'Orange Money' : p.method === 'wave' ? 'Wave' : 'carte'}</div></div><div class="hint who" style="margin:0">${esc(p.shop || p.email || p.phone || '—')}<br>${when(p.paidAt || p.created)} · ${p.status === 'paid' ? 'validé' : p.status === 'refunded' ? 'remboursé' : p.status === 'cancelled' ? 'annulé par la boutique' : 'refusé'}${p.status === 'paid' ? ` <button class="btn small" type="button" data-pay-refund="${esc(p.id)}">Rembourser</button>` : ''}</div></div>`).join('')
         : '<p class="empty">—</p>';
     } catch { box.innerHTML = '<p class="empty">—</p>'; }
   }
@@ -859,6 +859,10 @@
     const b = ok || no || remind || refund;
     if (!b) return;
     if (refund && !confirm('Rembourser ce paiement ? Les mois seront retirés de la boutique.')) return;
+    /* Valider ouvre un mois : on montre le montant et la référence avant,
+       pour qu’un clic ne tombe pas sur la demande voisine. */
+    const ask = ok ? 'Valider le paiement ?\n\n' + ok.dataset.info + '\nRéférence : ' + ok.dataset.ref + '\n\nVérifiez que le transfert porte bien cette référence.' : '';
+    if (ok && !confirm(ask)) return;
     const msg = document.getElementById('payMsg');
     b.disabled = true;
     msg.className = 'hint';
@@ -866,14 +870,27 @@
     try {
       let path = '/api/admin/payment';
       let payload = { id: ok ? ok.dataset.payOk : no.dataset.payNo, ok: !!ok };
+      if (ok) { payload.ref = ok.dataset.ref; }
       if (remind) { path = '/api/admin/payment-remind'; payload = { id: remind.dataset.payRemind }; }
       if (refund) { path = '/api/admin/refund'; payload = { id: refund.dataset.payRefund }; }
-      const r = await fetch(path, {
+      const send = () => fetch(path, {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      let r = await send();
+      if (r.status === 409 && ok) {
+        const e = await r.json().catch(() => ({}));
+        if (e.error === 'old' && confirm('Cette demande date de plus de 30 jours.\nOuvrir le mois quand même ?')) {
+          payload.force = true;
+          r = await send();
+        } else if (e.error === 'ref') {
+          throw new Error('La référence ne correspond pas à cette demande. Rechargez la liste.');
+        } else if (e.error === 'amount') {
+          throw new Error('Le montant de cette demande est nul : refusez-la et faites-en une nouvelle.');
+        }
+      }
       if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
-      if (!r.ok) throw new Error();
+      if (!r.ok) throw new Error('Non enregistré. Réessayez.');
       const d = await r.json().catch(() => ({}));
       msg.className = 'hint ok';
       if (remind) msg.textContent = d.mail ? 'Relance envoyée par e-mail.' : 'E-mail indisponible : ouvrez le lien WhatsApp.';
@@ -882,10 +899,10 @@
       toast(remind ? 'Relance enregistrée.' : refund ? 'Remboursement enregistré.' : ok ? 'Mois ouvert.' : 'Demande refusée.');
       await load(true);
       await loadPayments();
-    } catch {
+    } catch (err) {
       b.disabled = false;
       msg.className = 'hint err';
-      msg.textContent = 'Non enregistré. Réessayez.';
+      msg.textContent = (err && err.message) || 'Non enregistré. Réessayez.';
     }
   });
 
