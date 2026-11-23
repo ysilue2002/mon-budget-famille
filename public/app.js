@@ -232,6 +232,9 @@ const isoOf = (ts) => {
    en arabe (RTL) coupe « 5 » et « 000 » en deux blocs et inverse leur ordre. */
 const fr = (n) => Math.round(n || 0).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g, '\u00a0');
 const money = (n) => fr(n) + ' ' + ((db.settings && db.settings.currency) || 'FCFA');
+/* Le Premium se paie en francs CFA, quelle que soit la devise de la boutique :
+   afficher « 6 000 GHS » parce que le pays est le Ghana serait faux. */
+const fcfa = (n) => fr(n) + ' FCFA';
 const sizeWarning = () => (db.meta && db.meta.tooBig
   ? `<div class="card warnCard"><b>${T('tooBigTitle')}</b><p class="hint">${T('tooBigHint')}</p><p class="hint">${Math.round(stateBytes() / 1000)} Ko / 2 000 Ko</p></div>`
   : '');
@@ -3812,11 +3815,11 @@ function payModal() {
   if (PAY.payOm) methods.push(['om', T('payOm')]);
   if (PAY.card) methods.push(['card', T('payCard')]);
   body.innerHTML = `<div class="card">
-      <div class="row"><div><div class="t">${T('payMonths')}</div><div class="s">${money(amount)}</div></div></div>
+      <div class="row"><div><div class="t">${T('payMonths')}</div><div class="s">${fcfa(amount)}</div></div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         ${[1, 3, 6, 12].map((n) => `<button class="btn ${n === payMonths ? '' : 'out'}" type="button" data-months="${n}" style="min-width:64px">${n}</button>`).join('')}
       </div>
-      <p class="hint">${T('payTotal')} <b>${money(amount)}</b></p>
+      <p class="hint">${T('payTotal')} <b>${fcfa(amount)}</b></p>
     </div>
     <div id="payStep"></div>`;
   body.querySelectorAll('[data-months]').forEach((b) => {
@@ -3844,10 +3847,10 @@ async function payGo(method, step) {
     return;
   }
   const p = r.data;
-  const text = `${T('payTitle')} — ${p.months} mois · ${money(p.amount)} · ${T('payRef')} ${p.ref}`;
+  const text = `${T('payTitle')} — ${p.months} mois · ${fcfa(p.amount)} · ${T('payRef')} ${p.ref}`;
   step.innerHTML = `<div class="card">
     <div class="t">${T('payRef')} <b>${esc(p.ref)}</b></div>
-    <p class="hint">${T('payHow').replace('{amount}', money(p.amount)).replace('{number}', esc(p.number))}</p>
+    <p class="hint">${T('payHow').replace('{amount}', fcfa(p.amount)).replace('{number}', esc(p.number))}</p>
     ${SUPPORT.wa ? `<a class="btn whats" href="https://wa.me/${SUPPORT.wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">${T('payProof')}</a>` : ''}
     <p class="hint ok">${T('paySent')}</p>
   </div>`;

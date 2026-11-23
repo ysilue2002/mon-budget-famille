@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -347,6 +347,21 @@ test('chaque personne du support peut avoir son propre code', () => {
   assert.equal(adminCodes(env).size, 1);
   assert.equal(adminSigningKey({ ADMIN_CODES: 'c@test.ci:solo' }), 'solo', 'sans ADMIN_CODE, le premier code signe');
   assert.equal(adminSigningKey({}), '', 'aucun code : rien n’est signé');
+});
+
+/* Débloquer une boutique ne doit pas débloquer une autre dont l'e-mail finit
+   par les mêmes caractères (a@x.com et aa@x.com). */
+test('le déblocage ne vise que le compte demandé', () => {
+  const [mail] = unlockPatterns('a@x.com', '');
+  assert.equal(mail, '%:a@x.com');
+  const like = (pattern, key) => key.endsWith(pattern.slice(1));
+  assert.ok(like(mail, 'login-user:a@x.com'), 'même compte : débloqué');
+  assert.ok(like(mail, 'login-id:41.1.1.1:a@x.com'), 'même compte, autre IP : débloqué');
+  assert.ok(like(mail, 'admin-mail:a@x.com'), 'compte admin : débloqué');
+  assert.equal(like(mail, 'login-user:aa@x.com'), false, 'voisin : intact');
+  assert.equal(like(mail, 'login-user:ba@x.com'), false);
+  assert.deepEqual(unlockPatterns('', '+225 07 00 00 00 00'), ['%:2250700000000']);
+  assert.deepEqual(unlockPatterns('', ''), [], 'sans identifiant : rien');
 });
 
 /* La carte bancaire passe par Stripe : un webhook non signé ne doit jamais

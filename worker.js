@@ -210,18 +210,28 @@ async function sendPremiumMail(env, to, days, link) {
    la date n'est pas retenue : le jour où la clé arrive, le rappel part. */
 async function maybePremiumReminder(env, origin) {
   if (!env.RESEND_API_KEY) return;
-  const day = new Date().toISOString().slice(0, 10);
-  const guard = await env.DB.prepare("SELECT value FROM app_config WHERE key = 'premiumRemindedOn'").first();
-  if (guard && String(guard.value) === day) return;
-  await env.DB.prepare("INSERT INTO app_config (key, value) VALUES ('premiumRemindedOn', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(day).run();
+  /* Une réservation par heure : plusieurs requêtes simultanées ne peuvent pas
+     envoyer le même rappel, et dix boutiques par heure suffisent sans risquer
+     de dépasser le temps d'un Worker. */
+  const slot = new Date().toISOString().slice(0, 13);
+  const claim = await env.DB.prepare(
+    "INSERT INTO app_config (key, value) VALUES ('premiumRemindedOn', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE app_config.value <> excluded.value",
+  ).bind(slot).run();
+  if (!claim.meta || !claim.meta.changes) return;
   const now = Date.now();
   const soon = await env.DB.prepare(
-    'SELECT id, email, premium_until FROM users WHERE owner_id IS NULL AND premium_until > ? AND premium_until < ? AND email IS NOT NULL AND COALESCE(premium_reminded, 0) <> premium_until',
+    'SELECT id, email, premium_until FROM users WHERE owner_id IS NULL AND premium_until > ? AND premium_until < ? AND email IS NOT NULL AND COALESCE(premium_reminded, 0) <> premium_until LIMIT 10',
   ).bind(now, now + 7 * 86400000).all();
   for (const u of soon.results || []) {
-    const days = Math.max(1, Math.ceil((Number(u.premium_until) - now) / 86400000));
+    /* Réservation par boutique : deux ouvertures simultanées n'envoient
+       qu'un e-mail. Une réservation annulée si l'envoi échoue. */
+    const until = Number(u.premium_until) || 0;
+    const own = await env.DB.prepare('UPDATE users SET premium_reminded = ? WHERE id = ? AND COALESCE(premium_reminded, 0) <> ?')
+      .bind(until, u.id, until).run();
+    if (!own.meta || !own.meta.changes) continue;
+    const days = Math.max(1, Math.ceil((until - now) / 86400000));
     const sent = await sendPremiumMail(env, u.email, days, origin);
-    if (sent) await env.DB.prepare('UPDATE users SET premium_reminded = ? WHERE id = ?').bind(Number(u.premium_until) || 0, u.id).run();
+    if (!sent) await env.DB.prepare('UPDATE users SET premium_reminded = 0 WHERE id = ?').bind(u.id).run();
   }
 }
 
@@ -548,6 +558,18 @@ function adminCodes(env) {
 }
 const adminSigningKey = (env) => String(env.ADMIN_CODE || [...adminCodes(env).values()][0] || '');
 const codeForAdmin = (env, email) => adminCodes(env).get(String(email || '').trim().toLowerCase()) || String(env.ADMIN_CODE || '');
+
+/* Clés de limitation à effacer pour débloquer un compte. Le « %: » devant
+   l'identifiant est indispensable : sans lui, débloquer a@x.com effacerait
+   aussi le verrou de aa@x.com. */
+function unlockPatterns(email, phone) {
+  const patterns = [];
+  const mail = String(email || '').trim().toLowerCase();
+  const digits = digitsOf(phone || '');
+  if (mail) patterns.push('%:' + mail);
+  if (digits.length >= 8) patterns.push('%:' + digits);
+  return patterns;
+}
 const adminEmailOk = (email, list) => Array.isArray(list) && list.includes(String(email || '').trim().toLowerCase());
 
 async function adminToken(env, email, expires) {
@@ -674,20 +696,24 @@ async function api(request, env, url, ctx) {
       const userId = String((obj.metadata && obj.metadata.user_id) || obj.client_reference_id || '');
       const months = Math.max(1, Math.min(12, Math.round(Number(obj.metadata && obj.metadata.months) || 0)));
       const eventId = 'ev-' + String(ev.id || '');
-      if (userId && months && ev.id) {
+      /* Une session « terminée » peut être impayée (moyens asynchrones) : seul
+         un paiement réellement encaissé en francs ouvre un mois. */
+      const settled = String(obj.payment_status || '') === 'paid' && String(obj.currency || '').toLowerCase() === 'xof';
+      if (userId && months && ev.id && settled) {
         /* Stripe peut renvoyer le même événement : l'identifiant rend l'ajout
            idempotent, un mois n'est jamais offert deux fois. */
         const seen = await env.DB.prepare('SELECT id FROM payments WHERE id = ?').bind(eventId).first();
         if (!seen) {
-          const row = await env.DB.prepare('SELECT premium_until, email FROM users WHERE id = ? AND owner_id IS NULL').bind(userId).first();
+          const row = await env.DB.prepare('SELECT email FROM users WHERE id = ? AND owner_id IS NULL').bind(userId).first();
           if (row) {
-            const until = extendPremium(row.premium_until, months);
             await env.DB.batch([
-              env.DB.prepare('UPDATE users SET premium_until = ?, premium_reminded = 0 WHERE id = ?').bind(until, userId),
+              /* MAX(...) en SQL : deux webhooks simultanés ne s'écrasent pas. */
+              env.DB.prepare('UPDATE users SET premium_until = MAX(?, COALESCE(premium_until, 0)) + ?, premium_reminded = 0 WHERE id = ?')
+                .bind(Date.now(), months * PREMIUM_MONTH_MS, userId),
               env.DB.prepare("INSERT INTO payments (id, ref, user_id, months, amount, method, status, created, paid_at, actor, note) VALUES (?, ?, ?, ?, ?, 'card', 'paid', ?, ?, 'Stripe', ?)")
                 .bind(eventId, String(obj.id || ''), userId, months, Math.round(Number(obj.amount_total) || 0), Date.now(), Date.now(), 'carte'),
             ]);
-            await adminLog(env, 'Stripe', 'payment', row.email || userId, `${months} mois par carte`);
+            await adminLog(env, 'Stripe', 'payment', row.email || userId, `${months} mois par carte · ${Math.round(Number(obj.amount_total) || 0)} FCFA`);
           }
         }
       }
@@ -1145,15 +1171,12 @@ async function api(request, env, url, ctx) {
     const body = await readBody(request);
     const target = await env.DB.prepare('SELECT id, email, phone FROM users WHERE id = ?').bind(String(body.id || '')).first();
     if (!target) return json({ error: 'user' }, 404);
-    const mail = String(target.email || '').trim().toLowerCase();
-    const digits = digitsOf(target.phone || '');
-    const patterns = [];
-    if (mail) patterns.push('%' + mail + '%');
-    if (digits.length >= 8) patterns.push('%' + digits + '%');
+    const patterns = unlockPatterns(target.email, target.phone);
     if (!patterns.length) return json({ error: 'user' }, 404);
     const res = await env.DB.prepare(`DELETE FROM throttle WHERE ${patterns.map(() => 'key LIKE ?').join(' OR ')}`).bind(...patterns).run();
     const freed = Number((res.meta && res.meta.changes) || 0);
-    await adminLog(env, admin.email, 'unlock', mail || digits, `${freed} compteur(s) effacé(s)`);
+    const who = String(target.email || '').trim().toLowerCase() || digitsOf(target.phone || '');
+    await adminLog(env, admin.email, 'unlock', who, `${freed} compteur(s) effacé(s)`);
     return json({ ok: true, freed });
   }
 
@@ -1179,19 +1202,26 @@ async function api(request, env, url, ctx) {
   if (path === '/api/admin/payment' && request.method === 'POST') {
     const body = await readBody(request);
     const id = String(body.id || '');
-    const pay = await env.DB.prepare("SELECT * FROM payments WHERE id = ? AND status = 'pending'").bind(id).first();
+    const pay = await env.DB.prepare('SELECT * FROM payments WHERE id = ?').bind(id).first();
     if (!pay) return json({ error: 'notfound' }, 404);
+    /* Déjà réglée ou refusée : le dire clairement, sans rien rouvrir. */
+    if (pay.status !== 'pending') return json({ error: 'done' }, 409);
     const target = await env.DB.prepare('SELECT id, email, phone, premium_until FROM users WHERE id = ?').bind(pay.user_id).first();
     if (!target) return json({ error: 'user' }, 404);
     const note = String(body.note || '').slice(0, 120) || null;
     const label = target.email || target.phone || target.id;
     if (body.ok) {
-      const until = extendPremium(target.premium_until, Number(pay.months) || 1);
-      await env.DB.batch([
-        env.DB.prepare('UPDATE users SET premium_until = ?, premium_reminded = 0 WHERE id = ?').bind(until, target.id),
-        env.DB.prepare("UPDATE payments SET status = 'paid', paid_at = ?, actor = ?, note = ? WHERE id = ?").bind(Date.now(), admin.email, note, id),
-      ]);
-      await adminLog(env, admin.email, 'payment', label, `${pay.months} mois · ${pay.amount} FCFA · ${pay.ref}`);
+      const months = Math.max(1, Number(pay.months) || 1);
+      /* Le statut est changé en premier et sous condition : deux clics
+         simultanés n'ouvrent qu'un mois. */
+      const claim = await env.DB.prepare("UPDATE payments SET status = 'paid', paid_at = ?, actor = ?, note = ? WHERE id = ? AND status = 'pending'")
+        .bind(Date.now(), admin.email, note, id).run();
+      if (!claim.meta || !claim.meta.changes) return json({ error: 'done' }, 409);
+      await env.DB.prepare('UPDATE users SET premium_until = MAX(?, COALESCE(premium_until, 0)) + ?, premium_reminded = 0 WHERE id = ?')
+        .bind(Date.now(), months * PREMIUM_MONTH_MS, target.id).run();
+      const fresh = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(target.id).first();
+      const until = Number(fresh && fresh.premium_until) || 0;
+      await adminLog(env, admin.email, 'payment', label, `${months} mois · ${pay.amount} FCFA · ${pay.ref}`);
       return json({ ok: true, premiumUntil: until });
     }
     await env.DB.prepare("UPDATE payments SET status = 'rejected', actor = ?, note = ? WHERE id = ?").bind(admin.email, note, id).run();
@@ -1245,9 +1275,12 @@ async function api(request, env, url, ctx) {
     const take = await env.DB.prepare('UPDATE premium_codes SET used = 1, used_by = ?, used_at = ? WHERE code = ? AND used = 0')
       .bind(user.id, Date.now(), code).run();
     if (!take.meta || !take.meta.changes) return json({ error: 'code' }, 404);
-    const row = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(user.id).first();
-    const until = extendPremium(row && row.premium_until, months);
-    await env.DB.prepare('UPDATE users SET premium_until = ?, premium_reminded = 0 WHERE id = ?').bind(until, user.id).run();
+    /* MAX(...) en SQL : deux codes saisis en même temps s'additionnent au lieu
+       de s'écraser. */
+    await env.DB.prepare('UPDATE users SET premium_until = MAX(?, COALESCE(premium_until, 0)) + ?, premium_reminded = 0 WHERE id = ?')
+      .bind(Date.now(), months * PREMIUM_MONTH_MS, user.id).run();
+    const fresh = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(user.id).first();
+    const until = Number(fresh && fresh.premium_until) || 0;
     await adminLog(env, 'code', 'redeem', user.email || user.phone || user.id, `${months} mois · ${code}`);
     return json({ ok: true, months, premiumUntil: until, user: publicUser({ ...user, premiumUntil: until }) });
   }
@@ -1268,6 +1301,17 @@ async function api(request, env, url, ctx) {
     if (method === 'om' && !cfg.payOm) return json({ error: 'method' }, 400);
     if (await blocked(env, 'pay:' + user.id, 10)) return json({ error: 'slow' }, 429);
     await tooMany(env, 'pay:' + user.id, 10, 60 * 60000);
+    /* Une seule demande en attente par formule et par moyen : un double clic
+       ne crée pas deux lignes à valider. */
+    const existing = await env.DB.prepare(
+      "SELECT id, ref, amount, months FROM payments WHERE user_id = ? AND status = 'pending' AND method = ? AND months = ? AND created > ? ORDER BY created DESC LIMIT 1",
+    ).bind(user.id, method, months, Date.now() - 86400000).first();
+    if (existing) {
+      return json({
+        id: String(existing.id), ref: String(existing.ref), amount: Number(existing.amount) || 0, months,
+        method, number: method === 'wave' ? cfg.payWave : cfg.payOm, supportWa: cfg.supportWa,
+      });
+    }
     const id = crypto.randomUUID();
     const ref = 'AC-' + newRefCode();
     const amount = cfg.priceMonth * months;
@@ -1282,6 +1326,8 @@ async function api(request, env, url, ctx) {
   if (path === '/api/stripe/checkout' && request.method === 'POST') {
     if (user.ownerId) return json({ error: 'owner' }, 403);
     if (!env.STRIPE_SECRET_KEY) return json({ error: 'card' }, 503);
+    if (await blocked(env, 'checkout:' + user.id, 10)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'checkout:' + user.id, 10, 60 * 60000);
     const cfg = await readConfig(env);
     if (!cfg.priceMonth) return json({ error: 'price' }, 400);
     const body = await readBody(request);
