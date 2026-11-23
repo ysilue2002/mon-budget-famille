@@ -71,6 +71,9 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS public_docs (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, number TEXT NOT NULL, json TEXT NOT NULL, updated INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS installs (src TEXT NOT NULL, day TEXT NOT NULL, hits INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (src, day))'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
+    /* Codes d'activation Premium : créés par l'admin après paiement, utilisés
+       une seule fois par la boutique qui les saisit. */
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS premium_codes (code TEXT PRIMARY KEY, months INTEGER NOT NULL, created INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0, used_by TEXT)'),
   ]).then(async () => {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
     // Comptes par téléphone uniquement : l'e-mail et le téléphone deviennent facultatifs.
@@ -235,6 +238,23 @@ function extendPremium(current, months) {
 const isPremiumUntil = (until) => Number(until) > Date.now();
 /* Gratuit : un seul vendeur. Premium : autant que la boutique en veut. */
 const canAddStaff = (count, premium) => !!premium || Number(count) < 1;
+/* Code d'activation : huit signes sans I, O, 0 ni 1, dictés sans erreur au
+   téléphone. Il vaut pour un nombre de mois, une seule fois. */
+const newPremiumCode = () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return [...bytes].map((b) => REF_ALPHABET[b % REF_ALPHABET.length]).join('');
+};
+async function createPremiumCode(env, months) {
+  for (let i = 0; i < 8; i += 1) {
+    const code = newPremiumCode();
+    try {
+      await env.DB.prepare('INSERT INTO premium_codes (code, months, created, used, used_by) VALUES (?, ?, ?, 0, NULL)')
+        .bind(code, months, Date.now()).run();
+      return code;
+    } catch { /* collision improbable : on retente */ }
+  }
+  return '';
+}
 
 /* Ce qu'un vendeur ne doit jamais recevoir : prix d'achat, marges, dépenses
    et montants fournisseurs. On les vide à la lecture et on les rétablit
@@ -695,6 +715,31 @@ async function api(request, env, url) {
     return json({ premiumUntil: until });
   }
 
+  /* Codes d'activation : l'admin en crée un après paiement, le commerçant le
+     saisit dans l'application et son mois s'ouvre immédiatement. */
+  if (path === '/api/admin/codes' && request.method === 'GET') {
+    const list = adminList(env);
+    if (!list.length) return json({ error: 'notconfigured' }, 503);
+    if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    const rows = await env.DB.prepare('SELECT code, months, created FROM premium_codes WHERE used = 0 ORDER BY created DESC LIMIT 30').all();
+    const used = await env.DB.prepare('SELECT COUNT(*) AS n FROM premium_codes WHERE used = 1').first();
+    return json({
+      codes: (rows.results || []).map((r) => ({ code: String(r.code), months: Number(r.months) || 1, created: Number(r.created) || 0 })),
+      used: Number(used && used.n) || 0,
+    });
+  }
+
+  if (path === '/api/admin/codes' && request.method === 'POST') {
+    const list = adminList(env);
+    if (!list.length) return json({ error: 'notconfigured' }, 503);
+    if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    const body = await readBody(request);
+    const months = Math.max(1, Math.min(12, Math.round(Number(body.months) || 1)));
+    const code = await createPremiumCode(env, months);
+    if (!code) return json({ error: 'server' }, 500);
+    return json({ code, months });
+  }
+
   /* Publicité commune : activée pour l'application, avec l'identifiant AdSense
      et les deux emplacements. Une valeur vide désactive tout. */
   if (path === '/api/admin/config' && request.method === 'POST') {
@@ -741,6 +786,28 @@ async function api(request, env, url) {
     if (!code) return json({ error: 'server' }, 500);
     const n = await env.DB.prepare('SELECT COALESCE(SUM(hits), 0) AS n FROM installs WHERE src = ?').bind(refSrc(code)).first();
     return json({ code, count: Number(n && n.n) || 0 });
+  }
+
+  /* Activation Premium par code : réservée au patron (un vendeur ne modifie
+     pas l'abonnement de la boutique), un code ne sert qu'une fois, et deux
+     essais simultanés ne peuvent pas ouvrir deux fois le même mois. */
+  if (path === '/api/premium/redeem' && request.method === 'POST') {
+    if (user.ownerId) return json({ error: 'owner' }, 403);
+    if (await blocked(env, 'redeem:' + user.id, 10)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'redeem:' + user.id, 10, 15 * 60000);
+    const body = await readBody(request);
+    const code = String(body.code || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{8}$/.test(code)) return json({ error: 'code' }, 404);
+    const found = await env.DB.prepare('SELECT months FROM premium_codes WHERE code = ? AND used = 0').bind(code).first();
+    if (!found) return json({ error: 'code' }, 404);
+    const months = Math.max(1, Math.min(12, Number(found.months) || 1));
+    const take = await env.DB.prepare('UPDATE premium_codes SET used = 1, used_by = ? WHERE code = ? AND used = 0')
+      .bind(user.id, code).run();
+    if (!take.meta || !take.meta.changes) return json({ error: 'code' }, 404);
+    const row = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(user.id).first();
+    const until = extendPremium(row && row.premium_until, months);
+    await env.DB.prepare('UPDATE users SET premium_until = ? WHERE id = ?').bind(until, user.id).run();
+    return json({ ok: true, months, premiumUntil: until, user: publicUser({ ...user, premiumUntil: until }) });
   }
 
   /* Le QR d'un document ouvre la facture chez le client. Le serveur garde une

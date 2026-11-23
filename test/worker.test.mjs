@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -251,6 +251,14 @@ test('la facture publique reprend le logo, jamais une image distante', () => {
   assert.ok(!remote.includes('class="mark"'), 'aucune image distante');
   const svg = publicDocHtml(JSON.stringify({ ...base, logo: 'data:image/svg+xml;base64,' + 'A'.repeat(400) }));
   assert.ok(!svg.includes('class="mark"'), 'seulement PNG ou JPEG');
+});
+
+test('un code d’activation fait huit signes faciles à dicter', () => {
+  for (let i = 0; i < 50; i += 1) {
+    const code = newPremiumCode();
+    assert.equal(code.length, 8);
+    assert.match(code, /^[A-HJ-NP-Z2-9]{8}$/, 'ni I, ni O, ni 0, ni 1');
+  }
 });
 
 test('le code de parrainage est court, lisible et devient un canal', () => {

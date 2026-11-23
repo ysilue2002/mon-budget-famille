@@ -28,7 +28,7 @@ const formOptions = (sel) => COMPANY_FORMS.map((f) => `<option value="${f}" ${f 
 const fresh = () => ({
   shop: '', products: [], parties: [], suppliers: [], sales: [], expenses: [], withdrawals: [], docs: [], debts: [], moves: [], mailLog: [], log: [], tomb: [],
   seq: { DEV: 0, FAC: 0 },
-  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, invRemindDays: 7, autoRemind: false, autoRemindDay: '', autoRemindInfo: null, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30, inactiveDays: 30 },
+  settings: { lang: 'fr', ads: false, reminder: { ...DEFAULTS }, invReminder: {}, invRemindDays: 7, autoRemind: false, autoRemindDay: '', autoRemindInfo: null, country: 'CI', currency: 'FCFA', companyForm: '', city: '', district: '', address: '', vat: 18, remindDays: 30, inactiveDays: 30, autoRemindInactive: false },
   meta: { lastSync: null, updated: 0, rev: 0, mv: 0 },
 });
 /* Garde-fou de taille : le serveur refuse au-delà de 2 Mo (worker.js). Prévenir
@@ -2093,10 +2093,16 @@ function waRemindTargets() {
       if (phone) out.push({ kind: 'client', id: d.id, name: d.party || T('client'), phone, text: invoiceReminderText(d), amount: amountOf(d) });
     });
   }
-  if (s.autoSupRemind) supplierDueItems(db.debts, db.suppliers).forEach((x) => out.push({
+    if (s.autoSupRemind) supplierDueItems(db.debts, db.suppliers).forEach((x) => out.push({
     kind: 'supplier', id: 'sup:' + x.name, name: x.name, phone: x.phone,
     text: supplierReminderText(x), amount: x.rest,
   }));
+  /* Les clients sans achat rejoignent la même liste programmée : un seul
+     rendez-vous, une seule fenêtre, rien à preparer deux fois. */
+  if (s.autoRemindInactive) inactiveClients().forEach((x) => {
+    if (!x.phone) return;
+    out.push({ kind: 'inactive', id: 'ina:' + x.name, name: x.name, phone: x.phone, text: inactiveText(x), amount: 0 });
+  });
   return out;
 }
 /* Déclenchement à l'ouverture : on note le jour tout de suite (une seule
@@ -2119,7 +2125,7 @@ function autoWaModal(list) {
   const m = modal(`<h2>${T('autoWaTitle')}</h2>
     <p class="hint">${T('autoWaHint')}</p>
     ${list.map((x) => `<div class="row"><div>
-      <div class="t">${esc(x.name)} · ${money(x.amount)}</div>
+      <div class="t">${esc(x.name)}${x.amount ? ' · ' + money(x.amount) : ''}</div>
       <div class="s">${esc(x.phone)}</div></div>
       <div class="right"><button class="btn small whats" data-awgo="${esc(x.kind)}|${esc(x.id)}">${T('remind')}</button></div></div>`).join('')
       || `<p class="empty">${T('autoWaNone')}</p>`}
@@ -2138,7 +2144,7 @@ function autoWaModal(list) {
         logRemind({ docId: '', number: '', party: item.name, amount: item.amount, channel: 'wa', to: item.phone, ok: true });
       }
       const row = btn.closest('.row');
-      if (row) row.innerHTML = `<div><div class="t">${esc(item.name)} · ${money(item.amount)}</div>
+      if (row) row.innerHTML = `<div><div class="t">${esc(item.name)}${item.amount ? ' · ' + money(item.amount) : ''}</div>
         <div class="s">${esc(item.phone)}</div></div><div class="right"><span class="tag ok">✓</span></div>`;
       saveDB(); render();
     };
@@ -3233,13 +3239,12 @@ function settingsModal() {
       <div class="s">${isPremium() ? `${T('premiumUntilOn')} ${dayFR(premiumDate())}` : T('premiumPrice')}</div></div>
       <div class="right">${isPremium() ? '<span class="tag ok">Premium</span>' : `<span class="tag warn">${T('premium')}</span>`}</div></div>
     ${isPremium()
-      ? (SUPPORT.wa
-        ? `<button class="btn whats" id="supGo">${T('supportTitle')}</button><p class="hint">${T('supportHint')}</p>`
-        : `<p class="hint">${T('supportOff')}</p>`)
-      : `<p class="hint">${T('premiumAsk')}</p>
-        <p class="hint">${T('premiumActivateHint')}</p>
-        <button class="btn" id="premGo">${T('premiumActivate')}</button>
-        <button class="btn out" id="premCheck">${T('premiumCheck')}</button>`}
+      ? (SUPPORT.wa ? `<button class="btn whats" id="supGo">${T('supportTitle')}</button>` : `<p class="hint">${T('supportOff')}</p>`)
+      : `<label>${T('premiumCode')}</label>
+        <input id="premCode" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="ABCD2345">
+        <button class="btn" id="premGo">${T('premiumCodeGo')}</button>
+        <p class="hint">${T('premiumCodeHint')}</p>
+        ${SUPPORT.wa ? `<button class="btn out" id="premAsk">${T('premiumGetCode')}</button>` : ''}`}
     </div>
     <label>${T('language')}</label>
     <select id="setLang">${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang() ? 'selected' : ''}>${l.id === 'ar' ? 'العربية' : l.id === 'en' ? 'English' : 'Français'}</option>`).join('')}</select>
@@ -3281,6 +3286,8 @@ function settingsModal() {
     <p class="hint">${T('autoRemindHint')}</p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoSupRemind" ${db.settings.autoSupRemind ? 'checked' : ''} style="width:auto"><span>${T('autoSupRemind')}</span></label>
     <p class="hint">${T('autoSupRemindHint')}</p>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:12px"><input type="checkbox" id="setAutoInactive" ${db.settings.autoRemindInactive ? 'checked' : ''} style="width:auto"><span>${T('autoInactive')}</span></label>
+    <p class="hint">${T('autoInactiveHint')}</p>
     ${isPremium() ? '' : `<p class="hint">${T('premiumAuto')}</p>`}
     <label>${T('autoRemindEvery')}</label><select id="setArEvery"><option value="jour" ${(db.settings.autoRemindEvery || 'jour') === 'jour' ? 'selected' : ''}>${T('everyDay')}</option><option value="semaine" ${db.settings.autoRemindEvery === 'semaine' ? 'selected' : ''}>${T('everyWeek')}</option></select>
     <label>${T('autoRemindWeekday')}</label><select id="setArWeekday">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === (Math.round(Number(db.settings.autoRemindWeekday)) || 1) ? 'selected' : ''}>${weekdayName(n)}</option>`).join('')}</select>
@@ -3363,20 +3370,31 @@ function settingsModal() {
       if (s) s.textContent = `${s.textContent} — ${T('teamOwnerOnly')}`;
     });
   }
+  /* Le code suffit : l'activation ne dépend plus d'un message à traiter à la
+     main, et le serveur vérifie qu'il n'a jamais servi. */
   const premGo = d.querySelector('#premGo');
-  if (premGo) premGo.onclick = () => {
+  if (premGo) premGo.onclick = async () => {
+    const input = d.querySelector('#premCode');
+    const code = String((input && input.value) || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{8}$/.test(code)) { alert(T('premiumCodeBad')); return; }
+    premGo.disabled = true;
+    const r = await api('/api/premium/redeem', 'POST', { code });
+    premGo.disabled = false;
+    if (!r.ok) {
+      alert(r.data && r.data.error === 'slow' ? T('tooManyTries')
+        : r.data && r.data.error === 'owner' ? T('teamOwnerOnly')
+          : T('premiumCodeBad'));
+      return;
+    }
+    await refreshMe();
+    d.remove(); render(); settingsModal();
+    alert(`${T('premiumCodeOk')} ${dayFR(premiumDate())}`);
+  };
+  const premAsk = d.querySelector('#premAsk');
+  if (premAsk) premAsk.onclick = () => {
     if (!SUPPORT.wa) { alert(T('supportOff')); return; }
     const account = (me && (me.email || me.phone || me.id)) || '';
     waOpen(SUPPORT.wa, T('premiumWaMsg').replace('[Boutique]', db.shop || T('app')).replace('[Compte]', account));
-  };
-  /* L'admin active le mois ; ce bouton relit le compte sans reconnexion, sinon
-     le commerçant croirait son paiement perdu jusqu'au lendemain. */
-  const premCheck = d.querySelector('#premCheck');
-  if (premCheck) premCheck.onclick = async () => {
-    const u = await refreshMe();
-    if (u && Number(u.premiumUntil) > Date.now()) {
-      d.remove(); render(); settingsModal(); alert(T('premiumThanks'));
-    } else alert(T('premiumNotYet'));
   };
   const supGo = d.querySelector('#supGo');
   if (supGo) supGo.onclick = () => {
@@ -3400,7 +3418,7 @@ function settingsModal() {
   /* Les cases du Premium restent visibles, mais grisées en gratuit : on voit
      ce qui existe sans pouvoir le changer. */
   if (!isPremium()) {
-    ['#setAutoRemind', '#setAutoSupRemind', '#setArEvery', '#setArWeekday', '#setArHour', '#setLogo', '#logoDel'].forEach((sel) => {
+    ['#setAutoRemind', '#setAutoSupRemind', '#setAutoInactive', '#setArEvery', '#setArWeekday', '#setArHour', '#setLogo', '#logoDel'].forEach((sel) => {
       const el = d.querySelector(sel);
       if (el) el.disabled = true;
     });
@@ -3457,6 +3475,7 @@ function settingsModal() {
     db.settings.invRemindDays = Math.max(1, Math.round(+d.querySelector('#setRemDays').value || 7));
     db.settings.autoRemind = isPremium() && d.querySelector('#setAutoRemind').checked;
     db.settings.autoSupRemind = isPremium() && d.querySelector('#setAutoSupRemind').checked;
+    db.settings.autoRemindInactive = isPremium() && d.querySelector('#setAutoInactive').checked;
     db.settings.autoRemindEvery = d.querySelector('#setArEvery').value;
     db.settings.autoRemindWeekday = Math.min(7, Math.max(1, Math.round(+d.querySelector('#setArWeekday').value || 1)));
     db.settings.autoRemindHour = autoHourOf({ autoRemindHour: d.querySelector('#setArHour').value });
