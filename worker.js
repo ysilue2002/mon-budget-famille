@@ -422,7 +422,9 @@ function isAdmin(user, list) {
    n'est jamais envoyé au navigateur ; le cookie ne contient que l'e-mail et sa
    date d'expiration, signés avec le code. */
 const ADMIN_COOKIE = 'ac_admin';
-const ADMIN_SESSION_MS = 12 * 3600000;
+/* Huit heures : une journée de travail, pas une semaine. Un poste laissé
+   ouvert le soir ne reste pas administrateur jusqu'au lendemain soir. */
+const ADMIN_SESSION_MS = 8 * 3600000;
 const adminSigningKey = (env) => String(env.ADMIN_CODE || '');
 const adminEmailOk = (email, list) => Array.isArray(list) && list.includes(String(email || '').trim().toLowerCase());
 
@@ -662,33 +664,46 @@ async function api(request, env, url) {
     const list = adminList(env);
     if (!list.length || !adminSigningKey(env)) return json({ error: 'notconfigured' }, 503);
     const ip = request.headers.get('cf-connecting-ip') || 'local';
-    if (await blocked(env, 'admin-login:' + ip, 20)) return json({ error: 'slow' }, 429);
     const body = await readBody(request);
     const email = String(body.email || '').trim().toLowerCase();
     const code = String(body.code || '');
+    /* Deux verrous, pas un : l'adresse réseau et l'e-mail visé. Sans le second,
+       une attaque répartie sur plusieurs adresses essaie sans fin le compte
+       d'un administrateur dont l'e-mail est connu. */
+    const ipKey = 'admin-login:' + ip;
+    const mailKey = 'admin-mail:' + (email || 'vide');
+    if (await blocked(env, ipKey, 20) || await blocked(env, mailKey, 8)) return json({ error: 'slow' }, 429);
     /* Le code est comparé par empreintes : même longueur, même temps, et
        aucune trace du vrai code dans la réponse. */
     const ok = adminEmailOk(email, list)
       && same(await sha256(code), await sha256(adminSigningKey(env)));
     if (!ok) {
-      await tooMany(env, 'admin-login:' + ip, 20, 15 * 60000);
+      await tooMany(env, ipKey, 20, 15 * 60000);
+      await tooMany(env, mailKey, 8, 15 * 60000);
       return json({ error: 'credentials' }, 401);
     }
     const expires = Date.now() + ADMIN_SESSION_MS;
     const token = await adminToken(env, email, expires);
+    /* SameSite=Strict : le cookie d'administration ne part jamais avec une
+       requête venue d'un autre site, même en simple navigation. */
     return json({ ok: true, email, expires }, 200, {
-      'set-cookie': `${ADMIN_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${ADMIN_SESSION_MS / 1000}`,
+      'set-cookie': `${ADMIN_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${ADMIN_SESSION_MS / 1000}`,
     });
   }
 
   if (path === '/api/admin/logout' && request.method === 'POST') {
-    return json({ ok: true }, 200, { 'set-cookie': `${ADMIN_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0` });
+    return json({ ok: true }, 200, { 'set-cookie': `${ADMIN_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0` });
   }
 
   const user = await currentUser(request, env);
   /* L'administration accepte son propre cookie, ou un compte connecté dont
      l'e-mail figure dans la liste. */
   const admin = path.startsWith('/api/admin/') ? await adminSession(request, env) : null;
+  /* L'administration n'ouvre ses portes qu'avec son propre cookie signé. Un
+     compte de l'application, même avec l'e-mail administrateur, ne suffit
+     pas : une session de boutique volée ne devient jamais une session
+     d'administration, et le code reste exigé à chaque nouveau poste. */
+  if (path.startsWith('/api/admin/') && !admin) return json({ error: 'auth' }, 401);
   if (!user && !admin) return json({ error: 'auth' }, 401);
 
   /* ---------------- tableau de bord administrateur ---------------- */
@@ -709,6 +724,8 @@ async function api(request, env, url) {
       staff: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NOT NULL'),
       active7: await one('SELECT COUNT(*) AS n FROM state WHERE updated > ?', now - 7 * day),
       premium: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL AND premium_until > ?', now),
+      /* Premium qui se termine sous sept jours : à prévenir avant la coupure. */
+      premiumSoon: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL AND premium_until > ? AND premium_until < ?', now, now + 7 * day),
       newToday: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL AND created > ?', now - day),
       new7: await one('SELECT COUNT(*) AS n FROM users WHERE owner_id IS NULL AND created > ?', now - 7 * day),
       sales: await one("SELECT COALESCE(SUM(json_array_length(json_extract(json,'$.sales'))), 0) AS n FROM state"),
@@ -751,6 +768,9 @@ async function api(request, env, url) {
       /* L'envoi d'e-mails dépend d'un secret, pas d'un réglage : l'admin voit
          s'il est actif, jamais sa valeur. */
       mail: !!env.RESEND_API_KEY,
+      /* Session en cours : l'écran affiche l'e-mail et l'heure de fin, pour
+         qu'un poste laissé ouvert se voie avant de surprendre. */
+      admin: admin ? { email: admin.email, expires: admin.expires } : null,
     });
   }
 
@@ -796,7 +816,7 @@ async function api(request, env, url) {
     const list = adminList(env);
     if (!list.length) return json({ error: 'notconfigured' }, 503);
     if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
-    const rows = await env.DB.prepare('SELECT code, months, created, expires FROM premium_codes WHERE used = 0 ORDER BY created DESC LIMIT 30').all();
+    const rows = await env.DB.prepare('SELECT code, months, created, expires FROM premium_codes WHERE used = 0 ORDER BY created DESC LIMIT 60').all();
     const used = await env.DB.prepare('SELECT COUNT(*) AS n FROM premium_codes WHERE used = 1').first();
     /* Qui a activé quoi : le code, les mois, la boutique et le compte. Utile
        pour retrouver un paiement, jamais pour autre chose. */
@@ -827,10 +847,18 @@ async function api(request, env, url) {
     const body = await readBody(request);
     const months = Math.max(1, Math.min(12, Math.round(Number(body.months) || 1)));
     const days = Math.max(1, Math.min(365, Math.round(Number(body.days) || 30)));
+    /* Par lot : une promotion, un revendeur ou une école demandent plusieurs
+       codes d'un coup. Cinquante au maximum, pour ne pas noyer la liste. */
+    const count = Math.max(1, Math.min(50, Math.round(Number(body.count) || 1)));
     const expires = Date.now() + days * 86400000;
-    const code = await createPremiumCode(env, months, expires);
-    if (!code) return json({ error: 'server' }, 500);
-    return json({ code, months, expires });
+    const codes = [];
+    for (let i = 0; i < count; i += 1) {
+      const made = await createPremiumCode(env, months, expires);
+      if (!made) return json({ error: 'server', codes }, 500);
+      codes.push(made);
+    }
+    /* « code » reste renvoyé pour l'ancien écran ; « codes » porte le lot. */
+    return json({ codes, code: codes[0], months, expires });
   }
 
   /* Publicité commune : activée pour l'application, avec l'identifiant AdSense
@@ -1326,6 +1354,16 @@ export default {
     copy.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
     copy.headers.set('x-frame-options', 'SAMEORIGIN');
     copy.headers.set('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+    /* La page d'administration ne se laisse ni encadrer par un autre site ni
+       exécuter d'autre script que le sien : une page piégée ne peut pas faire
+       cliquer l'admin à sa place. */
+    if (url.pathname === '/admin' || url.pathname === '/admin.html') {
+      copy.headers.set('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+      copy.headers.set('x-frame-options', 'DENY');
+      copy.headers.set('referrer-policy', 'no-referrer');
+      copy.headers.set('cache-control', 'no-store');
+      copy.headers.set('x-robots-tag', 'noindex, nofollow');
+    }
     return copy;
   },
 };

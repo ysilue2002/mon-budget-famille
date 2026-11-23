@@ -113,7 +113,7 @@
 <body>
 <header>
   <div class="top">
-    <div class="brand"><b>Administration</b><span>Assistant Commercial · données des boutiques</span></div>
+    <div class="brand"><b>Administration</b><span id="sessionTxt">Assistant Commercial · données des boutiques</span></div>
     <div class="acts">
       <a href="/">Application</a>
       <button id="adOut" type="button" hidden>Quitter</button>
@@ -144,6 +144,12 @@
       <h2 id="t-overview">Vue d'ensemble</h2>
       <p class="lead">Ce que font les boutiques, en un coup d'œil.</p>
       <div class="cards" id="cards"></div>
+      <div class="card" id="soonCard" hidden>
+        <h3>Premium finit bientôt <span class="badge warn" id="soonCount">0</span></h3>
+        <p class="hint" style="margin-top:0">Prévenez la boutique avant la fin : après, elle repasse en gratuit (un seul vendeur, publicités).</p>
+        <div id="soonList"></div>
+        <p class="hint" id="soonMsg"></p>
+      </div>
       <div class="card">
         <h3>Nouvelles boutiques (14 jours)</h3>
         <div id="signups"></div>
@@ -191,12 +197,21 @@
             <input id="codeDays" type="text" inputmode="numeric" value="30">
           </div>
         </div>
-        <button class="btn solid" id="codeNew" type="button" style="margin-top:14px">Créer un code</button>
+        <label for="codeCount">Combien de codes ?</label>
+        <input id="codeCount" type="text" inputmode="numeric" value="1">
+        <p class="hint" style="margin-top:4px">1 à 50 codes d'un coup, tous avec les mêmes mois et la même date de fin.</p>
+        <button class="btn solid" id="codeNew" type="button" style="margin-top:14px">Créer</button>
         <p class="hint" id="codeMsg"></p>
+        <div id="batchBox" hidden style="margin-top:12px">
+          <p class="hint" style="margin-top:0">Codes créés : copiez la liste, puis donnez-en un par boutique.</p>
+          <textarea id="batchList" readonly rows="5" style="width:100%;padding:10px;border:1px solid #cfdccf;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:16px;letter-spacing:1px;background:#fff;color:var(--ink)"></textarea>
+          <button class="btn" id="batchCopy" type="button" style="margin-top:8px">Copier les codes</button>
+        </div>
       </div>
       <div class="card">
         <h3>Codes disponibles <span class="badge off" id="codesCount">0</span></h3>
         <p class="hint" style="margin-top:0">Touchez un code pour le copier.</p>
+        <button class="btn small" id="codesCopyAll" type="button" hidden style="margin-bottom:8px">Copier tous les codes valables</button>
         <div id="codes"><p class="empty">—</p></div>
       </div>
       <div class="card">
@@ -263,7 +278,16 @@
   const day = (ms) => (ms ? new Date(Number(ms)).toLocaleDateString('fr-FR') : '—');
   const num = (n) => Number(n || 0).toLocaleString('fr-FR');
   const premiumOn = (u) => Number(u) > Date.now();
-  const premiumLabel = (u) => (premiumOn(u) ? 'Premium · ' + day(u) : 'Gratuit');
+  /* Jours restants de Premium : 0 si gratuit ou déjà fini. */
+  const daysLeft = (u) => {
+    const left = Number(u) - Date.now();
+    return left > 0 ? Math.ceil(left / 86400000) : 0;
+  };
+  const premiumLabel = (u) => {
+    if (!premiumOn(u)) return 'Gratuit';
+    const d = daysLeft(u);
+    return 'Premium · ' + day(u) + (d <= 7 ? ` (${d} j)` : '');
+  };
 
   let toastTimer = null;
   function toast(text) {
@@ -332,6 +356,11 @@
     ].map(([v, l]) => `<div class="kpi"><b>${num(v)}</b><span>${l}</span></div>`).join('');
     document.getElementById('tabShops').textContent = num(c.owners);
     document.getElementById('tabPremium').textContent = num(c.premium);
+    /* Session en cours : visible en haut, pour un poste laissé ouvert. */
+    const session = data.admin;
+    document.getElementById('sessionTxt').textContent = session
+      ? `${session.email} · session ouverte jusqu’à ${new Date(Number(session.expires)).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+      : 'Assistant Commercial · données des boutiques';
 
     const days = (data.signups || []).filter((d) => Number(d.n) > 0);
     const maxDay = Math.max(1, ...days.map((d) => d.n));
@@ -352,6 +381,7 @@
       : '<p class="empty">Aucune installation comptée.</p>';
 
     renderShops();
+    renderSoon();
     const cfg = data.config || {};
     document.getElementById('adsOn').checked = !!cfg.ads;
     document.getElementById('adsClient').value = cfg.adsClient || '';
@@ -393,7 +423,7 @@
         <div class="s">${esc(s.email || s.phone || s.id)} · ${esc(s.country || 'pays ?')} · ${num(s.sales)} vente${Number(s.sales) === 1 ? '' : 's'} · ${num(s.docs)} doc${Number(s.docs) === 1 ? '' : 's'}</div>
         <div class="s">Inscrite le ${day(s.created)} · ${Number(s.updated) > 1000000000000 ? 'vue le ' + day(s.updated) : 'jamais ouverte'}${s.src ? ' · ' + esc(s.src) : ''}</div>
       </div>
-      <div><span class="badge ${premiumOn(s.premiumUntil) ? 'on' : 'off'}">${premiumLabel(s.premiumUntil)}</span></div>
+      <div><span class="badge ${premiumOn(s.premiumUntil) ? (daysLeft(s.premiumUntil) <= 7 ? 'warn' : 'on') : 'off'}">${premiumLabel(s.premiumUntil)}</span></div>
       <div class="acts2">
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="1">+1 mois</button>
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="0" ${premiumOn(s.premiumUntil) ? '' : 'disabled'}>Retirer</button>
@@ -403,6 +433,59 @@
     const more = document.getElementById('shopsMore');
     more.hidden = list.length <= view.shown;
   }
+
+  /* Premium qui se termine sous sept jours : ces boutiques perdent leurs
+     vendeurs et voient revenir les publicités. On les prévient avant, avec
+     le moyen de renouveler sous la main. */
+  function renderSoon() {
+    const soon = (data.shops || [])
+      .filter((s) => premiumOn(s.premiumUntil) && daysLeft(s.premiumUntil) <= 7)
+      .sort((a, b) => Number(a.premiumUntil) - Number(b.premiumUntil));
+    const card = document.getElementById('soonCard');
+    card.hidden = !soon.length;
+    document.getElementById('soonCount').textContent = num(soon.length);
+    if (!soon.length) return;
+    const text = (s) => `Bonjour, votre Premium Assistant Commercial se termine le ${day(s.premiumUntil)}. Pour garder vos vendeurs, renouvelez : répondez à ce message.`;
+    document.getElementById('soonList').innerHTML = soon.map((s) => {
+      const d = daysLeft(s.premiumUntil);
+      const phone = String(s.phone || '').replace(/\D/g, '');
+      return `<div class="shop">
+        <div>
+          <div class="t">${esc(s.shop || s.email || s.phone || '(sans nom)')}</div>
+          <div class="s">${d === 1 ? 'Dernier jour' : d + ' jours restants'} · fin le ${day(s.premiumUntil)}</div>
+        </div>
+        <div><span class="badge warn">${d} j</span></div>
+        <div class="acts2">
+          <button class="btn small" type="button" data-soon-add="${esc(s.id)}">+1 mois</button>
+          ${phone ? `<a class="btn small" style="display:inline-flex;align-items:center;text-decoration:none" href="https://wa.me/${phone}?text=${encodeURIComponent(text(s))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  document.getElementById('soonList').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-soon-add]');
+    if (!b) return;
+    const msg = document.getElementById('soonMsg');
+    b.disabled = true;
+    msg.className = 'hint';
+    msg.textContent = 'Enregistrement…';
+    try {
+      const r = await fetch('/api/admin/premium', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: b.dataset.soonAdd, months: 1 }),
+      });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+      if (!r.ok) throw new Error();
+      toast('Un mois de Premium offert.');
+      msg.textContent = '';
+      await load(true);
+    } catch {
+      b.disabled = false;
+      msg.className = 'hint err';
+      msg.textContent = 'Non enregistré. Réessayez.';
+    }
+  });
 
   /* Code de réinitialisation remis à la main : l'assistance le lit au
      téléphone ou l'envoie sur WhatsApp, sans attendre les e-mails. */
@@ -474,10 +557,10 @@
     renderShops();
   });
 
-  async function copyText(text) {
+  async function copyText(text, done) {
     try {
       await navigator.clipboard.writeText(text);
-      toast('Code ' + text + ' copié.');
+      toast(done || 'Code ' + text + ' copié.');
     } catch {
       toast('Copie impossible : notez le code.');
     }
@@ -487,10 +570,17 @@
     const box = document.getElementById('codes');
     try {
       const r = await fetch('/api/admin/codes', { cache: 'no-store', credentials: 'same-origin' });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
       if (!r.ok) { box.innerHTML = '<p class="empty">—</p>'; return; }
       const d = await r.json();
       const codes = d.codes || [];
       const now = Date.now();
+      /* Tous les codes encore valables en une seule copie : utile quand on en
+         distribue un lot à un revendeur ou à une école. */
+      const valid = codes.filter((c) => !Number(c.expires) || Number(c.expires) > now).map((c) => c.code);
+      const copyAll = document.getElementById('codesCopyAll');
+      copyAll.hidden = valid.length < 2;
+      copyAll.onclick = () => copyText(valid.join('\n'), `${num(valid.length)} codes copiés.`);
       document.getElementById('codesCount').textContent = num(codes.length);
       box.innerHTML = codes.length
         ? codes.map((c) => {
@@ -519,19 +609,33 @@
     const msg = document.getElementById('codeMsg');
     const btn = document.getElementById('codeNew');
     const days = Math.max(1, Math.min(365, Math.round(Number(document.getElementById('codeDays').value) || 30)));
+    const count = Math.max(1, Math.min(50, Math.round(Number(document.getElementById('codeCount').value) || 1)));
     msg.className = 'hint';
     msg.textContent = 'Création…';
     btn.disabled = true;
     try {
       const r = await fetch('/api/admin/codes', {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ months: document.getElementById('codeMonths').value, days }),
+        body: JSON.stringify({ months: document.getElementById('codeMonths').value, days, count }),
       });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
       if (!r.ok) throw new Error();
       const d = await r.json();
+      const codes = Array.isArray(d.codes) && d.codes.length ? d.codes : (d.code ? [d.code] : []);
       msg.className = 'hint ok';
-      msg.textContent = `Code ${d.code} créé pour ${num(d.months)} mois, valable ${days} jours.`;
-      await copyText(d.code);
+      msg.textContent = codes.length > 1
+        ? `${num(codes.length)} codes créés pour ${num(d.months)} mois, valables ${days} jours.`
+        : `Code ${codes[0] || '—'} créé pour ${num(d.months)} mois, valable ${days} jours.`;
+      const box = document.getElementById('batchBox');
+      const list = document.getElementById('batchList');
+      if (codes.length > 1) {
+        list.value = codes.join('\n');
+        box.hidden = false;
+        document.getElementById('batchCopy').onclick = () => copyText(list.value, `${num(codes.length)} codes copiés.`);
+      } else {
+        box.hidden = true;
+        if (codes[0]) await copyText(codes[0]);
+      }
       await loadCodes();
     } catch {
       msg.className = 'hint err';

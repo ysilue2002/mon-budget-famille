@@ -367,7 +367,9 @@ function render() {
   /* La bande fixe du bas recouvre le contenu : on réserve sa hauteur, et
      seulement sur l'écran qui la porte. */
   document.body.classList.toggle('adsOn', Boolean(tab === 'vendre' && ads.bottom));
-  document.getElementById('app').innerHTML = sizeWarning() + (tab === 'vendre' ? ads.top : '') + view + (tab === 'vendre' ? ads.bottom : '');
+  document.getElementById('app').innerHTML = premiumWarning() + sizeWarning() + (tab === 'vendre' ? ads.top : '') + view + (tab === 'vendre' ? ads.bottom : '');
+  const renew = document.querySelector('[data-premium-renew]');
+  if (renew) renew.onclick = renewPremium;
   if (draft) document.getElementById('app').insertAdjacentHTML('beforeend', docForm());
   linkLabels(document.getElementById('app'));
   fillAds();
@@ -3750,6 +3752,29 @@ function isStaff() {
    boutique ; sans date, le compte est gratuit. */
 const isPremium = () => Boolean(me && Number(me.premiumUntil) > Date.now());
 const premiumDate = () => (me && Number(me.premiumUntil) ? new Date(Number(me.premiumUntil)).toISOString().slice(0, 10) : '');
+/* Fin du Premium : on prévient une semaine avant, jamais au dernier jour. Un
+   rappel visible vaut mieux qu'une boutique qui découvre la coupure en
+   perdant ses vendeurs et en voyant revenir les publicités. */
+const premiumDaysLeft = () => {
+  const left = Number(me && me.premiumUntil) - Date.now();
+  return left > 0 ? Math.ceil(left / 86400000) : 0;
+};
+function premiumWarning() {
+  if (isStaff() || !isPremium()) return '';
+  const days = premiumDaysLeft();
+  if (days > 7) return '';
+  const when = days === 1 ? T('premiumEndsTomorrow') : T('premiumEndsIn').replace('{n}', String(days));
+  return `<div class="card warnCard"><b>${esc(when)}</b><p class="hint">${T('premiumEndsHint')}</p>
+    <button class="btn out" type="button" data-premium-renew>${T('premiumRenew')}</button></div>`;
+}
+function renewPremium() {
+  if (SUPPORT.wa) {
+    const text = T('premiumRenewMsg') + (db.shop ? ' — ' + db.shop : '');
+    window.open(`https://wa.me/${SUPPORT.wa}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    return;
+  }
+  settingsModal();
+}
 /* Rien de sensible ne reste dans le stockage local d'un vendeur : un appareil
    qui a synchronisé avant le masquage serveur garderait sinon les prix d'achat
    et les montants. On les vide à chaque écriture locale ; le serveur les
