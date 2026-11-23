@@ -40,7 +40,7 @@
   .tag.on { background: #e5f5e9; color: #14532d; border: 1px solid #14532d; }
   .tag.off { background: #f1f1ee; color: #4a5a4f; border: 1px solid #c9d2cb; }
   label { display: block; font-weight: 700; margin: 12px 0 4px; font-size: 15px; }
-  input[type="text"] { width: 100%; min-height: 48px; padding: 10px 12px; border: 2px solid #cfdccf; border-radius: 12px; font: inherit; background: #fff; }
+  input[type="text"], input[type="email"], input[type="password"] { width: 100%; min-height: 48px; padding: 10px 12px; border: 2px solid #cfdccf; border-radius: 12px; font: inherit; background: #fff; }
   .check { display: flex; gap: 12px; align-items: center; min-height: 44px; margin-top: 10px; font-weight: 700; }
   .check input { width: 24px; height: 24px; }
   .hint { font-size: 14px; color: #4a5a4f; margin: 6px 0 0; }
@@ -62,10 +62,21 @@
 <header>
   <b>Administration</b>
   <button id="reload" type="button">Rafraîchir</button>
+  <button id="adOut" type="button" hidden>Quitter</button>
   <a href="/">Application</a>
 </header>
 <main>
   <div id="state" class="msg"><h2>Chargement…</h2></div>
+  <form id="login" class="msg" hidden>
+    <h2>Connexion administrateur</h2>
+    <p class="hint">Entrez un e-mail autorisé et le code d'administration.</p>
+    <label for="adEmail">Adresse e-mail</label>
+    <input id="adEmail" type="email" autocomplete="username" inputmode="email" required>
+    <label for="adCode">Code d'administration</label>
+    <input id="adCode" type="password" autocomplete="current-password" required>
+    <button class="btn solid" id="adGo" type="submit">Entrer</button>
+    <p class="hint err" id="adMsg"></p>
+  </form>
   <div id="dash" hidden>
     <div class="cards" id="cards"></div>
     <section>
@@ -108,6 +119,7 @@
 <script>
   const stateBox = document.getElementById('state');
   const dash = document.getElementById('dash');
+  const loginBox = document.getElementById('login');
   let data = null;
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -118,6 +130,7 @@
 
   function message(html, action) {
     dash.hidden = true;
+    loginBox.hidden = true;
     stateBox.hidden = false;
     stateBox.innerHTML = html;
     if (action) {
@@ -128,6 +141,20 @@
       b.onclick = action.run;
       stateBox.appendChild(b);
     }
+  }
+
+  /* La page d'administration a sa propre connexion : pas besoin d'un compte
+     dans l'application, seulement d'un e-mail autorisé et du code. */
+  function showLogin(text) {
+    dash.hidden = true;
+    stateBox.hidden = true;
+    loginBox.hidden = false;
+    document.getElementById('adOut').hidden = true;
+    const m = document.getElementById('adMsg');
+    m.className = text ? 'hint err' : 'hint';
+    m.textContent = text || '';
+    const email = document.getElementById('adEmail');
+    if (!email.value) email.focus();
   }
 
   function bar(label, n, max) {
@@ -225,20 +252,10 @@
       message('<h2>Pas de connexion</h2><p>Vérifiez le réseau, puis réessayez.</p>', { label: 'Réessayer', run: () => load() });
       return;
     }
-    if (r.status === 401) {
-      message('<h2>Connectez-vous d’abord</h2><p>L’administration utilise votre compte Assistant Commercial. Connectez-vous dans l’application, puis revenez ici.</p>',
-        { label: 'Ouvrir l’application', run: () => { location.href = '/'; } });
-      const b = stateBox.querySelector('button');
-      if (b) b.onclick = () => { location.href = '/'; };
-      return;
-    }
-    if (r.status === 403) {
-      message('<h2>Compte non administrateur</h2><p>Ce compte n’est pas dans la liste des administrateurs. Ajoutez son e-mail dans le secret <b>ADMIN_EMAILS</b> (Sites → Secrets), séparé par des virgules s’il y en a plusieurs.</p>',
-        { label: 'Réessayer', run: () => load() });
-      return;
-    }
+    if (r.status === 401) { showLogin(''); return; }
+    if (r.status === 403) { showLogin('Ce compte n’est pas autorisé à administrer.'); return; }
     if (r.status === 503) {
-      message('<h2>Administration non configurée</h2><p>Ajoutez le secret <b>ADMIN_EMAILS</b> avec l’e-mail de votre compte (Sites → Secrets), puis rechargez cette page. Sans ce secret, personne ne peut entrer.</p>',
+      message('<h2>Administration non configurée</h2><p>Ajoutez les secrets <b>ADMIN_EMAILS</b> (les e-mails autorisés) et <b>ADMIN_CODE</b> (le code commun) dans Sites → Secrets, puis rechargez cette page.</p>',
         { label: 'Réessayer', run: () => load() });
       return;
     }
@@ -248,11 +265,47 @@
     }
     data = await r.json();
     stateBox.hidden = true;
+    loginBox.hidden = true;
     dash.hidden = false;
+    document.getElementById('adOut').hidden = false;
     paint();
   }
 
   document.getElementById('reload').onclick = () => load();
+  loginBox.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('adGo');
+    const msg = document.getElementById('adMsg');
+    msg.className = 'hint';
+    msg.textContent = 'Vérification…';
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/admin/login', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: document.getElementById('adEmail').value.trim(),
+          code: document.getElementById('adCode').value,
+        }),
+      });
+      if (r.ok) {
+        document.getElementById('adCode').value = '';
+        await load(true);
+        return;
+      }
+      msg.className = 'hint err';
+      msg.textContent = r.status === 503 ? 'Administration non configurée : ajoutez ADMIN_EMAILS et ADMIN_CODE (Sites → Secrets).'
+        : r.status === 429 ? 'Trop d’essais. Attendez un quart d’heure.'
+          : 'E-mail ou code incorrect.';
+    } catch {
+      msg.className = 'hint err';
+      msg.textContent = 'Pas de connexion : réessayez.';
+    }
+    btn.disabled = false;
+  });
+  document.getElementById('adOut').onclick = async () => {
+    try { await fetch('/api/admin/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+    location.reload();
+  };
   document.getElementById('adsSave').onclick = async () => {
     const msg = document.getElementById('adsMsg');
     msg.className = 'hint';

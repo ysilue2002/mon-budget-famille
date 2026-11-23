@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -282,6 +282,23 @@ test('seuls les comptes listés entrent dans l’administration', () => {
   assert.equal(isAdmin({ email: 'autre@boutique.ci' }, list), false, 'e-mail inconnu');
   assert.equal(isAdmin({ email: 'patron@boutique.ci' }, []), false, 'sans liste : personne');
   assert.equal(isAdmin(null, list), false, 'sans compte : personne');
+});
+
+test('la connexion administrateur exige un e-mail autorisé et le bon code', async () => {
+  const env = { ADMIN_EMAILS: 'ysilue2002@gmail.com, ysilue2002@yahoo.fr', ADMIN_CODE: 'entrepreneuriat2015' };
+  const future = Date.now() + 3600000;
+  for (const email of ['ysilue2002@gmail.com', 'ysilue2002@yahoo.fr']) {
+    const token = await adminToken(env, email, future);
+    const who = await adminFromToken(env, token);
+    assert.equal(who && who.email, email, 'les deux e-mails passent');
+  }
+  const token = await adminToken(env, 'ysilue2002@gmail.com', future);
+  assert.equal(await adminFromToken(env, token.replace('ysilue2002', 'intrus')), null, 'e-mail modifié : refusé');
+  assert.equal(await adminFromToken(env, token + 'x'), null, 'signature modifiée : refusée');
+  assert.equal(await adminFromToken(env, await adminToken(env, 'autre@test.ci', future)), null, 'e-mail hors liste : refusé');
+  assert.equal(await adminFromToken(env, await adminToken(env, 'ysilue2002@gmail.com', Date.now() - 1000)), null, 'session expirée : refusée');
+  assert.equal(await adminFromToken({ ...env, ADMIN_CODE: 'autre-code' }, token), null, 'autre code : refusé');
+  assert.equal(await adminToken({ ADMIN_EMAILS: env.ADMIN_EMAILS }, 'ysilue2002@gmail.com', future), '', 'sans code, rien n’est signé');
 });
 
 test('un mois de Premium s’ajoute sans écraser une date encore à venir', () => {

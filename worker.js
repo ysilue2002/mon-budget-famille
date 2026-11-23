@@ -367,6 +367,46 @@ function isAdmin(user, list) {
   const digits = digitsOf(user.phone || '');
   return list.some((v) => (v.includes('@') ? v === email : digits.length > 0 && digitsOf(v) === digits));
 }
+/* Connexion d'administration : un e-mail de la liste et le code commun
+   donnent un cookie signé, sans exiger un compte dans l'application. Le code
+   n'est jamais envoyé au navigateur ; le cookie ne contient que l'e-mail et sa
+   date d'expiration, signés avec le code. */
+const ADMIN_COOKIE = 'ac_admin';
+const ADMIN_SESSION_MS = 12 * 3600000;
+const adminSigningKey = (env) => String(env.ADMIN_CODE || '');
+const adminEmailOk = (email, list) => Array.isArray(list) && list.includes(String(email || '').trim().toLowerCase());
+
+async function adminToken(env, email, expires) {
+  const key = adminSigningKey(env);
+  if (!key) return '';
+  const payload = `${String(email).trim().toLowerCase()}|${Number(expires) || 0}`;
+  const sig = (await sha256(payload + '|' + key)).slice(0, 32);
+  /* Ni « | » ni « @ » ne sont interdits dans un cookie : la valeur reste
+     lisible et se vérifie telle quelle. */
+  return payload + '.' + sig;
+}
+
+/* Vérification silencieuse : cookie absent, mal signé, expiré ou e-mail retiré
+   de la liste donnent tous « pas administrateur », jamais une erreur utile à
+   un curieux. */
+async function adminFromToken(env, raw) {
+  const key = adminSigningKey(env);
+  if (!key || !raw) return null;
+  const at = raw.lastIndexOf('.');
+  if (at < 1) return null;
+  const payload = raw.slice(0, at);
+  const sig = raw.slice(at + 1);
+  const expected = (await sha256(payload + '|' + key)).slice(0, 32);
+  if (!same(sig, expected)) return null;
+  const parts = payload.split('|');
+  if (parts.length !== 2) return null;
+  const email = parts[0].trim().toLowerCase();
+  const expires = Number(parts[1]) || 0;
+  if (!(expires > Date.now())) return null;
+  if (!adminEmailOk(email, adminList(env))) return null;
+  return { email, expires };
+}
+const adminSession = (request, env) => adminFromToken(env, cookieOf(request, ADMIN_COOKIE));
 /* Réglages communs à toute l'application : publicité, emplacements et numéro
    WhatsApp du support (activation Premium et aide). */
 const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '', supportWa: '' };
@@ -544,14 +584,46 @@ async function api(request, env, url) {
     return json({ ok: true }, 200, { 'set-cookie': 'ac_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0' });
   }
 
+  /* Page de connexion de l'administration : e-mail autorisé + code commun.
+     Aucun compte n'est créé, aucun mot de passe d'application n'est demandé. */
+  if (path === '/api/admin/login' && request.method === 'POST') {
+    const list = adminList(env);
+    if (!list.length || !adminSigningKey(env)) return json({ error: 'notconfigured' }, 503);
+    const ip = request.headers.get('cf-connecting-ip') || 'local';
+    if (await blocked(env, 'admin-login:' + ip, 20)) return json({ error: 'slow' }, 429);
+    const body = await readBody(request);
+    const email = String(body.email || '').trim().toLowerCase();
+    const code = String(body.code || '');
+    /* Le code est comparé par empreintes : même longueur, même temps, et
+       aucune trace du vrai code dans la réponse. */
+    const ok = adminEmailOk(email, list)
+      && same(await sha256(code), await sha256(adminSigningKey(env)));
+    if (!ok) {
+      await tooMany(env, 'admin-login:' + ip, 20, 15 * 60000);
+      return json({ error: 'credentials' }, 401);
+    }
+    const expires = Date.now() + ADMIN_SESSION_MS;
+    const token = await adminToken(env, email, expires);
+    return json({ ok: true, email, expires }, 200, {
+      'set-cookie': `${ADMIN_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${ADMIN_SESSION_MS / 1000}`,
+    });
+  }
+
+  if (path === '/api/admin/logout' && request.method === 'POST') {
+    return json({ ok: true }, 200, { 'set-cookie': `${ADMIN_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0` });
+  }
+
   const user = await currentUser(request, env);
-  if (!user) return json({ error: 'auth' }, 401);
+  /* L'administration accepte son propre cookie, ou un compte connecté dont
+     l'e-mail figure dans la liste. */
+  const admin = path.startsWith('/api/admin/') ? await adminSession(request, env) : null;
+  if (!user && !admin) return json({ error: 'auth' }, 401);
 
   /* ---------------- tableau de bord administrateur ---------------- */
   if (path === '/api/admin/stats' && request.method === 'GET') {
     const list = adminList(env);
     if (!list.length) return json({ error: 'notconfigured' }, 503);
-    if (!isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
     const now = Date.now();
     const day = 86400000;
     const one = async (sql, ...args) => {
@@ -611,7 +683,7 @@ async function api(request, env, url) {
   if (path === '/api/admin/premium' && request.method === 'POST') {
     const list = adminList(env);
     if (!list.length) return json({ error: 'notconfigured' }, 503);
-    if (!isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
     const body = await readBody(request);
     const id = String(body.id || '');
     const months = Math.max(0, Math.min(24, Math.round(Number(body.months) || 0)));
@@ -628,7 +700,7 @@ async function api(request, env, url) {
   if (path === '/api/admin/config' && request.method === 'POST') {
     const list = adminList(env);
     if (!list.length) return json({ error: 'notconfigured' }, 503);
-    if (!isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
     const body = await readBody(request);
     const client = String(body.adsClient || '').trim();
     const top = String(body.adsTop || '').trim();
