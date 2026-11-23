@@ -151,6 +151,7 @@ I18N.en = {
     premiumCodeHint: 'After payment, the team sends you an 8-character code. It works once.',
     premiumCodeOk: 'Premium active until',
     premiumCodeBad: 'Unknown or already used code.',
+    premiumCodeExpired: 'This code has expired. Ask the team for a new one.',
     supportTitle: 'WhatsApp support',
     supportMsg: 'Hello, I need help. Shop: [Boutique].',
     supportOff: 'WhatsApp support will be available soon.',

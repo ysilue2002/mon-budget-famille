@@ -73,7 +73,7 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     /* Codes d'activation Premium : créés par l'admin après paiement, utilisés
        une seule fois par la boutique qui les saisit. */
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS premium_codes (code TEXT PRIMARY KEY, months INTEGER NOT NULL, created INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0, used_by TEXT)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS premium_codes (code TEXT PRIMARY KEY, months INTEGER NOT NULL, created INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0, used_by TEXT, expires INTEGER, used_at INTEGER)'),
   ]).then(async () => {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_digits TEXT').run(); } catch {}
     // Comptes par téléphone uniquement : l'e-mail et le téléphone deviennent facultatifs.
@@ -108,6 +108,10 @@ function ensureSchema(env) {
        chacun après la première vente du filleul, jamais à l'inscription. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN ref_by TEXT').run(); } catch {}
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN referral_rewarded INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+    /* Codes d'activation : date de validité et date d'utilisation, pour
+       n'accepter un code qu'un temps et savoir qui s'en est servi. */
+    try { await env.DB.prepare('ALTER TABLE premium_codes ADD COLUMN expires INTEGER').run(); } catch {}
+    try { await env.DB.prepare('ALTER TABLE premium_codes ADD COLUMN used_at INTEGER').run(); } catch {}
     await env.DB.prepare(
       'CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used_by TEXT)',
     ).run(    );
@@ -244,17 +248,20 @@ const newPremiumCode = () => {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
   return [...bytes].map((b) => REF_ALPHABET[b % REF_ALPHABET.length]).join('');
 };
-async function createPremiumCode(env, months) {
+async function createPremiumCode(env, months, expires) {
   for (let i = 0; i < 8; i += 1) {
     const code = newPremiumCode();
     try {
-      await env.DB.prepare('INSERT INTO premium_codes (code, months, created, used, used_by) VALUES (?, ?, ?, 0, NULL)')
-        .bind(code, months, Date.now()).run();
+      await env.DB.prepare('INSERT INTO premium_codes (code, months, created, used, used_by, expires) VALUES (?, ?, ?, 0, NULL, ?)')
+        .bind(code, months, Date.now(), Number(expires) || null).run();
       return code;
     } catch { /* collision improbable : on retente */ }
   }
   return '';
 }
+/* Un code sans date de fin reste valable : c'est le cas des codes créés
+   avant l'ajout des dates. */
+const codeExpired = (expires, now) => !!Number(expires) && Number(expires) <= (Number(now) || Date.now());
 
 /* Ce qu'un vendeur ne doit jamais recevoir : prix d'achat, marges, dépenses
    et montants fournisseurs. On les vide à la lecture et on les rétablit
@@ -721,11 +728,27 @@ async function api(request, env, url) {
     const list = adminList(env);
     if (!list.length) return json({ error: 'notconfigured' }, 503);
     if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
-    const rows = await env.DB.prepare('SELECT code, months, created FROM premium_codes WHERE used = 0 ORDER BY created DESC LIMIT 30').all();
+    const rows = await env.DB.prepare('SELECT code, months, created, expires FROM premium_codes WHERE used = 0 ORDER BY created DESC LIMIT 30').all();
     const used = await env.DB.prepare('SELECT COUNT(*) AS n FROM premium_codes WHERE used = 1').first();
+    /* Qui a activé quoi : le code, les mois, la boutique et le compte. Utile
+       pour retrouver un paiement, jamais pour autre chose. */
+    const history = await env.DB.prepare(
+      `SELECT c.code, c.months, c.used_at, u.email, u.phone, u.name,
+        COALESCE(json_extract(s.json,'$.shop'), '') AS shop
+       FROM premium_codes c JOIN users u ON u.id = c.used_by
+       LEFT JOIN state s ON s.user_id = u.id
+       WHERE c.used = 1 ORDER BY c.used_at DESC LIMIT 30`,
+    ).all().catch(() => ({ results: [] }));
     return json({
-      codes: (rows.results || []).map((r) => ({ code: String(r.code), months: Number(r.months) || 1, created: Number(r.created) || 0 })),
+      codes: (rows.results || []).map((r) => ({
+        code: String(r.code), months: Number(r.months) || 1,
+        created: Number(r.created) || 0, expires: Number(r.expires) || 0,
+      })),
       used: Number(used && used.n) || 0,
+      history: (history.results || []).map((r) => ({
+        code: String(r.code), months: Number(r.months) || 1, usedAt: Number(r.used_at) || 0,
+        email: r.email || null, phone: r.phone || null, name: r.name || null, shop: String(r.shop || ''),
+      })),
     });
   }
 
@@ -735,9 +758,11 @@ async function api(request, env, url) {
     if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
     const body = await readBody(request);
     const months = Math.max(1, Math.min(12, Math.round(Number(body.months) || 1)));
-    const code = await createPremiumCode(env, months);
+    const days = Math.max(1, Math.min(365, Math.round(Number(body.days) || 30)));
+    const expires = Date.now() + days * 86400000;
+    const code = await createPremiumCode(env, months, expires);
     if (!code) return json({ error: 'server' }, 500);
-    return json({ code, months });
+    return json({ code, months, expires });
   }
 
   /* Publicité commune : activée pour l'application, avec l'identifiant AdSense
@@ -798,11 +823,12 @@ async function api(request, env, url) {
     const body = await readBody(request);
     const code = String(body.code || '').trim().toUpperCase();
     if (!/^[A-Z0-9]{8}$/.test(code)) return json({ error: 'code' }, 404);
-    const found = await env.DB.prepare('SELECT months FROM premium_codes WHERE code = ? AND used = 0').bind(code).first();
+    const found = await env.DB.prepare('SELECT months, expires FROM premium_codes WHERE code = ? AND used = 0').bind(code).first();
     if (!found) return json({ error: 'code' }, 404);
+    if (codeExpired(found.expires)) return json({ error: 'expired' }, 410);
     const months = Math.max(1, Math.min(12, Number(found.months) || 1));
-    const take = await env.DB.prepare('UPDATE premium_codes SET used = 1, used_by = ? WHERE code = ? AND used = 0')
-      .bind(user.id, code).run();
+    const take = await env.DB.prepare('UPDATE premium_codes SET used = 1, used_by = ?, used_at = ? WHERE code = ? AND used = 0')
+      .bind(user.id, Date.now(), code).run();
     if (!take.meta || !take.meta.changes) return json({ error: 'code' }, 404);
     const row = await env.DB.prepare('SELECT premium_until FROM users WHERE id = ?').bind(user.id).first();
     const until = extendPremium(row && row.premium_until, months);

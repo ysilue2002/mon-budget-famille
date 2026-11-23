@@ -155,6 +155,7 @@ const I18N = { fr: {
     premiumCodeHint: 'Après paiement, l’équipe vous envoie un code à 8 signes. Il ne sert qu’une fois.',
     premiumCodeOk: 'Premium activé jusqu’au',
     premiumCodeBad: 'Code inconnu ou déjà utilisé.',
+    premiumCodeExpired: 'Ce code a expiré. Demandez-en un nouveau à l’équipe.',
     supportTitle: 'Support WhatsApp',
     supportMsg: 'Bonjour, j’ai besoin d’aide. Boutique : [Boutique].',
     supportOff: 'Le support WhatsApp sera bientôt disponible.',

@@ -3382,8 +3382,9 @@ function settingsModal() {
     premGo.disabled = false;
     if (!r.ok) {
       alert(r.data && r.data.error === 'slow' ? T('tooManyTries')
-        : r.data && r.data.error === 'owner' ? T('teamOwnerOnly')
-          : T('premiumCodeBad'));
+        : r.data && r.data.error === 'expired' ? T('premiumCodeExpired')
+          : r.data && r.data.error === 'owner' ? T('teamOwnerOnly')
+            : T('premiumCodeBad'));
       return;
     }
     await refreshMe();

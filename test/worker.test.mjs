@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -251,6 +251,15 @@ test('la facture publique reprend le logo, jamais une image distante', () => {
   assert.ok(!remote.includes('class="mark"'), 'aucune image distante');
   const svg = publicDocHtml(JSON.stringify({ ...base, logo: 'data:image/svg+xml;base64,' + 'A'.repeat(400) }));
   assert.ok(!svg.includes('class="mark"'), 'seulement PNG ou JPEG');
+});
+
+test('un code d’activation expire à sa date, jamais avant', () => {
+  const now = 1_800_000_000_000;
+  assert.equal(codeExpired(now + 1000, now), false);
+  assert.equal(codeExpired(now - 1000, now), true);
+  assert.equal(codeExpired(now, now), true);
+  assert.equal(codeExpired(0, now), false, 'sans date de fin : toujours valable');
+  assert.equal(codeExpired(null, now), false);
 });
 
 test('un code d’activation fait huit signes faciles à dicter', () => {

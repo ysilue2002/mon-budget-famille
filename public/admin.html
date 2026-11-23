@@ -104,9 +104,13 @@
       <p class="hint">Un code ouvre le nombre de mois choisi, une seule fois, à la boutique qui le saisit dans Réglages → Premium.</p>
       <label for="codeMonths">Mois offerts</label>
       <input id="codeMonths" type="text" inputmode="numeric" value="1">
+      <label for="codeDays">Valable (jours)</label>
+      <input id="codeDays" type="text" inputmode="numeric" value="30">
       <button class="btn solid" id="codeNew" type="button">Créer un code</button>
       <p class="hint" id="codeMsg"></p>
       <div id="codes"><p class="hint">—</p></div>
+      <h2 style="margin-top:18px">Qui a activé</h2>
+      <div id="codeHistory"><p class="hint">—</p></div>
     </section>
     <section>
       <h2>Publicité</h2>
@@ -290,10 +294,21 @@
       if (!r.ok) { box.innerHTML = '<p class="hint">—</p>'; return; }
       const d = await r.json();
       const codes = d.codes || [];
+      const now = Date.now();
       box.innerHTML = (codes.length
-        ? codes.map((c) => `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #e6ece7"><b style="font-size:20px;letter-spacing:2px">${esc(c.code)}</b><span class="hint">${num(c.months)} mois · ${day(c.created)}</span></div>`).join('')
+        ? codes.map((c) => {
+          const exp = Number(c.expires) || 0;
+          const expired = exp && exp <= now;
+          const when = exp ? `${expired ? 'expiré le' : 'valable jusqu’au'} ${day(exp)}` : 'sans date de fin';
+          return `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #e6ece7"><b style="font-size:20px;letter-spacing:2px;${expired ? 'text-decoration:line-through;opacity:.5' : ''}">${esc(c.code)}</b><span class="hint">${num(c.months)} mois · ${when}</span></div>`;
+        }).join('')
         : '<p class="hint">Aucun code disponible. Créez-en un après un paiement.</p>')
         + `<p class="hint">${num(d.used || 0)} code${Number(d.used) === 1 ? '' : 's'} déjà utilisé${Number(d.used) === 1 ? '' : 's'}.</p>`;
+      const hist = document.getElementById('codeHistory');
+      const h = d.history || [];
+      hist.innerHTML = h.length
+        ? h.map((x) => `<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid #e6ece7"><div><b style="letter-spacing:1px">${esc(x.code)}</b> <span class="hint">${num(x.months)} mois</span></div><div class="hint" style="text-align:right">${esc(x.shop || x.name || x.email || x.phone || '—')}${x.email && (x.shop || x.name) ? '<br>' + esc(x.email) : ''}<br>${day(x.usedAt)}</div></div>`).join('')
+        : '<p class="hint">Aucune activation pour le moment.</p>';
     } catch { box.innerHTML = '<p class="hint">—</p>'; }
   }
 
@@ -306,12 +321,16 @@
     try {
       const r = await fetch('/api/admin/codes', {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ months: document.getElementById('codeMonths').value }),
+        body: JSON.stringify({
+          months: document.getElementById('codeMonths').value,
+          days: document.getElementById('codeDays').value,
+        }),
       });
       if (!r.ok) throw new Error();
       const d = await r.json();
       msg.className = 'ok';
-      msg.textContent = `Code ${d.code} créé pour ${num(d.months)} mois.`;
+      const days = Math.max(1, Math.min(365, Math.round(Number(document.getElementById('codeDays').value) || 30)));
+      msg.textContent = `Code ${d.code} créé pour ${num(d.months)} mois, valable ${days} jours.`;
       await loadCodes();
     } catch {
       msg.className = 'err';
