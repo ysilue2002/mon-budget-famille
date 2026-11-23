@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -260,6 +260,25 @@ test('un code d’activation expire à sa date, jamais avant', () => {
   assert.equal(codeExpired(now, now), true);
   assert.equal(codeExpired(0, now), false, 'sans date de fin : toujours valable');
   assert.equal(codeExpired(null, now), false);
+});
+
+test('un code de réinitialisation fait huit signes faciles à dicter', () => {
+  for (let i = 0; i < 50; i += 1) {
+    const code = newResetCode();
+    assert.equal(code.length, 8);
+    assert.match(code, /^[A-HJ-NP-Z2-9]{8}$/);
+  }
+  assert.equal(normalizeResetCode(' abcd-2345 '), 'ABCD2345');
+  assert.equal(normalizeResetCode('abcd 2345'), 'ABCD2345');
+  assert.equal(normalizeResetCode(undefined), '');
+});
+
+test('le lien officiel n’accepte que https', () => {
+  assert.equal(OFFICIAL_URL_RE.test('https://boutique.exemple.com'), true);
+  assert.equal(OFFICIAL_URL_RE.test('https://boutique.exemple.com/app'), true);
+  assert.equal(OFFICIAL_URL_RE.test('http://boutique.exemple.com'), false);
+  assert.equal(OFFICIAL_URL_RE.test('javascript:alert(1)'), false);
+  assert.equal(OFFICIAL_URL_RE.test('https://exemple.com/a b'), false);
 });
 
 test('un code d’activation fait huit signes faciles à dicter', () => {

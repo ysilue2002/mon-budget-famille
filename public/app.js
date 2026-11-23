@@ -62,6 +62,9 @@ const ADS = { client: '', top: '', bottom: '' };
 /* Numéro WhatsApp de l'équipe, réglé dans /admin : sans lui, ni demande
    d'activation ni bouton de support. Aucun numéro n'est écrit dans le code. */
 const SUPPORT = { wa: '' };
+/* Un seul lien officiel, réglé dans /admin : celui qu'on partage, celui des
+   QR et celui des e-mails. Vide : l'adresse du navigateur fait l'affaire. */
+let OFFICIAL = '';
 
 /* Consentement aux cookies publicitaires. « yes » seulement après un clic sur
    Accepter : sans choix, ou après un refus, aucune annonce n'est chargée. */
@@ -1077,7 +1080,7 @@ function printHtml(html, cls) {
 /* QR du reçu : le client scanne l'image et retrouve la boutique. Dessiné
    module par module dans le PDF (net à l'impression, aucune image à charger)
    et en SVG dans la feuille imprimée. */
-const appUrl = () => location.origin + location.pathname;
+const appUrl = () => (OFFICIAL ? OFFICIAL.replace(/\/+$/, '') + '/' : location.origin + location.pathname);
 async function qrCode(text) {
   const QR = await loadQR();
   if (!QR) return null;
@@ -4069,20 +4072,45 @@ function wireAccount(d) {
   const forgot = d.querySelector('#acForgot');
   if (forgot) forgot.onclick = () => forgotModal((values().mode === 'email' ? values().ident : '') || d.querySelector('#acLoginId').value.trim());
 }
+/* Réinitialisation par code : l'e-mail envoie huit signes, ou l'assistance
+   les donne par WhatsApp. Une seule fenêtre : demander, puis changer. */
 function forgotModal(email = '') {
   const d = modal(`<h2>${T('forgotTitle')}</h2><p class="hint">${T('forgotHint')}</p>
-    <label>${T('email')}</label><input id="fEmail" type="email" value="${esc(email)}">
-    <button class="btn" id="fOk">${T('sendLink')}</button>
-    <button class="btn out" id="fNo">${T('cancel')}</button><p class="hint" id="fMsg"></p>`);
+    <label>${T('email')}</label><input id="fEmail" type="email" value="${esc(email)}" autocomplete="email">
+    <button class="btn out" id="fOk">${T('sendCode')}</button>
+    <p class="hint" id="fMsg"></p>
+    <label>${T('resetCode')}</label><input id="fCode" type="text" autocapitalize="characters" autocomplete="one-time-code" spellcheck="false" placeholder="ABCD2345">
+    <label>${T('newPassword')}</label><input id="fPass" type="password" autocomplete="new-password">
+    <button class="btn" id="fApply">${T('applyCode')}</button>
+    <button class="btn out" id="fNo">${T('cancel')}</button><p class="err" id="fErr"></p>`);
+  const msg = d.querySelector('#fMsg');
+  const err = d.querySelector('#fErr');
   d.querySelector('#fNo').onclick = () => d.remove();
   d.querySelector('#fOk').onclick = async () => {
     const addr = d.querySelector('#fEmail').value.trim();
-    const msg = d.querySelector('#fMsg');
-    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(addr)) { msg.textContent = T('badEmail'); return; }
+    err.textContent = '';
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(addr)) { err.textContent = T('badEmail'); return; }
     d.querySelector('#fOk').disabled = true;
     const r = await api('/api/forgot', 'POST', { email: addr });
     d.querySelector('#fOk').disabled = false;
-    msg.textContent = T('resetSent') + (r.ok && r.data && r.data.mail === false ? ' ' + T('mailNotReady') : '');
+    msg.textContent = r.ok && r.data && r.data.mail === false ? T('resetNoMail') : T('resetCodeSent');
+  };
+  d.querySelector('#fApply').onclick = async () => {
+    const code = d.querySelector('#fCode').value.trim();
+    const pass = d.querySelector('#fPass').value;
+    err.textContent = '';
+    if (code.replace(/[^A-Za-z0-9]/g, '').length !== 8) { err.textContent = T('resetCodeBad'); return; }
+    if (pass.length < 8) { err.textContent = T('badPass'); return; }
+    d.querySelector('#fApply').disabled = true;
+    const r = await api('/api/reset', 'POST', { code, password: pass });
+    d.querySelector('#fApply').disabled = false;
+    if (!r.ok) {
+      err.textContent = r.data && r.data.error === 'slow' ? T('tooManyTries') : T('resetCodeBad');
+      return;
+    }
+    d.remove();
+    alert(T('resetCodeDone'));
+    showAuthGate();
   };
 }
 function resetModal(token) {
@@ -4216,6 +4244,7 @@ function showAuthGate() {
       : `<label>${T('loginId')}</label><input id="gLoginId" type="text" autocomplete="username" placeholder="awa@exemple.com / +225 07 00 00 00 00">
          <label>${T('password')}</label><input id="gPass" type="password" autocomplete="current-password">
          <button class="btn" id="gGo">${T('signIn')}</button>
+         <button class="btn out" id="gForgot">${T('forgot')}</button>
          <p class="hint">${T('loginHint')}</p><p class="err" id="gErr"></p>`;
     const go = form.querySelector('#gGo');
     if (gateMode === 'signup') {
@@ -4234,6 +4263,9 @@ function showAuthGate() {
       };
       typeBox.querySelectorAll('button').forEach((b) => { b.onclick = () => pick(b.dataset.m); });
       pick(signupMode);
+    } else {
+      const fg = form.querySelector('#gForgot');
+      if (fg) fg.onclick = () => forgotModal(form.querySelector('#gLoginId').value.trim());
     }
     go.onclick = async () => {
       const err = form.querySelector('#gErr');
@@ -4364,6 +4396,7 @@ async function loadAppConfig() {
   if (!r.ok || !r.data) return;
   /* Le support se lit même quand la publicité est vide. */
   SUPPORT.wa = String(r.data.supportWa || '').replace(/\D/g, '').slice(0, 15);
+  OFFICIAL = /^https:\/\/[^\s]+$/i.test(String(r.data.officialUrl || '')) ? String(r.data.officialUrl).trim() : '';
   if (!r.data.ads || !r.data.adsClient) return;
   ADS.client = String(r.data.adsClient);
   ADS.top = String(r.data.adsTop || '');

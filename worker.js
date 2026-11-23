@@ -71,6 +71,9 @@ function ensureSchema(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS public_docs (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, number TEXT NOT NULL, json TEXT NOT NULL, updated INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS installs (src TEXT NOT NULL, day TEXT NOT NULL, hits INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (src, day))'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
+    /* Codes de réinitialisation : huit signes à dicter, valables trente
+       minutes, utilisés une seule fois. Seul leur empreinte est stockée. */
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS reset_codes (code TEXT PRIMARY KEY, user_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)'),
     /* Codes d'activation Premium : créés par l'admin après paiement, utilisés
        une seule fois par la boutique qui les saisit. */
     env.DB.prepare('CREATE TABLE IF NOT EXISTS premium_codes (code TEXT PRIMARY KEY, months INTEGER NOT NULL, created INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0, used_by TEXT, expires INTEGER, used_at INTEGER)'),
@@ -148,18 +151,38 @@ async function createSession(env, userId) {
   return `ac_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`;
 }
 
-async function sendResetMail(env, to, link) {
+/* Code de réinitialisation : huit signes sans I, O, 0 ni 1, faciles à dicter
+   au téléphone quand le client n'a pas accès à son e-mail. */
+function newResetCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return [...bytes].map((b) => REF_ALPHABET[b % REF_ALPHABET.length]).join('');
+}
+const normalizeResetCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+async function sendResetMail(env, to, code, link) {
   if (!env.RESEND_API_KEY) return false;
   const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
-  const text = `Bonjour,\n\nPour choisir un nouveau mot de passe Assistant Commercial, ouvrez ce lien (valable 1 heure) :\n${link}\n\nSi vous n'avez rien demandé, ignorez cet e-mail : votre mot de passe ne change pas.`;
+  const text = `Bonjour,\n\nVotre code pour choisir un nouveau mot de passe Assistant Commercial :\n\n    ${code}\n\nIl est valable 30 minutes et ne sert qu'une fois. Ouvrez l'application ici :\n${link}\n\nDans l'application : « Mot de passe oublié ? », puis saisissez ce code et votre nouveau mot de passe.\n\nSi vous n'avez rien demandé, ignorez cet e-mail : votre mot de passe ne change pas.`;
   try {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from, to: [to], subject: 'Assistant Commercial : nouveau mot de passe', text }),
+      body: JSON.stringify({ from, to: [to], subject: 'Assistant Commercial : votre code de réinitialisation', text }),
     });
     return r.ok;
   } catch { return false; }
+}
+
+/* Un seul lien officiel pour toute l'application : celui saisi dans
+   l'administration. À défaut, l'adresse par laquelle la demande est arrivée. */
+const OFFICIAL_URL_RE = /^https:\/\/[a-z0-9.-]+(:\d+)?(\/[^\s]*)?$/i;
+async function officialBase(env, url) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key = 'officialUrl'").first();
+    const v = row ? String(row.value || '').trim() : '';
+    if (v && OFFICIAL_URL_RE.test(v)) return v.replace(/\/+$/, '');
+  } catch { /* base indisponible : on retombe sur l'adresse de la requête */ }
+  return url.origin;
 }
 
 async function blocked(env, key, limit) {
@@ -436,7 +459,7 @@ async function adminFromToken(env, raw) {
 const adminSession = (request, env) => adminFromToken(env, cookieOf(request, ADMIN_COOKIE));
 /* Réglages communs à toute l'application : publicité, emplacements et numéro
    WhatsApp du support (activation Premium et aide). */
-const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '', supportWa: '' };
+const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '', supportWa: '', officialUrl: '' };
 async function readConfig(env) {
   const rows = await env.DB.prepare('SELECT key, value FROM app_config').all();
   const map = {};
@@ -447,10 +470,11 @@ async function readConfig(env) {
     adsTop: map.adsTop || '',
     adsBottom: map.adsBottom || '',
     supportWa: map.supportWa || '',
+    officialUrl: map.officialUrl || '',
   };
 }
 async function saveConfig(env, cfg) {
-  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom], ['supportWa', cfg.supportWa || '']];
+  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom], ['supportWa', cfg.supportWa || ''], ['officialUrl', cfg.officialUrl || '']];
   await env.DB.batch(pairs.map(([k, v]) => env.DB.prepare(
     'INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   ).bind(k, v)));
@@ -568,39 +592,60 @@ async function api(request, env, url) {
     return json({ user: publicUser(user) }, 200, { 'set-cookie': cookie });
   }
 
+  /* Demande de réinitialisation : un code à huit signes part par e-mail quand
+     l'envoi est configuré. Sinon l'assistance le donne par WhatsApp depuis
+     l'administration, ce qui couvre les comptes qui n'ont pas d'e-mail. */
   if (path === '/api/forgot' && request.method === 'POST') {
     const ip = request.headers.get('cf-connecting-ip') || 'local';
-    if (await blocked(env, 'forgot:' + ip, 30)) return json({ ok: true, mail: false });
-    await tooMany(env, 'forgot:' + ip, 30, 60 * 60000);
+    if (await blocked(env, 'forgot:' + ip, 10)) return json({ ok: true, mail: false });
+    await tooMany(env, 'forgot:' + ip, 10, 60 * 60000);
     const body = await readBody(request);
     const email = String(body.email || '').trim().toLowerCase();
     if (!validEmail(email)) return json({ ok: true, mail: false });
     const user = await env.DB.prepare('SELECT id, email FROM users WHERE email = ?').bind(email).first();
-    if (!user) return json({ ok: true, mail: false });
-    const last = await env.DB.prepare('SELECT created FROM resets WHERE user_id = ? ORDER BY created DESC LIMIT 1').bind(user.id).first();
+    if (!user || !user.email) return json({ ok: true, mail: false });
+    const last = await env.DB.prepare('SELECT created FROM reset_codes WHERE user_id = ? ORDER BY created DESC LIMIT 1').bind(user.id).first();
     if (last && Date.now() - last.created < 5 * 60000) return json({ ok: true, mail: !!env.RESEND_API_KEY });
-    const token = hex(crypto.getRandomValues(new Uint8Array(32)));
-    await env.DB.prepare('DELETE FROM resets WHERE user_id = ?').bind(user.id).run();
-    await env.DB.prepare('INSERT INTO resets (token, user_id, created, expires, used) VALUES (?, ?, ?, ?, 0)').bind(await sha256(token), user.id, Date.now(), Date.now() + 3600000).run();
-    const sent = await sendResetMail(env, user.email, `${url.origin}/?reset=${token}`);
+    await env.DB.prepare('DELETE FROM reset_codes WHERE user_id = ?').bind(user.id).run();
+    const code = newResetCode();
+    await env.DB.prepare('INSERT INTO reset_codes (code, user_id, created, expires, used) VALUES (?, ?, ?, ?, 0)')
+      .bind(await sha256('reset:' + code), user.id, Date.now(), Date.now() + 30 * 60000).run();
+    const sent = await sendResetMail(env, user.email, code, await officialBase(env, url));
     return json({ ok: true, mail: sent });
   }
 
+  /* Nouveau mot de passe avec le code reçu. L'ancien lien à jeton reste
+     accepté pour les e-mails déjà partis. */
   if (path === '/api/reset' && request.method === 'POST') {
     const body = await readBody(request);
-    const token = String(body.token || '');
     const password = String(body.password || '');
-    if (!/^[a-f0-9]{64}$/.test(token)) return json({ error: 'token' }, 400);
     if (!validPass(password)) return json({ error: 'password' }, 400);
-    const hash = await sha256(token);
-    const row = await env.DB.prepare('SELECT user_id, expires, used FROM resets WHERE token = ?').bind(hash).first();
-    if (!row || row.used || row.expires < Date.now()) return json({ error: 'token' }, 400);
+    const ip = request.headers.get('cf-connecting-ip') || 'local';
+    if (await blocked(env, 'reset:' + ip, 20)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'reset:' + ip, 20, 60 * 60000);
+    const code = normalizeResetCode(body.code);
+    const token = String(body.token || '');
+    const codeHash = code ? await sha256('reset:' + code) : '';
+    let userId = null;
+    if (code) {
+      const row = await env.DB.prepare('SELECT user_id, expires, used FROM reset_codes WHERE code = ?').bind(codeHash).first();
+      if (!row || row.used || row.expires < Date.now()) return json({ error: 'code' }, 400);
+      userId = row.user_id;
+      await env.DB.prepare('UPDATE reset_codes SET used = 1 WHERE code = ?').bind(codeHash).run();
+    } else if (/^[a-f0-9]{64}$/.test(token)) {
+      const tokenHash = await sha256(token);
+      const row = await env.DB.prepare('SELECT user_id, expires, used FROM resets WHERE token = ?').bind(tokenHash).first();
+      if (!row || row.used || row.expires < Date.now()) return json({ error: 'code' }, 400);
+      userId = row.user_id;
+      await env.DB.prepare('UPDATE resets SET used = 1 WHERE token = ?').bind(tokenHash).run();
+    } else {
+      return json({ error: 'code' }, 400);
+    }
     const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
     const pass = await pbkdf2(password, salt);
     await env.DB.batch([
-      env.DB.prepare('UPDATE users SET pass = ?, salt = ? WHERE id = ?').bind(pass, salt, row.user_id),
-      env.DB.prepare('UPDATE resets SET used = 1 WHERE token = ?').bind(hash),
-      env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(row.user_id),
+      env.DB.prepare('UPDATE users SET pass = ?, salt = ? WHERE id = ?').bind(pass, salt, userId),
+      env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
     ]);
     return json({ ok: true });
   }
@@ -703,7 +748,30 @@ async function api(request, env, url) {
         premiumUntil: Number(r.premium_until) || 0, src: String(r.src || ''),
       })),
       config: await readConfig(env),
+      /* L'envoi d'e-mails dépend d'un secret, pas d'un réglage : l'admin voit
+         s'il est actif, jamais sa valeur. */
+      mail: !!env.RESEND_API_KEY,
     });
+  }
+
+  /* Code de réinitialisation remis à la main : l'assistance le lit par
+     téléphone ou l'envoie sur WhatsApp quand le commerçant n'a pas d'e-mail. */
+  if (path === '/api/admin/reset-code' && request.method === 'POST') {
+    const list = adminList(env);
+    if (!list.length) return json({ error: 'notconfigured' }, 503);
+    if (!admin && !isAdmin(user, list)) return json({ error: 'forbidden' }, 403);
+    if (await blocked(env, 'adreset:' + (admin ? admin.email : user.id), 40)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'adreset:' + (admin ? admin.email : user.id), 40, 60 * 60000);
+    const body = await readBody(request);
+    const id = String(body.id || '');
+    const target = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(id).first();
+    if (!target) return json({ error: 'user' }, 404);
+    const code = newResetCode();
+    const expires = Date.now() + 30 * 60000;
+    await env.DB.prepare('DELETE FROM reset_codes WHERE user_id = ?').bind(target.id).run();
+    await env.DB.prepare('INSERT INTO reset_codes (code, user_id, created, expires, used) VALUES (?, ?, ?, ?, 0)')
+      .bind(await sha256('reset:' + code), target.id, Date.now(), expires).run();
+    return json({ code, expires });
   }
 
   /* Premium : le patron offre des mois à une boutique, ou les retire. */
@@ -782,7 +850,11 @@ async function api(request, env, url) {
     if (client && !ADMIN_REF.test(client)) return json({ error: 'client' }, 400);
     if (top && !ADMIN_SLOT.test(top)) return json({ error: 'slot' }, 400);
     if (bottom && !ADMIN_SLOT.test(bottom)) return json({ error: 'slot' }, 400);
-    const cfg = { ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom, supportWa };
+    /* Un seul lien officiel : https, sans espace. Sert aux e-mails, aux liens
+       de facture et aux partages, même si l'application répond ailleurs. */
+    const officialUrl = String(body.officialUrl || '').trim().replace(/\/+$/, '');
+    if (officialUrl && !OFFICIAL_URL_RE.test(officialUrl)) return json({ error: 'url' }, 400);
+    const cfg = { ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom, supportWa, officialUrl };
     await saveConfig(env, cfg);
     return json({ ok: true, config: cfg });
   }
@@ -857,7 +929,7 @@ async function api(request, env, url) {
          que plus personne n'ouvre, sinon la base grossit sans fin. */
       env.DB.prepare('DELETE FROM public_docs WHERE updated < ?').bind(Date.now() - 400 * 86400000),
     ]);
-    return json({ token, url: `${url.origin}/f/${token}` });
+    return json({ token, url: `${await officialBase(env, url)}/f/${token}` });
   }
 
   if (path === '/api/password' && request.method === 'POST') {

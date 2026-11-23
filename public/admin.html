@@ -210,6 +210,18 @@
       <h2 id="t-settings">Réglages</h2>
       <p class="lead">Une seule configuration pour toute l'application.</p>
       <div class="card">
+        <h3>Lien officiel</h3>
+        <p class="hint" style="margin-top:0">L'adresse que vous partagez : elle sert aux e-mails, aux liens de facture et aux QR. Une seule adresse, partout.</p>
+        <label for="officialUrl">Adresse de l'application</label>
+        <input id="officialUrl" type="text" inputmode="url" placeholder="https://…" autocomplete="off">
+        <p class="hint" id="officialState"></p>
+      </div>
+      <div class="card">
+        <h3>E-mails de réinitialisation</h3>
+        <p class="hint" style="margin-top:0">Le commerçant demande un code depuis « Mot de passe oublié ? » et le reçoit par e-mail. Sans e-mail configuré, vous donnez le code par WhatsApp depuis l'onglet Boutiques.</p>
+        <p id="mailState" class="hint"></p>
+      </div>
+      <div class="card">
         <h3>Support WhatsApp</h3>
         <p class="hint" style="margin-top:0">Le bouton « Support WhatsApp » des comptes Premium et la demande de code y arrivent. Laissez vide pour le masquer.</p>
         <label for="supportWa">Numéro WhatsApp du support (indicatif compris)</label>
@@ -231,7 +243,9 @@
             <input id="adsBottom" type="text" inputmode="numeric" placeholder="0987654321" autocomplete="off">
           </div>
         </div>
-        <button class="btn solid" id="adsSave" type="button" style="margin-top:16px">Enregistrer les réglages</button>
+      </div>
+      <div class="card">
+        <button class="btn solid" id="adsSave" type="button">Enregistrer les réglages</button>
         <p class="hint" id="adsMsg"></p>
       </div>
     </section>
@@ -344,6 +358,13 @@
     document.getElementById('adsTop').value = cfg.adsTop || '';
     document.getElementById('adsBottom').value = cfg.adsBottom || '';
     document.getElementById('supportWa').value = cfg.supportWa || '';
+    document.getElementById('officialUrl').value = cfg.officialUrl || '';
+    document.getElementById('officialState').textContent = cfg.officialUrl
+      ? 'Utilisé dans les e-mails, les liens de facture et les partages.'
+      : 'Vide : l’adresse par laquelle on ouvre l’application sert de lien.';
+    document.getElementById('mailState').innerHTML = data.mail
+      ? '<span class="badge on">Actifs</span> Les codes partent par e-mail.'
+      : '<span class="badge warn">Non configurés</span> Ajoutez les secrets <b>RESEND_API_KEY</b> et <b>MAIL_FROM</b> (Sites → Secrets), puis redéployez. En attendant, donnez les codes par WhatsApp.';
   }
 
   function filteredShops() {
@@ -376,13 +397,43 @@
       <div class="acts2">
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="1">+1 mois</button>
         <button class="btn small" type="button" data-id="${esc(s.id)}" data-months="0" ${premiumOn(s.premiumUntil) ? '' : 'disabled'}>Retirer</button>
+        <button class="btn small" type="button" data-reset="${esc(s.id)}" data-phone="${esc(String(s.phone || '').replace(/\D/g, ''))}">Code de passe</button>
       </div>
     </div>`).join('');
     const more = document.getElementById('shopsMore');
     more.hidden = list.length <= view.shown;
   }
 
+  /* Code de réinitialisation remis à la main : l'assistance le lit au
+     téléphone ou l'envoie sur WhatsApp, sans attendre les e-mails. */
   document.getElementById('shops').addEventListener('click', async (e) => {
+    const rb = e.target.closest('button[data-reset]');
+    if (rb) {
+      rb.disabled = true;
+      try {
+        const r = await fetch('/api/admin/reset-code', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: rb.dataset.reset }),
+        });
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        const phone = String(rb.dataset.phone || '').replace(/\D/g, '');
+        const text = `Bonjour, votre code pour changer le mot de passe Assistant Commercial : ${d.code} (valable 30 minutes).`;
+        const box = document.createElement('div');
+        box.className = 'acts2';
+        box.style.marginTop = '4px';
+        box.innerHTML = `<b style="font-family:ui-monospace,Consolas,monospace;letter-spacing:2px;font-size:18px">${esc(d.code)}</b>
+          <button class="btn small" type="button" data-copy="${esc(d.code)}">Copier</button>
+          ${phone ? `<a class="btn small" style="display:inline-flex;align-items:center;text-decoration:none" href="https://wa.me/${phone}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+          <span class="hint" style="margin:0">30 minutes, une seule fois.</span>`;
+        rb.replaceWith(box);
+        box.querySelector('button[data-copy]').onclick = () => copyText(d.code);
+      } catch {
+        rb.disabled = false;
+        toast('Code non créé. Réessayez.');
+      }
+      return;
+    }
     const b = e.target.closest('button[data-id]');
     if (!b) return;
     const msg = document.getElementById('premMsg');
@@ -566,12 +617,14 @@
           adsTop: document.getElementById('adsTop').value.trim(),
           adsBottom: document.getElementById('adsBottom').value.trim(),
           supportWa: document.getElementById('supportWa').value.trim(),
+          officialUrl: document.getElementById('officialUrl').value.trim(),
         }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         msg.className = 'hint err';
-        msg.textContent = j.error === 'client' ? 'Identifiant AdSense invalide (ca-pub-…).'
+        msg.textContent = j.error === 'url' ? 'Lien officiel invalide : commencez par https://'
+          : j.error === 'client' ? 'Identifiant AdSense invalide (ca-pub-…).'
           : j.error === 'slot' ? 'Emplacement invalide : chiffres seulement.'
             : j.error === 'support' ? 'Numéro WhatsApp invalide (8 à 15 chiffres, indicatif compris).'
               : 'Non enregistré. Réessayez.';
