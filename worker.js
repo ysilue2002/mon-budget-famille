@@ -175,6 +175,26 @@ function newResetCode() {
 }
 const normalizeResetCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+/* SMS de récupération : le même code à huit signes, pour les boutiques qui
+   n'ont qu'un numéro. Le fournisseur est branché par deux secrets
+   (SENT_API_KEY et SENT_PROJECT_ID) : sans eux, rien ne part et l'assistance
+   reste le recours. Aucun envoi n'est bloquant. */
+const smsReady = (env) => !!(env.SENT_API_KEY && env.SENT_PROJECT_ID);
+async function sendResetSms(env, to, code) {
+  if (!smsReady(env)) return false;
+  const digits = digitsOf(to);
+  if (digits.length < 8) return false;
+  const text = `Assistant Commercial : votre code de réinitialisation est ${code}. Valable 30 minutes, à usage unique.`;
+  try {
+    const r = await fetch('https://api.sent.dm/v1/messages', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.SENT_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ project_id: env.SENT_PROJECT_ID, channel: 'sms', to: '+' + digits, text }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
 async function sendResetMail(env, to, code, link) {
   if (!env.RESEND_API_KEY) return false;
   const from = env.MAIL_FROM || 'Assistant Commercial <onboarding@resend.dev>';
@@ -889,7 +909,7 @@ async function adminFromToken(env, raw) {
 const adminSession = (request, env) => adminFromToken(env, cookieOf(request, ADMIN_COOKIE));
 /* Réglages communs à toute l'application : publicité, emplacements et numéro
    WhatsApp du support (activation Premium et aide). */
-const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '', supportWa: '', officialUrl: '', payWave: '', payOm: '', priceMonth: 0 };
+const EMPTY_CONFIG = { ads: false, adsClient: '', adsTop: '', adsBottom: '', supportWa: '', supportMail: '', officialUrl: '', payWave: '', payOm: '', priceMonth: 0 };
 async function readConfig(env) {
   const rows = await env.DB.prepare('SELECT key, value FROM app_config').all();
   const map = {};
@@ -900,6 +920,9 @@ async function readConfig(env) {
     adsTop: map.adsTop || '',
     adsBottom: map.adsBottom || '',
     supportWa: map.supportWa || '',
+    /* Adresse de repli quand WhatsApp n'est pas renseigné : le commerçant
+       garde un moyen d'écrire à l'équipe. */
+    supportMail: map.supportMail || '',
     officialUrl: map.officialUrl || '',
     /* Encaissement du Premium : numéros Wave et Orange Money de l'équipe et
        prix d'un mois, en FCFA. Vides : seul le code ou WhatsApp reste. */
@@ -911,7 +934,7 @@ async function readConfig(env) {
   };
 }
 async function saveConfig(env, cfg) {
-  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom], ['supportWa', cfg.supportWa || ''], ['officialUrl', cfg.officialUrl || ''], ['payWave', cfg.payWave || ''], ['payOm', cfg.payOm || ''], ['priceMonth', String(Math.max(0, Math.round(Number(cfg.priceMonth) || 0)))], ['paySeuil', String(Math.max(0, Math.round(Number(cfg.paySeuil) || 0)))]];
+  const pairs = [['ads', cfg.ads ? '1' : '0'], ['adsClient', cfg.adsClient], ['adsTop', cfg.adsTop], ['adsBottom', cfg.adsBottom], ['supportWa', cfg.supportWa || ''], ['supportMail', cfg.supportMail || ''], ['officialUrl', cfg.officialUrl || ''], ['payWave', cfg.payWave || ''], ['payOm', cfg.payOm || ''], ['priceMonth', String(Math.max(0, Math.round(Number(cfg.priceMonth) || 0)))], ['paySeuil', String(Math.max(0, Math.round(Number(cfg.paySeuil) || 0)))]];
   await env.DB.batch(pairs.map(([k, v]) => env.DB.prepare(
     'INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   ).bind(k, v)));
@@ -1152,31 +1175,38 @@ async function api(request, env, url, ctx) {
     if (ident.includes('@')) {
       const email = ident.toLowerCase();
       if (!validEmail(email)) return json({ ok: true, mail: false });
-      user = await env.DB.prepare('SELECT id, email FROM users WHERE email = ?').bind(email).first();
+      user = await env.DB.prepare('SELECT id, email, phone FROM users WHERE email = ?').bind(email).first();
     } else {
       /* Même tolérance qu'à la connexion : le numéro complet, ou sa fin quand
          elle ne désigne qu'un seul compte. */
       const digits = digitsOf(ident);
       if (digits.length < 8) return json({ ok: true, mail: false });
-      user = await env.DB.prepare('SELECT id, email FROM users WHERE phone_digits = ?').bind(digits).first();
+      user = await env.DB.prepare('SELECT id, email, phone FROM users WHERE phone_digits = ?').bind(digits).first();
       if (!user) {
-        const rows = await env.DB.prepare('SELECT id, email FROM users WHERE phone_digits LIKE ?').bind('%' + digits).all();
+        const rows = await env.DB.prepare('SELECT id, email, phone FROM users WHERE phone_digits LIKE ?').bind('%' + digits).all();
         const found = rows.results || [];
         if (found.length === 1) user = found[0];
       }
     }
     if (!user) return json({ ok: true, mail: false });
-    /* Compte tenu par son téléphone seulement : aucun code ne peut partir tout
-       seul, il faut que l'assistance le remette. */
-    if (!user.email) return json({ ok: true, mail: false, support: true });
+    /* Un compte tenu par son téléphone seulement n'a de code que si le
+       fournisseur SMS est branché ; sinon l'assistance le remet à la main. */
+    if (!user.email && !smsReady(env)) return json({ ok: true, mail: false, support: true });
     const last = await env.DB.prepare('SELECT created FROM reset_codes WHERE user_id = ? ORDER BY created DESC LIMIT 1').bind(user.id).first();
-    if (last && Date.now() - last.created < 5 * 60000) return json({ ok: true, mail: !!env.RESEND_API_KEY });
+    if (last && Date.now() - last.created < 5 * 60000) {
+      const mail = !!(user.email && env.RESEND_API_KEY);
+      const sms = !!(user.phone && smsReady(env));
+      return json({ ok: true, mail, sms, support: !mail && !sms });
+    }
     await env.DB.prepare('DELETE FROM reset_codes WHERE user_id = ?').bind(user.id).run();
     const code = newResetCode();
     await env.DB.prepare('INSERT INTO reset_codes (code, user_id, created, expires, used) VALUES (?, ?, ?, ?, 0)')
       .bind(await sha256('reset:' + code), user.id, Date.now(), Date.now() + 30 * 60000).run();
-    const sent = await sendResetMail(env, user.email, code, await officialBase(env, url));
-    return json({ ok: true, mail: sent, support: !sent });
+    /* Les deux canaux partent quand ils existent : beaucoup de boutiques ont
+       un e-mail saisi à l'inscription mais ne le lisent pas. */
+    const mailed = user.email ? await sendResetMail(env, user.email, code, await officialBase(env, url)) : false;
+    const texted = user.phone ? await sendResetSms(env, user.phone, code) : false;
+    return json({ ok: true, mail: mailed, sms: texted, support: !mailed && !texted });
   }
 
   /* Nouveau mot de passe avec le code reçu. L'ancien lien à jeton reste
@@ -1382,6 +1412,9 @@ async function api(request, env, url, ctx) {
       /* L'envoi d'e-mails dépend d'un secret, pas d'un réglage : l'admin voit
          s'il est actif, jamais sa valeur. */
       mail: !!env.RESEND_API_KEY,
+      /* SMS de récupération : le fournisseur se branche par secrets, comme
+         l'e-mail. L'admin voit s'il est actif, jamais sa valeur. */
+      sms: smsReady(env),
       /* Session en cours : l'écran affiche l'e-mail et l'heure de fin, pour
          qu'un poste laissé ouvert se voie avant de surprendre. */
       admin: admin ? { email: admin.email, expires: admin.expires } : null,
@@ -1392,6 +1425,7 @@ async function api(request, env, url, ctx) {
         card: !!env.STRIPE_SECRET_KEY,
         totp: adminTotps(env).size,
         mail: !!env.RESEND_API_KEY,
+        sms: smsReady(env),
       },
     });
   }
@@ -1514,6 +1548,9 @@ async function api(request, env, url, ctx) {
        indicatif compris, sinon le bouton enverrait vers un lien cassé. */
     const supportWa = digitsOf(body.supportWa).slice(0, 15);
     if (String(body.supportWa || '').trim() && !validSupportWa(body.supportWa)) return json({ error: 'support' }, 400);
+    /* Adresse de repli : sert seulement à ouvrir un e-mail prérempli. */
+    const supportMail = String(body.supportMail || '').trim().toLowerCase();
+    if (supportMail && !validEmail(supportMail)) return json({ error: 'support' }, 400);
     if (client && !ADMIN_REF.test(client)) return json({ error: 'client' }, 400);
     if (top && !ADMIN_SLOT.test(top)) return json({ error: 'slot' }, 400);
     if (bottom && !ADMIN_SLOT.test(bottom)) return json({ error: 'slot' }, 400);
@@ -1529,7 +1566,7 @@ async function api(request, env, url, ctx) {
     /* Seuil du second accord : un montant en francs, jamais négatif. */
     const paySeuil = Math.max(0, Math.min(10000000, Math.round(Number(body.paySeuil) || 0)));
     const cfg = {
-      ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom, supportWa, officialUrl,
+      ads: !!body.ads && !!client, adsClient: client, adsTop: top, adsBottom: bottom, supportWa, supportMail, officialUrl,
       payWave: digitsOf(body.payWave).slice(0, 15), payOm: digitsOf(body.payOm).slice(0, 15), priceMonth, paySeuil,
     };
     await saveConfig(env, cfg);

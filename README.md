@@ -32,8 +32,17 @@ réinitialisation, ajouter dans Sites → Secrets :
 - `MAIL_FROM` : adresse d'expédition vérifiée, par exemple
   `Assistant Commercial <compte@votre-domaine.com>`.
 
-Sans ces deux réglages, l'application fonctionne normalement ; seul l'envoi du
-lien « mot de passe oublié » est désactivé.
+Pour que les codes de récupération partent aussi par SMS (utile aux boutiques
+inscrites avec un simple numéro), ajouter :
+
+- `SENT_API_KEY` : clé API du fournisseur SMS (sent.dm) ;
+- `SENT_PROJECT_ID` : identifiant du projet chez ce même fournisseur.
+
+L'adresse du support se règle dans `/admin` (onglet Réglages) : numéro WhatsApp
+et, en repli, e-mail du support. Ni l'un ni l'autre n'est écrit dans le code.
+
+Sans ces réglages, l'application fonctionne normalement ; seuls l'envoi
+automatique des codes et les boutons d'assistance sont désactivés.
 
 ## Développement local
 

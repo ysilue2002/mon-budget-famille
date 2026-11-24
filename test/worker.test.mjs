@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -587,4 +587,26 @@ test('le premier approbateur est relancé après quarante-huit heures', () => {
   assert.equal(needsApprovalAlert(now - 47 * h, now), false, 'pas encore');
   assert.equal(needsApprovalAlert(now + h, now), false, 'date future : rien');
   assert.equal(needsApprovalAlert(0, now), false, 'sans accord');
+});
+
+test('le SMS de récupération ne part que si le fournisseur est branché', async () => {
+  assert.equal(smsReady({}), false, 'sans secrets : rien');
+  assert.equal(smsReady({ SENT_API_KEY: 'k' }), false, 'clé seule : rien');
+  assert.equal(smsReady({ SENT_API_KEY: 'k', SENT_PROJECT_ID: 'p' }), true, 'les deux secrets : prêt');
+  let seen = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { seen = { url, init }; return { ok: true }; };
+  try {
+    assert.equal(await sendResetSms({ SENT_API_KEY: 'k', SENT_PROJECT_ID: 'p' }, '+225 07 00 00 00 00', 'ABCD2345'), true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(seen.url, 'https://api.sent.dm/v1/messages');
+  const body = JSON.parse(seen.init.body);
+  assert.equal(body.to, '+2250700000000', 'numéro en chiffres, indicatif compris');
+  assert.equal(body.channel, 'sms');
+  assert.equal(body.project_id, 'p');
+  assert.ok(body.text.includes('ABCD2345'), 'le code est dans le message');
+  assert.equal(await sendResetSms({}, '+2250700000000', 'ABCD2345'), false, 'sans secrets : aucun envoi');
+  assert.equal(await sendResetSms({ SENT_API_KEY: 'k', SENT_PROJECT_ID: 'p' }, '123', 'ABCD2345'), false, 'numéro trop court : aucun envoi');
 });

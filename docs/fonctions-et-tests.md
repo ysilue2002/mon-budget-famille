@@ -174,10 +174,13 @@ Essai complet, avec de vrais clics et de vraies requêtes :
 ## Mot de passe oublié
 
 1. Réglages → Mon compte → « Mot de passe oublié ? ».
-2. Le commerçant écrit l'adresse du compte ; le serveur crée un jeton valable
-   une heure (un seul par compte, l'ancien est effacé, un nouvel envoi n'est
-   possible qu'après 5 minutes).
-3. Le lien reçu ouvre l'application avec un formulaire « nouveau mot de passe ».
+2. Le commerçant écrit l'e-mail **ou** le numéro du compte ; le serveur crée un
+   code à huit signes valable 30 minutes (un seul par compte, l'ancien est
+   effacé, un nouvel envoi n'est possible qu'après 5 minutes). Le code part par
+   e-mail et, si le fournisseur SMS est branché, aussi par SMS.
+3. Sans e-mail ni SMS, l'assistance donne le code : WhatsApp si le numéro du
+   support est réglé, sinon un e-mail prérempli vers l'adresse de support.
+4. Le commerçant saisit le code et son nouveau mot de passe dans l'application.
 4. Après l'enregistrement, toutes les sessions du compte sont fermées ; il faut
    se reconnecter avec le nouveau mot de passe.
 5. La réponse est toujours la même, que le compte existe ou non : impossible de
@@ -190,14 +193,16 @@ Sites → Assistant Commercial → Secrets :
 - `MAIL_FROM` : adresse d'expédition vérifiée dans Resend, par exemple
   `Assistant Commercial <compte@votre-domaine.com>`.
 
-Sans ces réglages, le formulaire répond « l'envoi d'e-mails n'est pas encore
-activé » et aucune donnée n'est modifiée.
+Pour le SMS, ajouter `SENT_API_KEY` et `SENT_PROJECT_ID` (sent.dm). Sans ces
+réglages, le formulaire répond « aucun envoi automatique n'est activé » et
+propose l'assistance ; aucune donnée n'est modifiée.
 
 ## Prochaines étapes
 
 1. Activer l'envoi d'e-mails avec Resend pour le mot de passe oublié.
 2. Reprendre un nom de domaine propre.
-3. Vérifier le numéro de téléphone par SMS.
+3. Vérifier le numéro de téléphone par SMS à l'inscription.
+4. Envoyer les relances clients par SMS, pas seulement les codes.
 
 ## Dépôt GitHub
 

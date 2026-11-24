@@ -312,6 +312,9 @@
         <p class="hint" style="margin-top:0">Le bouton « Support WhatsApp » des comptes Premium et la demande de code y arrivent. Laissez vide pour le masquer.</p>
         <label for="supportWa">Numéro WhatsApp du support (indicatif compris)</label>
         <input id="supportWa" type="text" inputmode="tel" placeholder="+225 07 00 00 00 00" autocomplete="off">
+        <label for="supportMail">E-mail du support (repli quand WhatsApp est vide)</label>
+        <input id="supportMail" type="email" inputmode="email" placeholder="support@exemple.com" autocomplete="off">
+        <p class="hint">Avec les deux renseignés, l'application propose WhatsApp. Avec l'e-mail seul, elle ouvre un message prérempli. Avec aucun, les boutons d'assistance restent masqués.</p>
       </div>
       <div class="card">
         <h3>Publicité</h3>
@@ -460,13 +463,17 @@
     document.getElementById('adsTop').value = cfg.adsTop || '';
     document.getElementById('adsBottom').value = cfg.adsBottom || '';
     document.getElementById('supportWa').value = cfg.supportWa || '';
+    document.getElementById('supportMail').value = cfg.supportMail || '';
     document.getElementById('officialUrl').value = cfg.officialUrl || '';
     document.getElementById('officialState').textContent = cfg.officialUrl
       ? 'Utilisé dans les e-mails, les liens de facture et les partages.'
       : 'Vide : l’adresse par laquelle on ouvre l’application sert de lien.';
-    document.getElementById('mailState').innerHTML = data.mail
-      ? '<span class="badge on">Actifs</span> Les codes partent par e-mail.'
-      : '<span class="badge warn">Non configurés</span> Ajoutez les secrets <b>RESEND_API_KEY</b> et <b>MAIL_FROM</b> (Sites → Secrets), puis redéployez. En attendant, donnez les codes par WhatsApp.';
+    document.getElementById('mailState').innerHTML = (data.mail
+      ? '<span class="badge on">E-mail actif</span> Les codes partent par e-mail.'
+      : '<span class="badge warn">E-mail non configuré</span> Ajoutez les secrets <b>RESEND_API_KEY</b> et <b>MAIL_FROM</b> (Sites → Secrets), puis redéployez. En attendant, donnez les codes par WhatsApp.')
+      + ' ' + (data.sms
+        ? '<span class="badge on">SMS actif</span> Les comptes sans e-mail reçoivent leur code par SMS.'
+        : '<span class="badge warn">SMS non configuré</span> Secrets <b>SENT_API_KEY</b> et <b>SENT_PROJECT_ID</b> : les comptes sans e-mail passent par l\'assistance.');
     document.getElementById('priceMonth').value = String(cfg.priceMonth || 0);
     document.getElementById('paySeuil').value = String(cfg.paySeuil || 0);
     document.getElementById('payWave').value = cfg.payWave || '';
@@ -1060,6 +1067,7 @@
           adsTop: document.getElementById('adsTop').value.trim(),
           adsBottom: document.getElementById('adsBottom').value.trim(),
           supportWa: document.getElementById('supportWa').value.trim(),
+          supportMail: document.getElementById('supportMail').value.trim(),
           officialUrl: document.getElementById('officialUrl').value.trim(),
           priceMonth: document.getElementById('priceMonth').value.trim(),
           paySeuil: document.getElementById('paySeuil').value.trim(),

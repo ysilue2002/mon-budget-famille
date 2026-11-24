@@ -61,7 +61,10 @@ let draft = null;
 const ADS = { client: '', top: '', bottom: '' };
 /* Numéro WhatsApp de l'équipe, réglé dans /admin : sans lui, ni demande
    d'activation ni bouton de support. Aucun numéro n'est écrit dans le code. */
-const SUPPORT = { wa: '' };
+const SUPPORT = { wa: '', mail: '' };
+/* Lien d'aide : WhatsApp quand il existe, sinon un e-mail prérempli. */
+const supportMailHref = (text) => 'mailto:' + SUPPORT.mail + '?subject=' + encodeURIComponent(T('supportMailSubject')) + '&body=' + encodeURIComponent(text);
+const supportReady = () => !!(SUPPORT.wa || SUPPORT.mail);
 /* Un seul lien officiel, réglé dans /admin : celui qu'on partage, celui des
    QR et celui des e-mails. Vide : l'adresse du navigateur fait l'affaire. */
 let OFFICIAL = '';
@@ -3252,7 +3255,11 @@ function settingsModal() {
     <button class="btn" id="premPay">${T('payBtn')}</button>
     <div id="premPending"></div>
     ${isPremium()
-      ? (SUPPORT.wa ? `<button class="btn whats" id="supGo">${T('supportTitle')}</button>` : `<p class="hint">${T('supportOff')}</p>`)
+      ? (supportReady()
+        ? (SUPPORT.wa
+          ? `<button class="btn whats" id="supGo">${T('supportTitle')}</button>`
+          : `<a class="btn out" id="supGo" href="${supportMailHref(T('supportMsg').replace('[Boutique]', db.shop || T('app')))}">${T('supportMailBtn')}</a>`)
+        : `<p class="hint">${T('supportOff')}</p>`)
       : `<label>${T('premiumCode')}</label>
         <input id="premCode" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="ABCD2345">
         <button class="btn" id="premGo">${T('premiumCodeGo')}</button>
@@ -3312,11 +3319,13 @@ function settingsModal() {
     <p class="hint">${T('cookieCurrent')} : <b id="ckState">—</b></p>
     <button class="btn small" id="ckYes">${T('cookieYes')}</button>
     <button class="btn small out" id="ckNo">${T('cookieNo')}</button>
+    <label style="display:flex;gap:10px;align-items:center;min-height:44px;cursor:pointer;margin-top:12px"><input type="checkbox" id="setHideAccount" ${accountHidden() ? 'checked' : ''} style="width:24px;height:24px"><span>${T('hideAccount')}</span></label>
+    <p class="hint">${T('hideAccountHint')}</p>
     </details>
     <details><summary>${T('secTeam')}</summary>
     <div id="teamBox"><p class="hint">…</p></div>
     </details>
-    <details><summary>${T('secAccount')}</summary>
+    ${accountHidden() ? '' : `<details><summary>${T('secAccount')}</summary>
     <label style="display:flex;gap:10px;align-items:center;min-height:44px;cursor:pointer"><input type="checkbox" id="setBigText" ${bigTextOn() ? 'checked' : ''} style="width:24px;height:24px"><span>${T('bigText')}</span></label>
     ${accountHTML()}
     ${me ? `<h3 style="margin-top:16px">${T('changePassword')}</h3>
@@ -3325,7 +3334,7 @@ function settingsModal() {
       <label>${T('confirmPassword')}</label><input id="pwNew2" type="password" autocomplete="new-password">
       <button class="btn out" id="pwOk">${T('savePassword')}</button>
       <p class="hint" id="pwMsg"></p>` : ''}
-    </details>
+    </details>`}
     <details><summary>${T('legalInfo')}</summary>
     <p class="hint">${T('legalInfoHint')}</p>
     <label>${T('legalName')}</label><input id="lgName" value="${esc((db.settings.legal || {}).name || '')}">
@@ -3414,10 +3423,12 @@ function settingsModal() {
     waOpen(SUPPORT.wa, T('premiumWaMsg').replace('[Boutique]', db.shop || T('app')).replace('[Compte]', account));
   };
   const supGo = d.querySelector('#supGo');
-  if (supGo) supGo.onclick = () => {
+  if (supGo && supGo.tagName === 'BUTTON') supGo.onclick = () => {
     if (!SUPPORT.wa) { alert(T('supportOff')); return; }
     waOpen(SUPPORT.wa, T('supportMsg').replace('[Boutique]', db.shop || T('app')));
   };
+  const hideAcc = d.querySelector('#setHideAccount');
+  if (hideAcc) hideAcc.onchange = () => { setAccountHidden(hideAcc.checked); d.remove(); settingsModal(); };
   loadTeam(d.querySelector('#teamBox'));
   const ckState = d.querySelector('#ckState');
   if (ckState) {
@@ -4149,6 +4160,18 @@ async function bootAccount() {
   if (me) await pullNow();
   updatePill();
 }
+/* Section « Mon compte » masquée : un choix d'appareil, pour montrer son
+   téléphone sans dévoiler l'adresse, le numéro et les boutons de session. */
+const HIDE_ACCOUNT_KEY = KEY + '.hideAccount';
+function accountHidden() {
+  try { return localStorage.getItem(HIDE_ACCOUNT_KEY) === '1'; } catch { return false; }
+}
+function setAccountHidden(on) {
+  try {
+    if (on) localStorage.setItem(HIDE_ACCOUNT_KEY, '1');
+    else localStorage.removeItem(HIDE_ACCOUNT_KEY);
+  } catch {}
+}
 function accountHTML() {
   if (me) {
     return `<div class="row"><div><div class="t">${esc(me.email || me.phone || '')}</div><div class="s">${me.email && me.phone ? esc(me.phone) : (me.email ? T('byEmail') : T('byPhone'))}</div></div><div class="right"><span class="tag ok">${T('cloudOn')}</span></div></div>
@@ -4237,12 +4260,18 @@ function forgotModal(ident = '') {
   const offerSupport = (who) => {
     const box = d.querySelector('#fSupport');
     const wa = String((SUPPORT && SUPPORT.wa) || '').replace(/\D/g, '');
-    if (!box || !wa) return;
+    if (!box) return;
+    const text = T('recoveryWaText').replace('[id]', who);
     const a = document.createElement('a');
-    a.className = 'btn whats';
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.href = `https://wa.me/${wa}?text=${encodeURIComponent(T('recoveryWaText').replace('[id]', who))}`;
+    if (wa) {
+      a.className = 'btn whats';
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.href = `https://wa.me/${wa}?text=${encodeURIComponent(text)}`;
+    } else if (SUPPORT.mail) {
+      a.className = 'btn out';
+      a.href = supportMailHref(text);
+    } else return;
     a.textContent = T('recoverySupportBtn');
     box.appendChild(a);
   };
@@ -4261,7 +4290,7 @@ function forgotModal(ident = '') {
       offerSupport(who);
       return;
     }
-    msg.textContent = info.mail === false ? T('resetNoMail') : T('resetCodeSent');
+    msg.textContent = info.sms && !info.mail ? T('resetCodeSentSms') : info.mail ? T('resetCodeSent') : T('resetNoMail');
   };
   d.querySelector('#fApply').onclick = async () => {
     const code = d.querySelector('#fCode').value.trim();
@@ -4564,6 +4593,8 @@ async function loadAppConfig() {
   if (!r.ok || !r.data) return;
   /* Le support se lit même quand la publicité est vide. */
   SUPPORT.wa = String(r.data.supportWa || '').replace(/\D/g, '').slice(0, 15);
+  const sm = String(r.data.supportMail || '').trim();
+  SUPPORT.mail = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(sm) ? sm : '';
   OFFICIAL = /^https:\/\/[^\s]+$/i.test(String(r.data.officialUrl || '')) ? String(r.data.officialUrl).trim() : '';
   if (!r.data.ads || !r.data.adsClient) return;
   ADS.client = String(r.data.adsClient);
