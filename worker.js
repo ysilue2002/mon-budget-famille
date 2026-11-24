@@ -1008,7 +1008,9 @@ async function api(request, env, url, ctx) {
       /* Les numéros d'encaissement ne sortent que par /api/premium/offer : la
          configuration publique reste sans coordonnées de paiement. */
       const { payWave, payOm, priceMonth, ...pub } = cfg;
-      return json(pub);
+      /* L'application a besoin de savoir si le SMS est branché pour ne pas
+         proposer un bouton de vérification qui échouerait. */
+      return json(Object.assign({}, pub, { sms: smsReady(env) }));
     } catch { return json(EMPTY_CONFIG); }
   }
 
@@ -1461,7 +1463,7 @@ async function api(request, env, url, ctx) {
     };
     const reminderRow = await env.DB.prepare("SELECT value FROM app_config WHERE key = 'premiumRemindedOn'").first().catch(() => null);
     const shops = await env.DB.prepare(
-      `SELECT u.id, u.email, u.phone, u.name, u.created, u.src, u.premium_until,
+      `SELECT u.id, u.email, u.phone, u.phone_verified, u.name, u.created, u.src, u.premium_until,
         COALESCE(json_extract(s.json,'$.shop'), '') AS shop,
         COALESCE(json_extract(s.json,'$.settings.country'), '') AS country,
         s.updated, COALESCE(json_array_length(json_extract(s.json,'$.sales')), 0) AS sales,
@@ -1488,6 +1490,7 @@ async function api(request, env, url, ctx) {
         name: r.name || null, country: String(r.country || ''), created: Number(r.created) || 0,
         updated: Number(r.updated) || 0, sales: Number(r.sales) || 0, docs: Number(r.docs) || 0,
         premiumUntil: Number(r.premium_until) || 0, src: String(r.src || ''),
+        phoneVerified: !!Number(r.phone_verified),
         locked: isLocked(r.email, r.phone),
       })),
       config: await readConfig(env),

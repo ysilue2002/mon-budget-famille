@@ -529,7 +529,10 @@
     const list = filteredShops();
     const box = document.getElementById('shops');
     const count = document.getElementById('shopsCount');
-    count.textContent = list.length === 1 ? '1 boutique' : `${num(list.length)} boutiques`;
+    /* Numéros prouvés par SMS : ceux-là peuvent retrouver leur compte seuls. */
+    const verified = list.filter((s) => s.phone && s.phoneVerified).length;
+    count.textContent = (list.length === 1 ? '1 boutique' : `${num(list.length)} boutiques`)
+      + (verified ? ` · ${num(verified)} numéro${verified === 1 ? '' : 's'} vérifié${verified === 1 ? '' : 's'}` : '');
     if (!list.length) {
       box.innerHTML = `<p class="empty">${(data.shops || []).length ? 'Aucune boutique ne correspond à cette recherche.' : 'Aucune boutique.'}</p>`;
       document.getElementById('shopsMore').hidden = true;
@@ -538,7 +541,7 @@
     box.innerHTML = list.slice(0, view.shown).map((s) => `<div class="shop">
       <div>
         <div class="t">${esc(s.shop || '(sans nom)')}</div>
-        <div class="s">${esc(s.email || s.phone || s.id)} · ${esc(s.country || 'pays ?')} · ${num(s.sales)} vente${Number(s.sales) === 1 ? '' : 's'} · ${num(s.docs)} doc${Number(s.docs) === 1 ? '' : 's'}</div>
+        <div class="s">${esc(s.email || s.phone || s.id)}${s.email && s.phone ? ' · ' + esc(s.phone) : ''} · ${esc(s.country || 'pays ?')} · ${num(s.sales)} vente${Number(s.sales) === 1 ? '' : 's'} · ${num(s.docs)} doc${Number(s.docs) === 1 ? '' : 's'}${s.phone ? (s.phoneVerified ? ' · <span class="badge on">numéro vérifié</span>' : ' · <span class="badge off">numéro non vérifié</span>') : ''}</div>
         <div class="s">Inscrite le ${day(s.created)} · ${Number(s.updated) > 1000000000000 ? 'vue le ' + day(s.updated) : 'jamais ouverte'}${s.src ? ' · ' + esc(s.src) : ''}</div>
       </div>
       <div><span class="badge ${premiumOn(s.premiumUntil) ? (daysLeft(s.premiumUntil) <= 7 ? 'warn' : 'on') : 'off'}">${premiumLabel(s.premiumUntil)}</span>${s.locked ? ' <span class="badge warn">Bloqué</span>' : ''}</div>

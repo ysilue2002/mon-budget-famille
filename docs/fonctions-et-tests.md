@@ -207,7 +207,9 @@ propose l'assistance ; aucune donnée n'est modifiée. L'onglet Réglages de
    réseau SMS, le compte est créé et la vérification reste proposée.
 2. La feuille « Vérifier le numéro » s'ouvre après l'inscription ; « Plus tard »
    la referme sans rien bloquer. On la retrouve dans Réglages → Mon compte →
-   « Vérifier mon numéro ».
+   « Vérifier mon numéro ». **Sans SMS branché, ce bouton n'apparaît pas** :
+   `/api/config` dit si l'envoi est disponible, et l'application cache le geste
+   plutôt que de le laisser échouer.
 3. Le code vaut **15 minutes**, un seul code par compte, un nouvel envoi au plus
    tôt après une minute (5 envois par heure). Cinq essais faux brûlent le code.
 4. Une fois vérifié, le compte affiche « Numéro vérifié » ; le numéro est alors
@@ -215,13 +217,17 @@ propose l'assistance ; aucune donnée n'est modifiée. L'onglet Réglages de
 5. L'essai de l'admin envoie le même type de message : il confirme que la clé
    Sent, le projet et le crédit du compte fonctionnent, sans attendre qu'un
    commerçant perde son mot de passe.
+6. Dans `/admin`, l'onglet Boutiques affiche « numéro vérifié » ou « numéro non
+   vérifié » sous chaque boutique, et le compte de numéros vérifiés en tête de
+   liste : on sait qui peut se dépanner seul.
 
 ## Prochaines étapes
 
 1. Activer l'envoi d'e-mails avec Resend pour le mot de passe oublié.
 2. Reprendre un nom de domaine propre.
 3. Envoyer les relances clients par SMS, pas seulement les codes.
-4. Afficher dans `/admin` quels numéros sont vérifiés, pour cibler l'assistance.
+4. Suivre les **échecs d'envoi SMS** (fournisseur en panne, crédit épuisé) dans
+   une petite ligne du journal, pour ne pas le découvrir par un client bloqué.
 
 ## Dépôt GitHub
 

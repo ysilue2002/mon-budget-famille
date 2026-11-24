@@ -68,6 +68,9 @@ const supportReady = () => !!(SUPPORT.wa || SUPPORT.mail);
 /* Un seul lien officiel, réglé dans /admin : celui qu'on partage, celui des
    QR et celui des e-mails. Vide : l'adresse du navigateur fait l'affaire. */
 let OFFICIAL = '';
+/* SMS branché côté serveur : sans lui, le bouton « Vérifier mon numéro »
+   mènerait à une erreur. On le cache au lieu de le laisser mourir. */
+let SMS_ON = false;
 
 /* Consentement aux cookies publicitaires. « yes » seulement après un clic sur
    Accepter : sans choix, ou après un refus, aucune annonce n'est chargée. */
@@ -4181,7 +4184,7 @@ function setAccountHidden(on) {
 function accountHTML() {
   if (me) {
     return `<div class="row"><div><div class="t">${esc(me.email || me.phone || '')}</div><div class="s">${me.email && me.phone ? esc(me.phone) : (me.email ? T('byEmail') : T('byPhone'))}</div></div><div class="right"><span class="tag ok">${T('cloudOn')}</span></div></div>
-      ${me.phone ? (me.phoneVerified ? `<p class="hint ok">${T('verifyOk')}</p>` : `<p class="hint">${T('verifyPendingHint')}</p><button class="btn out" id="acVerify">${T('verifyNumber')}</button>`) : ''}
+      ${me.phone ? (me.phoneVerified ? `<p class="hint ok">${T('verifyOk')}</p>` : SMS_ON ? `<p class="hint">${T('verifyPendingHint')}</p><button class="btn out" id="acVerify">${T('verifyNumber')}</button>` : '') : ''}
       <p class="hint">${T('lastSaved')} ${clock(db.meta.lastSync)}</p>
       <button class="btn out" data-act="syncNow">${T('syncNow')}</button>
       <button class="btn out" data-act="logout">${T('signOut')}</button>
@@ -4649,6 +4652,7 @@ async function loadAppConfig() {
   SUPPORT.wa = String(r.data.supportWa || '').replace(/\D/g, '').slice(0, 15);
   const sm = String(r.data.supportMail || '').trim();
   SUPPORT.mail = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(sm) ? sm : '';
+  SMS_ON = !!r.data.sms;
   OFFICIAL = /^https:\/\/[^\s]+$/i.test(String(r.data.officialUrl || '')) ? String(r.data.officialUrl).trim() : '';
   if (!r.data.ads || !r.data.adsClient) return;
   ADS.client = String(r.data.adsClient);
