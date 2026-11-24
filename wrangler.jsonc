@@ -12,7 +12,10 @@
     // Sans ça, en développement, le repli vers index.html répond aux navigations
     // vers /f/<jeton> : la facture ne s'affiche jamais dans un navigateur local,
     // alors qu'en production le Worker passe bien en premier.
-    "run_worker_first": ["/f/*", "/api/*"]
+    // Les pages passent aussi par le Worker en développement : sans cela les
+    // en-têtes de sécurité (CSP de /admin, HSTS) n'apparaîtraient qu'en
+    // production, et un contrôle local ne prouverait rien.
+    "run_worker_first": ["/f/*", "/api/*", "/", "/index.html", "/admin", "/admin.html"]
   },
   "d1_databases": [
     {

@@ -11,6 +11,7 @@ const I18N = { fr: {
     accountHint: 'Créez un compte pour sauvegarder votre boutique dans le cloud et la retrouver sur un autre téléphone.',
     byEmail: 'Par e-mail', byPhone: 'Par téléphone',
     addEmail: 'Ajouter mon e-mail', addEmailHint: 'Ajoutez une adresse e-mail pour pouvoir récupérer votre mot de passe si vous l’oubliez un jour.',
+    addEmailSecure: 'Votre mot de passe actuel est demandé : sans lui, personne ne peut attacher une adresse à votre compte.',
     emailAdded: 'Adresse e-mail ajoutée. Vous pouvez maintenant récupérer votre mot de passe.',
     synced: 'sauvegardé', syncing: 'envoi…', syncPending: 'en attente', localOnly: 'sur ce téléphone', syncTooBig: 'non sauvegardé', sessionExpired: 'session expirée',
     tooBigTitle: 'Données trop volumineuses', tooBigHint: 'Elles dépassent 1,8 Mo : elles restent sur cet appareil mais ne sont plus sauvegardées en ligne. Exportez-les depuis Réglages, ou archivez les écritures anciennes.',

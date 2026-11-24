@@ -15,6 +15,11 @@ async function sha256(text) {
   return hex(await crypto.subtle.digest('SHA-256', enc.encode(text)));
 }
 
+/* Sel fixe : sert à calculer un mot de passe factice quand l'identifiant
+   n'existe pas, pour que la connexion prenne le même temps dans les deux cas
+   et ne dise pas, par sa durée, quels comptes existent. */
+const DUMMY_SALT = '00112233445566778899aabbccddeeff';
+
 async function pbkdf2(password, saltHex) {
   const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
@@ -693,6 +698,53 @@ function parsePerms(raw) {
   } catch { return { ...FULL_PERMS }; }
 }
 
+/* Réponse de « mot de passe oublié » : identique que le compte existe ou non,
+   et sans dire quels canaux il possède. Sinon la page devient un annuaire des
+   adresses et des numéros inscrits. */
+const forgotReply = (byMail, mailOn, smsOn) => (byMail
+  ? { ok: true, mail: !!mailOn, support: !mailOn }
+  : { ok: true, mail: false, sms: !!smsOn, support: !smsOn });
+
+/* Ce qu'un vendeur à droits limités ne peut pas faire : supprimer un élément
+   déjà enregistré (article, document, client, fournisseur, sa propre vente)
+   ou changer un prix. Vérifié sur le serveur : griser un champ dans le
+   navigateur n'empêche pas une requête fabriquée à la main. */
+const PERM_LISTS = ['products', 'docs', 'parties', 'suppliers', 'debts', 'expenses', 'withdrawals'];
+function permViolation(stored, mine, perms, viewerId = '') {
+  if (!stored || !mine || typeof stored !== 'object' || typeof mine !== 'object') return null;
+  if (!perms) return null;
+  const ids = (list) => new Set((Array.isArray(list) ? list : []).filter((x) => x && x.id).map((x) => String(x.id)));
+  if (!perms.del) {
+    for (const key of PERM_LISTS) {
+      const sent = ids(mine[key]);
+      for (const item of (Array.isArray(stored[key]) ? stored[key] : [])) {
+        if (item && item.id && !sent.has(String(item.id))) return 'del';
+      }
+    }
+    /* Ses propres ventes : celles des autres sont remises par restoreMasked,
+       donc seules celles du vendeur peuvent manquer volontairement. */
+    const sentSales = ids(mine.sales);
+    for (const sale of (Array.isArray(stored.sales) ? stored.sales : [])) {
+      if (sale && sale.id && String(sale.byId || '') === String(viewerId) && !sentSales.has(String(sale.id))) return 'del';
+    }
+  }
+  if (!perms.price) {
+    const old = new Map((Array.isArray(stored.products) ? stored.products : []).filter((p) => p && p.id).map((p) => [String(p.id), p]));
+    for (const p of (Array.isArray(mine.products) ? mine.products : [])) {
+      if (!p || !p.id) continue;
+      const before = old.get(String(p.id));
+      if (before && Math.max(0, Number(p.sell) || 0) !== Math.max(0, Number(before.sell) || 0)) return 'price';
+    }
+    const oldDocs = new Map((Array.isArray(stored.docs) ? stored.docs : []).filter((d) => d && d.id).map((d) => [String(d.id), d]));
+    for (const d of (Array.isArray(mine.docs) ? mine.docs : [])) {
+      if (!d || !d.id) continue;
+      const before = oldDocs.get(String(d.id));
+      if (before && Math.round(Number(d.total) || 0) !== Math.round(Number(before.total) || 0)) return 'price';
+    }
+  }
+  return null;
+}
+
 /* Identité renvoyée au client : le rôle et les droits doivent être connus dès
    la connexion, sinon un vendeur est traité comme patron jusqu'au rechargement. */
 function publicUser(u) {
@@ -1186,6 +1238,9 @@ async function api(request, env, url, ctx) {
       }
     }
     if (!user) {
+      /* Même calcul que pour un compte réel : la durée de la réponse ne dit
+         pas si l'identifiant existe. */
+      await pbkdf2(password || 'x', DUMMY_SALT);
       await tooMany(env, idKey, 10, 15 * 60000);
       await tooMany(env, ipKey, 100, 15 * 60000);
       await tooMany(env, userKey, 10, 15 * 60000);
@@ -1208,20 +1263,23 @@ async function api(request, env, url, ctx) {
      franchement et l'assistance remet le code par WhatsApp (onglet Boutiques). */
   if (path === '/api/forgot' && request.method === 'POST') {
     const ip = request.headers.get('cf-connecting-ip') || 'local';
-    if (await blocked(env, 'forgot:' + ip, 10)) return json({ ok: true, mail: false });
-    await tooMany(env, 'forgot:' + ip, 10, 60 * 60000);
+    const mailOn = !!env.RESEND_API_KEY;
+    const smsOn = smsReady(env);
     const body = await readBody(request);
     const ident = String(body.ident || body.email || '').trim();
+    const shape = forgotReply(ident.includes('@'), mailOn, smsOn);
+    if (await blocked(env, 'forgot:' + ip, 10)) return json(shape);
+    await tooMany(env, 'forgot:' + ip, 10, 60 * 60000);
     let user = null;
     if (ident.includes('@')) {
       const email = ident.toLowerCase();
-      if (!validEmail(email)) return json({ ok: true, mail: false });
+      if (!validEmail(email)) return json(shape);
       user = await env.DB.prepare('SELECT id, email, phone FROM users WHERE email = ?').bind(email).first();
     } else {
       /* Même tolérance qu'à la connexion : le numéro complet, ou sa fin quand
          elle ne désigne qu'un seul compte. */
       const digits = digitsOf(ident);
-      if (digits.length < 8) return json({ ok: true, mail: false });
+      if (digits.length < 8) return json(shape);
       user = await env.DB.prepare('SELECT id, email, phone FROM users WHERE phone_digits = ?').bind(digits).first();
       if (!user) {
         const rows = await env.DB.prepare('SELECT id, email, phone FROM users WHERE phone_digits LIKE ?').bind('%' + digits).all();
@@ -1229,16 +1287,14 @@ async function api(request, env, url, ctx) {
         if (found.length === 1) user = found[0];
       }
     }
-    if (!user) return json({ ok: true, mail: false });
+    /* La réponse ne dépend plus du compte trouvé : mêmes champs pour un
+       identifiant inconnu, un compte sans e-mail ou un compte complet. */
+    if (!user) return json(shape);
     /* Un compte tenu par son téléphone seulement n'a de code que si le
        fournisseur SMS est branché ; sinon l'assistance le remet à la main. */
-    if (!user.email && !smsReady(env)) return json({ ok: true, mail: false, support: true });
+    if (!user.email && !smsOn) return json(shape);
     const last = await env.DB.prepare('SELECT created FROM reset_codes WHERE user_id = ? ORDER BY created DESC LIMIT 1').bind(user.id).first();
-    if (last && Date.now() - last.created < 5 * 60000) {
-      const mail = !!(user.email && env.RESEND_API_KEY);
-      const sms = !!(user.phone && smsReady(env));
-      return json({ ok: true, mail, sms, support: !mail && !sms });
-    }
+    if (last && Date.now() - last.created < 5 * 60000) return json(shape);
     await env.DB.prepare('DELETE FROM reset_codes WHERE user_id = ?').bind(user.id).run();
     const code = newResetCode();
     await env.DB.prepare('INSERT INTO reset_codes (code, user_id, created, expires, used) VALUES (?, ?, ?, ?, 0)')
@@ -1247,7 +1303,10 @@ async function api(request, env, url, ctx) {
        un e-mail saisi à l'inscription mais ne le lisent pas. */
     const mailed = user.email ? await sendResetMail(env, user.email, code, await officialBase(env, url)) : false;
     const texted = user.phone ? await sendResetSms(env, user.phone, code) : false;
-    return json({ ok: true, mail: mailed, sms: texted, support: !mailed && !texted });
+    /* Les échecs d'envoi se voient dans le journal du serveur, pas dans la
+       réponse : un fournisseur en panne ne doit pas devenir un indice. */
+    if (!mailed && !texted) console.warn('forgot: aucun envoi', { mail: !!user.email, sms: !!user.phone });
+    return json(shape);
   }
 
   /* Nouveau mot de passe avec le code reçu. L'ancien lien à jeton reste
@@ -1314,17 +1373,21 @@ async function api(request, env, url, ctx) {
     const body = await readBody(request);
     const code = normalizePhoneCode(body.code);
     if (code.length !== 6) return json({ error: 'code' }, 400);
-    const row = await env.DB.prepare('SELECT code, expires, tries FROM phone_codes WHERE user_id = ?').bind(account.id).first();
+    const row = await env.DB.prepare('SELECT code, expires FROM phone_codes WHERE user_id = ?').bind(account.id).first();
     /* Cinq essais puis le code est brûlé : six chiffres ne se devinent pas au
-       hasard, mais pas non plus en boucle. */
-    if (!row || Number(row.expires) < Date.now() || Number(row.tries) >= 5) {
+       hasard, mais pas non plus en boucle. Le compteur est incrémenté avant
+       la comparaison, pour que cinq requêtes simultanées ne valent pas cinq
+       essais chacune. */
+    if (!row || Number(row.expires) < Date.now()) {
       await env.DB.prepare('DELETE FROM phone_codes WHERE user_id = ?').bind(account.id).run();
       return json({ error: 'code' }, 400);
     }
-    if (!same(await sha256('phone:' + code), row.code)) {
-      await env.DB.prepare('UPDATE phone_codes SET tries = tries + 1 WHERE user_id = ?').bind(account.id).run();
+    const claim = await env.DB.prepare('UPDATE phone_codes SET tries = tries + 1 WHERE user_id = ? AND tries < 5').bind(account.id).run();
+    if (!claim.meta || !claim.meta.changes) {
+      await env.DB.prepare('DELETE FROM phone_codes WHERE user_id = ?').bind(account.id).run();
       return json({ error: 'code' }, 400);
     }
+    if (!same(await sha256('phone:' + code), row.code)) return json({ error: 'code' }, 400);
     await env.DB.batch([
       env.DB.prepare('UPDATE users SET phone_verified = 1 WHERE id = ?').bind(account.id),
       env.DB.prepare('DELETE FROM phone_codes WHERE user_id = ?').bind(account.id),
@@ -2050,10 +2113,14 @@ async function api(request, env, url, ctx) {
   }
 
   if (path === '/api/password' && request.method === 'POST') {
+    /* Dix essais par heure : sans plafond, un mot de passe actuel volé se
+       devine par force brute, et chaque essai coûte cher au serveur. */
+    if (await blocked(env, 'password:' + user.id, 10)) return json({ error: 'slow' }, 429);
     const body = await readBody(request);
     const current = String(body.current || '');
     const password = String(body.password || '');
     if (!validPass(password)) return json({ error: 'password' }, 400);
+    await tooMany(env, 'password:' + user.id, 10, 60 * 60000);
     const row = await env.DB.prepare('SELECT pass, salt FROM users WHERE id = ?').bind(user.id).first();
     if (!row) return json({ error: 'auth' }, 401);
     if (!same(await pbkdf2(current, row.salt), row.pass)) return json({ error: 'current' }, 401);
@@ -2072,6 +2139,15 @@ async function api(request, env, url, ctx) {
     const body = await readBody(request);
     const email = String(body.email || '').trim().toLowerCase();
     if (!validEmail(email)) return json({ error: 'email' }, 400);
+    /* Attacher une adresse, c'est ouvrir la récupération du compte : on
+       redemande le mot de passe. Sans cela, une session volée (téléphone
+       emprunté, poste laissé ouvert) devenait un compte définitivement volé,
+       par un simple « mot de passe oublié » sur la nouvelle adresse. */
+    const row = await env.DB.prepare('SELECT pass, salt FROM users WHERE id = ?').bind(user.id).first();
+    if (!row || !same(await pbkdf2(String(body.current || ''), row.salt), row.pass)) {
+      await tooMany(env, 'email:' + user.id, 10, 60 * 60000);
+      return json({ error: 'current' }, 401);
+    }
     const taken = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
     if (taken && taken.id !== user.id) return json({ error: 'exists' }, 409);
     await tooMany(env, 'email:' + user.id, 10, 60 * 60000);
@@ -2232,28 +2308,12 @@ async function api(request, env, url, ctx) {
        de vente interdit est refusé en bloc. Le client se recale alors sur
        l'état du patron, pour qu'aucune modification partielle ne survive. */
     if (user.ownerId && row) {
-      const perms = user.perms || FULL_PERMS;
-      if (!perms.del || !perms.price) {
-        let stored = null;
-        let mine = null;
-        try { stored = JSON.parse(row.json || '{}'); } catch {}
-        try { mine = JSON.parse(rawPayload || '{}'); } catch {}
-        if (stored && mine) {
-          const known = new Map((stored.products || []).filter((p) => p && p.id).map((p) => [String(p.id), p]));
-          const sent = new Map((mine.products || []).filter((p) => p && p.id).map((p) => [String(p.id), p]));
-          if (!perms.del) {
-            for (const pid of known.keys()) if (!sent.has(pid)) return json({ error: 'perm', what: 'del' }, 403);
-          }
-          if (!perms.price) {
-            for (const [pid, p] of sent) {
-              const old = known.get(pid);
-              if (old && Math.max(0, Number(p.sell) || 0) !== Math.max(0, Number(old.sell) || 0)) {
-                return json({ error: 'perm', what: 'price' }, 403);
-              }
-            }
-          }
-        }
-      }
+      let stored = null;
+      let mine = null;
+      try { stored = JSON.parse(row.json || '{}'); } catch {}
+      try { mine = JSON.parse(rawPayload || '{}'); } catch {}
+      const violation = permViolation(stored, mine, user.perms || FULL_PERMS, user.id);
+      if (violation) return json({ error: 'perm', what: violation }, 403);
     }
     /* Le vendeur envoie un état où les valeurs sensibles sont vides : on
        remet celles du patron avant d'écrire. */
@@ -2437,7 +2497,10 @@ export default {
       try {
         return await api(request, env, url, ctx);
       } catch (e) {
-        return json({ error: 'server', detail: String(e && e.message ? e.message : e) }, 500);
+        /* Le détail reste dans les journaux du serveur : un message de base de
+           données renvoyé au navigateur décrit le schéma à un curieux. */
+        console.error('api', url.pathname, e);
+        return json({ error: 'server' }, 500);
       }
     }
     const response = await env.ASSETS.fetch(request);
@@ -2446,6 +2509,10 @@ export default {
     copy.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
     copy.headers.set('x-frame-options', 'SAMEORIGIN');
     copy.headers.set('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+    /* HTTPS obligatoire pendant un an, et aucun plugin Flash/PDF tiers autorisé
+       à lire les données de la page. */
+    copy.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    copy.headers.set('x-permitted-cross-domain-policies', 'none');
     /* La page d'administration ne se laisse ni encadrer par un autre site ni
        exécuter d'autre script que le sien : une page piégée ne peut pas faire
        cliquer l'admin à sa place. */

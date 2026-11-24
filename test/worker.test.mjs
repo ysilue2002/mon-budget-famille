@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms, sendSms, newPhoneCode, normalizePhoneCode, sendVerifySms };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms, sendSms, newPhoneCode, normalizePhoneCode, sendVerifySms, permViolation, forgotReply };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms, sendSms, newPhoneCode, normalizePhoneCode, sendVerifySms } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms, sendSms, newPhoneCode, normalizePhoneCode, sendVerifySms, permViolation, forgotReply } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -633,4 +633,32 @@ test('la vérification du numéro tient en six chiffres', async () => {
   assert.ok(body.text.includes('482913'), 'le code est dans le message');
   assert.ok(body.text.includes('vérification'), 'le message dit de quoi il s’agit');
   assert.equal(await sendVerifySms({}, '+2250700000000', '482913'), false, 'sans secrets : aucun envoi');
+});
+
+test('les droits d’un vendeur sont vérifiés sur le serveur', () => {
+  const stored = {
+    products: [{ id: 'p1', sell: 8000 }],
+    docs: [{ id: 'd1', total: 9000 }],
+    parties: [{ id: 'c1', name: 'Awa' }],
+    suppliers: [{ id: 'f1', name: 'Grossiste' }],
+  };
+  const same = { products: [{ id: 'p1', sell: 8000 }], docs: [{ id: 'd1', total: 9000 }], parties: [{ id: 'c1' }], suppliers: [{ id: 'f1' }] };
+  assert.equal(permViolation(stored, same, { del: false, price: false }), null, 'rien de changé : accepté');
+  assert.equal(permViolation(stored, { ...same, products: [] }, { del: false, price: true }), 'del', 'supprimer un article : refusé');
+  assert.equal(permViolation(stored, { ...same, parties: [] }, { del: false, price: true }), 'del', 'supprimer un client : refusé');
+  assert.equal(permViolation(stored, { ...same, docs: [] }, { del: false, price: true }), 'del', 'supprimer un document : refusé');
+  assert.equal(permViolation(stored, { ...same, products: [{ id: 'p1', sell: 9000 }] }, { del: true, price: false }), 'price', 'changer un prix : refusé');
+  assert.equal(permViolation(stored, { ...same, docs: [{ id: 'd1', total: 12000 }] }, { del: true, price: false }), 'price', 'changer un total de document : refusé');
+  assert.equal(permViolation(stored, { ...same, products: [{ id: 'p1', sell: 9000 }] }, { del: true, price: true }), null, 'droits complets : accepté');
+  /* Ses propres ventes seulement : celles des autres ne sont pas dans son état. */
+  const sales = { sales: [{ id: 's1', byId: 'moi' }, { id: 's0', byId: 'autre' }] };
+  assert.equal(permViolation(sales, { sales: [{ id: 's1', byId: 'moi' }] }, { del: false, price: true }, 'moi'), null, 'les ventes des autres ne comptent pas');
+  assert.equal(permViolation(sales, { sales: [] }, { del: false, price: true }, 'moi'), 'del', 'supprimer sa vente : refusé');
+});
+
+test('mot de passe oublié : la réponse ne dit pas si le compte existe', () => {
+  assert.deepEqual(forgotReply(true, false, false), { ok: true, mail: false, support: true });
+  assert.deepEqual(forgotReply(true, true, true), { ok: true, mail: true, support: false });
+  assert.deepEqual(forgotReply(false, true, false), { ok: true, mail: false, sms: false, support: true });
+  assert.deepEqual(forgotReply(false, true, true), { ok: true, mail: false, sms: true, support: false });
 });

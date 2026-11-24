@@ -221,6 +221,56 @@ propose l'assistance ; aucune donnée n'est modifiée. L'onglet Réglages de
    vérifié » sous chaque boutique, et le compte de numéros vérifiés en tête de
    liste : on sait qui peut se dépanner seul.
 
+## Sécurité
+
+Ce qui protège déjà l'application :
+
+- **Mots de passe** : PBKDF2-SHA256, 100 000 tours, sel unique par compte,
+  comparaison à temps constant. Jamais stocké ni journalisé en clair.
+- **Sessions** : jeton aléatoire de 32 octets, stocké haché, cookie `HttpOnly`,
+  `Secure`, `SameSite=Lax`, expiration 30 jours en base. Changer le mot de passe
+  ferme toutes les autres sessions.
+- **Administration** : cookie signé séparé (`SameSite=Strict`, 8 heures), code
+  d'administration comparé par empreinte, second facteur TOTP facultatif avec
+  anti-rejeu, huit codes de secours à usage unique, verrou après 8 essais par
+  e-mail et 20 par adresse.
+- **Limitation** : connexion (10 essais/15 min par identifiant et par IP, 100
+  par IP), inscription (20/h/IP), mot de passe oublié (10/h/IP), vérification
+  du numéro (5/h/compte), changement de mot de passe et ajout d'e-mail (10/h),
+  codes Premium, invitations, demandes de paiement.
+- **Entrées** : toutes les requêtes SQL utilisent des paramètres liés ; les
+  pages publiques de facture échappent tout et n'autorisent qu'un script à
+  nonce ; le corps des requêtes est plafonné à 2 Mo.
+- **CSRF** : les écritures exigent la même origine que l'application, et les
+  cookies sont `SameSite`.
+- **Droits vendeur** : `del` et `price` sont vérifiés côté serveur (suppression
+  d'articles, documents, clients, fournisseurs, propres ventes ; changement de
+  prix et de total de document), pas seulement grisés dans l'interface.
+- **En-têtes** : `nosniff`, `X-Frame-Options`, `Referrer-Policy`,
+  `Permissions-Policy`, HSTS un an, CSP stricte sur `/admin` et sur les pages
+  de facture.
+
+Corrigé lors du dernier contrôle :
+
+1. Les erreurs serveur ne renvoient plus le message interne (schéma, SQL) :
+   réponse `{"error":"server"}` et détail dans les journaux uniquement.
+2. « Mot de passe oublié » renvoie exactement la même réponse qu'un compte
+   existe ou non : plus d'annuaire des adresses et numéros inscrits.
+3. La connexion calcule un mot de passe factice quand l'identifiant est
+   inconnu : la durée de réponse ne révèle plus l'existence du compte.
+4. Ajouter un e-mail exige désormais le **mot de passe actuel** : une session
+   empruntée ne peut plus s'approprier le compte via la récupération.
+5. Le changement de mot de passe est limité à 10 essais par heure (force brute
+   du mot de passe actuel et coût CPU).
+6. Les droits vendeur sont contrôlés sur toutes les collections, plus seulement
+   les articles, et le compteur d'essais du code SMS est incrémenté avant
+   comparaison (pas de contournement par requêtes simultanées).
+
+Restes connus : pas de second facteur pour les commerçants (seulement pour
+l'admin) ; pas de liste de révocation d'IP ni de CAPTCHA ; l'e-mail et le SMS ne
+sont pas branchés en production, donc la récupération passe encore par
+l'assistance.
+
 ## Prochaines étapes
 
 1. Activer l'envoi d'e-mails avec Resend pour le mot de passe oublié.
@@ -228,6 +278,8 @@ propose l'assistance ; aucune donnée n'est modifiée. L'onglet Réglages de
 3. Envoyer les relances clients par SMS, pas seulement les codes.
 4. Suivre les **échecs d'envoi SMS** (fournisseur en panne, crédit épuisé) dans
    une petite ligne du journal, pour ne pas le découvrir par un client bloqué.
+5. Proposer un **second facteur facultatif** aux commerçants (TOTP, comme
+   l'admin), pour les boutiques qui manipulent de gros montants.
 
 ## Dépôt GitHub
 

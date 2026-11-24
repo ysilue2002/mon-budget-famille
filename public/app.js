@@ -2960,9 +2960,18 @@ document.addEventListener('click', async (e) => {
   if (act === 'addEmail') {
     const box = document.getElementById('acAddEmail');
     const email = (box ? box.value : '').trim().toLowerCase();
+    const passBox = document.getElementById('acAddEmailPass');
+    const current = (passBox ? passBox.value : '');
     if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) { alert(T('badEmail')); return; }
-    api('/api/email', 'POST', { email }).then((r) => {
-      if (!r.ok) { alert(r.data && r.data.error === 'exists' ? T('emailTaken') : T('badEmail')); return; }
+    /* L'adresse ouvre la récupération du compte : le mot de passe actuel est
+       demandé, pour qu'une session empruntée ne suffise pas. */
+    if (!current) { alert(T('badPass')); return; }
+    api('/api/email', 'POST', { email, current }).then((r) => {
+      if (!r.ok) {
+        alert(r.data && r.data.error === 'exists' ? T('emailTaken')
+          : r.data && r.data.error === 'current' ? T('badCredentials') : T('badEmail'));
+        return;
+      }
       me = r.data.user;
       alert(T('emailAdded'));
       render();
@@ -4195,6 +4204,8 @@ function accountHTML() {
       ${me.email ? '' : `<h3 style="margin-top:16px">${T('addEmail')}</h3>
       <p class="hint">${T('addEmailHint')}</p>
       <label>${T('email')}</label><input id="acAddEmail" type="email" autocomplete="email" placeholder="awa@exemple.com">
+      <label>${T('currentPassword')}</label><input id="acAddEmailPass" type="password" autocomplete="current-password">
+      <p class="hint">${T('addEmailSecure')}</p>
       <button class="btn out" data-act="addEmail">${T('addEmail')}</button>`}`;
   }
   return `<div class="seg" id="acType"><button type="button" id="acModeEmail" class="on">${T('byEmail')}</button><button type="button" id="acModePhone">${T('byPhone')}</button></div>
