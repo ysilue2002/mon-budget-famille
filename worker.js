@@ -74,6 +74,9 @@ function ensureSchema(env) {
     /* Codes de réinitialisation : huit signes à dicter, valables trente
        minutes, utilisés une seule fois. Seul leur empreinte est stockée. */
     env.DB.prepare('CREATE TABLE IF NOT EXISTS reset_codes (code TEXT PRIMARY KEY, user_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)'),
+    /* Vérification du numéro : un code court, valable quinze minutes, remplacé
+       à chaque demande. Seule son empreinte est gardée. */
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS phone_codes (user_id TEXT PRIMARY KEY, code TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0)'),
     /* Codes d'activation Premium : créés par l'admin après paiement, utilisés
        une seule fois par la boutique qui les saisit. */
     env.DB.prepare('CREATE TABLE IF NOT EXISTS premium_codes (code TEXT PRIMARY KEY, months INTEGER NOT NULL, created INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0, used_by TEXT, expires INTEGER, used_at INTEGER)'),
@@ -113,6 +116,9 @@ function ensureSchema(env) {
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN src TEXT').run(); } catch {}
     /* Code de parrainage de la boutique, stable une fois créé. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN ref_code TEXT').run(); } catch {}
+    /* Numéro prouvé par un code SMS : la récupération du compte devient plus
+       sûre, et l'admin sait à quoi s'en tenir. */
+    try { await env.DB.prepare('ALTER TABLE users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0').run(); } catch {}
     /* Abonnement Premium : date de fin, 0 ou vide = gratuit. */
     try { await env.DB.prepare('ALTER TABLE users ADD COLUMN premium_until INTEGER').run(); } catch {}
     /* Parrain d'une boutique et récompense déjà versée : un mois offert à
@@ -147,7 +153,7 @@ async function currentUser(request, env) {
   const hash = await sha256(token);
   /* Le vendeur hérite du Premium de la boutique, pas du sien. */
   const row = await env.DB.prepare(
-    `SELECT s.user_id AS id, u.email, u.phone, u.name, u.owner_id, u.role, u.perms, s.expires,
+    `SELECT s.user_id AS id, u.email, u.phone, u.phone_verified, u.name, u.owner_id, u.role, u.perms, s.expires,
        CASE WHEN u.owner_id IS NULL THEN COALESCE(u.premium_until, 0)
             ELSE COALESCE((SELECT o.premium_until FROM users o WHERE o.id = u.owner_id), 0) END AS premium_until
      FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`,
@@ -157,7 +163,7 @@ async function currentUser(request, env) {
     await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(hash).run();
     return null;
   }
-  return { id: row.id, email: row.email, phone: row.phone, name: row.name || null, ownerId: row.owner_id || null, role: row.role || 'owner', perms: parsePerms(row.perms), premiumUntil: Number(row.premium_until) || 0 };
+  return { id: row.id, email: row.email, phone: row.phone, phoneVerified: !!Number(row.phone_verified), name: row.name || null, ownerId: row.owner_id || null, role: row.role || 'owner', perms: parsePerms(row.perms), premiumUntil: Number(row.premium_until) || 0 };
 }
 
 async function createSession(env, userId) {
@@ -180,11 +186,10 @@ const normalizeResetCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-
    (SENT_API_KEY et SENT_PROJECT_ID) : sans eux, rien ne part et l'assistance
    reste le recours. Aucun envoi n'est bloquant. */
 const smsReady = (env) => !!(env.SENT_API_KEY && env.SENT_PROJECT_ID);
-async function sendResetSms(env, to, code) {
+async function sendSms(env, to, text) {
   if (!smsReady(env)) return false;
   const digits = digitsOf(to);
   if (digits.length < 8) return false;
-  const text = `Assistant Commercial : votre code de réinitialisation est ${code}. Valable 30 minutes, à usage unique.`;
   try {
     const r = await fetch('https://api.sent.dm/v1/messages', {
       method: 'POST',
@@ -193,6 +198,32 @@ async function sendResetSms(env, to, code) {
     });
     return r.ok;
   } catch { return false; }
+}
+async function sendResetSms(env, to, code) {
+  if (!smsReady(env)) return false;
+  return sendSms(env, to, `Assistant Commercial : votre code de réinitialisation est ${code}. Valable 30 minutes, à usage unique.`);
+}
+
+/* Vérification du numéro : six chiffres, valables quinze minutes. Elle prouve
+   que le numéro est bien celui de la boutique avant de s'en servir pour la
+   récupération. Un envoi qui échoue ne bloque jamais l'inscription. */
+const PHONE_CODE_MS = 15 * 60000;
+function newPhoneCode() {
+  const bytes = crypto.getRandomValues(new Uint32Array(1));
+  return String(100000 + (bytes[0] % 900000));
+}
+const normalizePhoneCode = (v) => String(v || '').replace(/\D/g, '').slice(0, 6);
+async function sendVerifySms(env, to, code) {
+  return sendSms(env, to, `Assistant Commercial : votre code de vérification est ${code}. Valable 15 minutes. Si vous n'avez rien demandé, ignorez ce message.`);
+}
+async function issuePhoneCode(env, userId, phone) {
+  const code = newPhoneCode();
+  await env.DB.prepare('DELETE FROM phone_codes WHERE user_id = ?').bind(userId).run();
+  await env.DB.prepare('INSERT INTO phone_codes (user_id, code, created, expires, tries) VALUES (?, ?, ?, ?, 0)')
+    .bind(userId, await sha256('phone:' + code), Date.now(), Date.now() + PHONE_CODE_MS).run();
+  const sent = await sendVerifySms(env, phone, code);
+  if (!sent) await env.DB.prepare('DELETE FROM phone_codes WHERE user_id = ?').bind(userId).run();
+  return sent;
 }
 
 async function sendResetMail(env, to, code, link) {
@@ -670,6 +701,7 @@ function publicUser(u) {
     email: u.email || null,
     phone: u.phone || null,
     name: u.name || null,
+    phoneVerified: !!Number(u.phoneVerified !== undefined ? u.phoneVerified : u.phone_verified),
     ownerId: u.ownerId || u.owner_id || null,
     role: u.role || 'owner',
     perms: parsePerms(u.perms),
@@ -1105,8 +1137,15 @@ async function api(request, env, url, ctx) {
       /* Le compteur ne raconte que six mois : au-delà, il ne dit plus rien. */
       await env.DB.prepare('DELETE FROM installs WHERE day < ?').bind(new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10)).run();
     }
+    /* Numéro à vérifier : le code part tout de suite si le SMS est branché.
+       L'inscription n'attend pas la réponse : sans réseau SMS, elle réussit
+       quand même et la vérification reste proposée dans les réglages. */
+    let verify = false;
+    if (phoneDigits && smsReady(env)) {
+      try { verify = await issuePhoneCode(env, id, phone); } catch { verify = false; }
+    }
     const cookie = await createSession(env, id);
-    return json({ user: publicUser({ id, email: email || null, phone: phone || null, premiumUntil: 0 }) }, 200, { 'set-cookie': cookie });
+    return json({ user: publicUser({ id, email: email || null, phone: phone || null, phoneVerified: 0, premiumUntil: 0 }), verify }, 200, { 'set-cookie': cookie });
   }
 
   if (path === '/api/login' && request.method === 'POST') {
@@ -1243,6 +1282,52 @@ async function api(request, env, url, ctx) {
       env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
     ]);
     return json({ ok: true });
+  }
+
+  /* Vérifier le numéro du compte : un code à six chiffres par SMS. Le compte
+     reste utilisable sans cette preuve ; elle sert surtout à la récupération. */
+  if (path === '/api/phone/start' && request.method === 'POST') {
+    const account = await currentUser(request, env);
+    if (!account) return json({ error: 'auth' }, 401);
+    if (!account.phone) return json({ error: 'phone' }, 400);
+    if (!smsReady(env)) return json({ error: 'sms' }, 503);
+    if (await blocked(env, 'phone:' + account.id, 5)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'phone:' + account.id, 5, 60 * 60000);
+    /* Un code par minute au plus : deux appuis ne font pas deux SMS payants. */
+    const last = await env.DB.prepare('SELECT created FROM phone_codes WHERE user_id = ?').bind(account.id).first();
+    if (last && Date.now() - Number(last.created) < 60000) {
+      return json({ ok: true, wait: Math.ceil((60000 - (Date.now() - Number(last.created))) / 1000) });
+    }
+    const sent = await issuePhoneCode(env, account.id, account.phone);
+    if (!sent) return json({ error: 'send' }, 502);
+    return json({ ok: true });
+  }
+
+  if (path === '/api/phone/confirm' && request.method === 'POST') {
+    const account = await currentUser(request, env);
+    if (!account) return json({ error: 'auth' }, 401);
+    const ip = request.headers.get('cf-connecting-ip') || 'local';
+    if (await blocked(env, 'phonec:' + ip, 20)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'phonec:' + ip, 20, 60 * 60000);
+    const body = await readBody(request);
+    const code = normalizePhoneCode(body.code);
+    if (code.length !== 6) return json({ error: 'code' }, 400);
+    const row = await env.DB.prepare('SELECT code, expires, tries FROM phone_codes WHERE user_id = ?').bind(account.id).first();
+    /* Cinq essais puis le code est brûlé : six chiffres ne se devinent pas au
+       hasard, mais pas non plus en boucle. */
+    if (!row || Number(row.expires) < Date.now() || Number(row.tries) >= 5) {
+      await env.DB.prepare('DELETE FROM phone_codes WHERE user_id = ?').bind(account.id).run();
+      return json({ error: 'code' }, 400);
+    }
+    if (!same(await sha256('phone:' + code), row.code)) {
+      await env.DB.prepare('UPDATE phone_codes SET tries = tries + 1 WHERE user_id = ?').bind(account.id).run();
+      return json({ error: 'code' }, 400);
+    }
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET phone_verified = 1 WHERE id = ?').bind(account.id),
+      env.DB.prepare('DELETE FROM phone_codes WHERE user_id = ?').bind(account.id),
+    ]);
+    return json({ ok: true, user: Object.assign({}, account, { phoneVerified: true }) });
   }
 
   if (path === '/api/logout' && request.method === 'POST') {
@@ -1428,6 +1513,21 @@ async function api(request, env, url, ctx) {
         sms: smsReady(env),
       },
     });
+  }
+
+  /* Essai de SMS depuis l'administration : le seul moyen de savoir que la
+     clé Sent est bonne sans attendre qu'un commerçant perde son mot de passe. */
+  if (path === '/api/admin/sms-test' && request.method === 'POST') {
+    if (!admin) return json({ error: 'forbidden' }, 403);
+    if (!smsReady(env)) return json({ error: 'sms' }, 503);
+    if (await blocked(env, 'adms:' + admin.email, 5)) return json({ error: 'slow' }, 429);
+    await tooMany(env, 'adms:' + admin.email, 5, 60 * 60000);
+    const body = await readBody(request);
+    const to = String(body.to || '').trim();
+    if (!validPhone(to)) return json({ error: 'phone' }, 400);
+    const sent = await sendSms(env, to, "Assistant Commercial : essai de SMS depuis l'administration. Si ce message arrive, le fournisseur est bien branché.");
+    await adminLog(env, admin.email, 'config', 'sms', sent ? 'essai réussi' : 'essai échoué');
+    return json({ ok: sent }, sent ? 200 : 502);
   }
 
   /* Code de réinitialisation remis à la main : l'assistance le lit par

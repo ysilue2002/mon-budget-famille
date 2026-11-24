@@ -153,8 +153,10 @@ Essai complet, avec de vrais clics et de vraies requêtes :
 
 ## Limites à connaître
 
-1. **Le numéro de téléphone est enregistré, mais pas vérifié par SMS.** Il sert
-   à vous joindre et à retrouver le compte, pas de seconde preuve.
+1. **La vérification du numéro par SMS demande un fournisseur branché.** Sans
+   `SENT_API_KEY` et `SENT_PROJECT_ID`, le numéro sert quand même à retrouver le
+   compte, mais il reste marqué « non vérifié » ; on peut le vérifier plus tard
+   depuis Réglages → Mon compte.
 2. **La fusion est faite écriture par écriture** : ventes, dépenses, articles,
    clients, documents et mouvements de stock s'additionnent, y compris les
    paiements partiels. Si les deux téléphones modifient le *même*
@@ -195,14 +197,31 @@ Sites → Assistant Commercial → Secrets :
 
 Pour le SMS, ajouter `SENT_API_KEY` et `SENT_PROJECT_ID` (sent.dm). Sans ces
 réglages, le formulaire répond « aucun envoi automatique n'est activé » et
-propose l'assistance ; aucune donnée n'est modifiée.
+propose l'assistance ; aucune donnée n'est modifiée. L'onglet Réglages de
+`/admin` détaille les cinq étapes et propose un **SMS d'essai**.
+
+## Vérifier le numéro
+
+1. À l'inscription par téléphone, quand le SMS est branché, un code à **6
+   chiffres** part tout de suite. L'inscription n'attend pas la réponse : sans
+   réseau SMS, le compte est créé et la vérification reste proposée.
+2. La feuille « Vérifier le numéro » s'ouvre après l'inscription ; « Plus tard »
+   la referme sans rien bloquer. On la retrouve dans Réglages → Mon compte →
+   « Vérifier mon numéro ».
+3. Le code vaut **15 minutes**, un seul code par compte, un nouvel envoi au plus
+   tôt après une minute (5 envois par heure). Cinq essais faux brûlent le code.
+4. Une fois vérifié, le compte affiche « Numéro vérifié » ; le numéro est alors
+   une preuve et non plus une simple coordonnée.
+5. L'essai de l'admin envoie le même type de message : il confirme que la clé
+   Sent, le projet et le crédit du compte fonctionnent, sans attendre qu'un
+   commerçant perde son mot de passe.
 
 ## Prochaines étapes
 
 1. Activer l'envoi d'e-mails avec Resend pour le mot de passe oublié.
 2. Reprendre un nom de domaine propre.
-3. Vérifier le numéro de téléphone par SMS à l'inscription.
-4. Envoyer les relances clients par SMS, pas seulement les codes.
+3. Envoyer les relances clients par SMS, pas seulement les codes.
+4. Afficher dans `/admin` quels numéros sont vérifiés, pour cibler l'assistance.
 
 ## Dépôt GitHub
 

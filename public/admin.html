@@ -265,9 +265,23 @@
         <p class="hint" id="officialState"></p>
       </div>
       <div class="card">
-        <h3>E-mails de réinitialisation</h3>
-        <p class="hint" style="margin-top:0">Le commerçant demande un code depuis « Mot de passe oublié ? » et le reçoit par e-mail. Sans e-mail configuré, vous donnez le code par WhatsApp depuis l'onglet Boutiques.</p>
+        <h3>Codes de récupération</h3>
+        <p class="hint" style="margin-top:0">Le commerçant demande un code depuis « Mot de passe oublié ? ». Il part par e-mail et par SMS quand les deux sont branchés. Sans aucun envoi, vous donnez le code par WhatsApp depuis l'onglet Boutiques.</p>
         <p id="mailState" class="hint"></p>
+        <label for="smsTestTo">Essai : numéro qui reçoit le message</label>
+        <input id="smsTestTo" type="tel" inputmode="tel" placeholder="+225 07 00 00 00 00" autocomplete="off">
+        <button class="btn" id="smsTestGo" type="button">Envoyer un SMS d'essai</button>
+        <p class="hint" id="smsTestMsg"></p>
+        <h3 style="margin-top:18px">Brancher le SMS (Sent)</h3>
+        <p class="hint" style="margin:6px 0 0">Le SMS sert aux codes (récupération et vérification du numéro), jamais aux relances clients : celles-ci partent par WhatsApp.</p>
+        <ol class="hint" style="margin:8px 0 0;padding-left:20px;line-height:1.6">
+          <li>Créez un compte sur <b>sent.dm</b> et validez l'expéditeur proposé. L'essai est gratuit, puis les SMS se paient par crédits.</li>
+          <li>Dans Sent, copiez la <b>clé API</b> et l'<b>identifiant du projet</b>.</li>
+          <li>Ici : <b>Sites → Secrets</b>. Ajoutez <b>SENT_API_KEY</b> et <b>SENT_PROJECT_ID</b>, sans les recopier ici.</li>
+          <li>Redéployez l'application : les secrets ne sont lus qu'au déploiement.</li>
+          <li>Rouvrez cette page : la pastille passe à « SMS actif ». Envoyez l'essai ci-dessus pour confirmer.</li>
+        </ol>
+        <p class="hint" style="margin-top:8px">Sans secrets, rien n'est envoyé : les comptes sans e-mail passent par l'assistance, et la vérification du numéro reste proposée mais inactive.</p>
       </div>
       <div class="card">
         <h3>Paiement du Premium</h3>
@@ -468,12 +482,19 @@
     document.getElementById('officialState').textContent = cfg.officialUrl
       ? 'Utilisé dans les e-mails, les liens de facture et les partages.'
       : 'Vide : l’adresse par laquelle on ouvre l’application sert de lien.';
-    document.getElementById('mailState').innerHTML = (data.mail
-      ? '<span class="badge on">E-mail actif</span> Les codes partent par e-mail.'
-      : '<span class="badge warn">E-mail non configuré</span> Ajoutez les secrets <b>RESEND_API_KEY</b> et <b>MAIL_FROM</b> (Sites → Secrets), puis redéployez. En attendant, donnez les codes par WhatsApp.')
-      + ' ' + (data.sms
-        ? '<span class="badge on">SMS actif</span> Les comptes sans e-mail reçoivent leur code par SMS.'
-        : '<span class="badge warn">SMS non configuré</span> Secrets <b>SENT_API_KEY</b> et <b>SENT_PROJECT_ID</b> : les comptes sans e-mail passent par l\'assistance.');
+    /* Message honnête sur les quatre combinaisons : un envoi actif ne dit pas
+       que l'autre l'est, et la phrase doit dire quoi faire ensuite. */
+    const mailOn = !!data.mail;
+    const smsOn = !!data.sms;
+    const act = (on) => (on ? '<span class="badge on">actif</span>' : '<span class="badge off">non configuré</span>');
+    const advice = mailOn && smsOn
+      ? 'Le code part par e-mail et par SMS quand le compte a les deux. Vérifiez seulement que MAIL_FROM est bien validé côté Resend.'
+      : mailOn
+        ? 'Le code part par e-mail. Les comptes sans e-mail passent par l’assistance tant que le SMS n’est pas branché.'
+        : smsOn
+          ? 'Le code part par SMS. Sans RESEND_API_KEY, aucun e-mail ne part : les comptes sans numéro passent par l’assistance.'
+          : 'Aucun envoi automatique : donnez les codes par WhatsApp depuis l’onglet Boutiques, ou branchez l’e-mail (RESEND_API_KEY + MAIL_FROM) et le SMS ci-dessous.';
+    document.getElementById('mailState').innerHTML = `E-mail : ${act(mailOn)} · SMS : ${act(smsOn)}<br>${advice}`;
     document.getElementById('priceMonth').value = String(cfg.priceMonth || 0);
     document.getElementById('paySeuil').value = String(cfg.paySeuil || 0);
     document.getElementById('payWave').value = cfg.payWave || '';
@@ -587,6 +608,35 @@
       msg.className = 'hint err';
       msg.textContent = 'Non enregistré. Réessayez.';
     }
+  });
+
+  /* Essai de SMS : confirme que la clé Sent est bonne sans attendre qu'un
+     commerçant perde son mot de passe. */
+  document.getElementById('smsTestGo').addEventListener('click', async () => {
+    const btn = document.getElementById('smsTestGo');
+    const msg = document.getElementById('smsTestMsg');
+    const to = document.getElementById('smsTestTo').value.trim();
+    msg.className = 'hint';
+    if (to.replace(/\D/g, '').length < 8) { msg.className = 'hint err'; msg.textContent = 'Numéro trop court (8 chiffres minimum).'; return; }
+    btn.disabled = true;
+    msg.textContent = 'Envoi…';
+    try {
+      const r = await fetch('/api/admin/sms-test', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ to }),
+      });
+      if (r.status === 401) { showLogin('Votre session a expiré. Entrez le code à nouveau.'); return; }
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) { msg.className = 'hint ok'; msg.textContent = 'SMS accepté par Sent. Il devrait arriver dans une minute.'; return; }
+      msg.className = 'hint err';
+      msg.textContent = r.status === 503 ? 'SMS non configuré : ajoutez SENT_API_KEY et SENT_PROJECT_ID, puis redéployez.'
+        : r.status === 429 ? 'Trop d’essais : réessayez dans une heure.'
+          : d.error === 'phone' ? 'Numéro invalide.'
+            : 'Sent a refusé l’envoi. Vérifiez la clé, le projet et le crédit du compte.';
+    } catch {
+      msg.className = 'hint err';
+      msg.textContent = 'Envoi impossible : vérifiez la connexion.';
+    } finally { btn.disabled = false; }
   });
 
   /* Code de réinitialisation remis à la main : l'assistance le lit au

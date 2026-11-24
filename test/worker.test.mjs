@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms };\n';
+  + '\nexport { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms, sendSms, newPhoneCode, normalizePhoneCode, sendVerifySms };\n';
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
-const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms } = mod;
+const { maskState, restoreMasked, publicUser, parsePerms, publicDocHtml, cleanSrc, SIGNUP_LIMIT, SIGNUP_WINDOW_MS, signupGuard, newRefCode, refSrc, isAdmin, extendPremium, canAddStaff, isPremiumUntil, validSupportWa, adminToken, adminFromToken, newPremiumCode, codeExpired, newResetCode, normalizeResetCode, OFFICIAL_URL_RE, adminCodes, codeForAdmin, adminSigningKey, stripeEvent, unlockPatterns, totpAt, totpOk, totpMatch, adminTotps, csvOf, newBackupCode, normalizeBackupCode, issueBackupCodes, useBackupCode, backupCodesLeft, expireStalePayments, PENDING_DAYS, needsExpiryWarning, needsApprovalAlert, PAY_WARN_DAYS, APPROVAL_ALERT_HOURS, smsReady, sendResetSms, sendSms, newPhoneCode, normalizePhoneCode, sendVerifySms } = mod;
 const { variant } = await import(new URL('../scripts/presentation.mjs', import.meta.url).href);
 
 const OWNER = 'owner-1';
@@ -609,4 +609,28 @@ test('le SMS de récupération ne part que si le fournisseur est branché', asyn
   assert.ok(body.text.includes('ABCD2345'), 'le code est dans le message');
   assert.equal(await sendResetSms({}, '+2250700000000', 'ABCD2345'), false, 'sans secrets : aucun envoi');
   assert.equal(await sendResetSms({ SENT_API_KEY: 'k', SENT_PROJECT_ID: 'p' }, '123', 'ABCD2345'), false, 'numéro trop court : aucun envoi');
+});
+
+test('la vérification du numéro tient en six chiffres', async () => {
+  for (let i = 0; i < 40; i += 1) assert.match(newPhoneCode(), /^\d{6}$/, 'six chiffres, dictables au téléphone');
+  assert.equal(normalizePhoneCode(' 12 34 56 '), '123456', 'espaces ignorés');
+  assert.equal(normalizePhoneCode('12-34-56-78'), '123456', 'six chiffres au plus');
+  assert.equal(normalizePhoneCode('abc'), '', 'aucun chiffre : rien');
+  /* Le drapeau vient du SQL (phone_verified) comme de l'API (phoneVerified). */
+  assert.equal(publicUser({ id: 'u', phone: '+2250700000000', phone_verified: 1 }).phoneVerified, true);
+  assert.equal(publicUser({ id: 'u', phone: '+2250700000000', phoneVerified: true }).phoneVerified, true);
+  assert.equal(publicUser({ id: 'u', phone: '+2250700000000' }).phoneVerified, false, 'non vérifié par défaut');
+  let seen = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { seen = { url, init }; return { ok: true }; };
+  try {
+    assert.equal(await sendVerifySms({ SENT_API_KEY: 'k', SENT_PROJECT_ID: 'p' }, '+225 07 00 00 00 00', '482913'), true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const body = JSON.parse(seen.init.body);
+  assert.equal(body.to, '+2250700000000');
+  assert.ok(body.text.includes('482913'), 'le code est dans le message');
+  assert.ok(body.text.includes('vérification'), 'le message dit de quoi il s’agit');
+  assert.equal(await sendVerifySms({}, '+2250700000000', '482913'), false, 'sans secrets : aucun envoi');
 });

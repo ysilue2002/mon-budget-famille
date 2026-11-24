@@ -3429,6 +3429,8 @@ function settingsModal() {
   };
   const hideAcc = d.querySelector('#setHideAccount');
   if (hideAcc) hideAcc.onchange = () => { setAccountHidden(hideAcc.checked); d.remove(); settingsModal(); };
+  const verifyBtn = d.querySelector('#acVerify');
+  if (verifyBtn) verifyBtn.onclick = () => { d.remove(); verifyPhoneModal(false); };
   loadTeam(d.querySelector('#teamBox'));
   const ckState = d.querySelector('#ckState');
   if (ckState) {
@@ -4002,7 +4004,7 @@ function storedMe() {
 }
 function rememberMe(user) {
   try {
-    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, name: user.name || null, role: user.role || 'owner', ownerId: user.ownerId || null, perms: user.perms || null, premiumUntil: Number(user.premiumUntil) || 0 }));
+    if (user) localStorage.setItem(KEY + '.me', JSON.stringify({ id: user.id, email: user.email || null, phone: user.phone || null, phoneVerified: !!user.phoneVerified, name: user.name || null, role: user.role || 'owner', ownerId: user.ownerId || null, perms: user.perms || null, premiumUntil: Number(user.premiumUntil) || 0 }));
     else localStorage.removeItem(KEY + '.me');
   } catch {}
 }
@@ -4125,12 +4127,16 @@ async function syncTick() {
   if (dirty || syncState === 'pending') await pushNow();
   else await pullNow(false);
 }
+/* Le serveur a déjà envoyé un code de vérification à l'inscription par
+   téléphone : on propose de le saisir tout de suite, sans rien bloquer. */
+let phoneVerifyPending = false;
 async function signup(mode, identifier, password) {
   const body = { mode, password, src: channel() };
   if (mode === 'email') body.email = identifier; else body.phone = identifier;
   const r = await api('/api/signup', 'POST', body);
   if (!r.ok) return (r.data && r.data.error) || 'server';
   me = r.data.user;
+  phoneVerifyPending = !!r.data.verify;
   markSync('syncing');
   await pushNow();
   return null;
@@ -4175,6 +4181,7 @@ function setAccountHidden(on) {
 function accountHTML() {
   if (me) {
     return `<div class="row"><div><div class="t">${esc(me.email || me.phone || '')}</div><div class="s">${me.email && me.phone ? esc(me.phone) : (me.email ? T('byEmail') : T('byPhone'))}</div></div><div class="right"><span class="tag ok">${T('cloudOn')}</span></div></div>
+      ${me.phone ? (me.phoneVerified ? `<p class="hint ok">${T('verifyOk')}</p>` : `<p class="hint">${T('verifyPendingHint')}</p><button class="btn out" id="acVerify">${T('verifyNumber')}</button>`) : ''}
       <p class="hint">${T('lastSaved')} ${clock(db.meta.lastSync)}</p>
       <button class="btn out" data-act="syncNow">${T('syncNow')}</button>
       <button class="btn out" data-act="logout">${T('signOut')}</button>
@@ -4227,6 +4234,7 @@ function wireAccount(d) {
     const e = await signup(m, ident, pass);
     if (e) { err.textContent = e === 'exists' ? T('emailTaken') : e === 'phone_taken' ? T('phoneTaken') : e === 'phone' ? T('badPhone') : e === 'identifier' ? T('badCredentials') : T('badCredentials'); return; }
     d.remove(); render();
+    if (phoneVerifyPending) { phoneVerifyPending = false; verifyPhoneModal(true); }
   };
   d.querySelector('#acLogin').onclick = async () => {
     err.textContent = '';
@@ -4309,6 +4317,49 @@ function forgotModal(ident = '') {
     alert(T('resetCodeDone'));
     showAuthGate();
   };
+}
+/* Vérification du numéro : un code à six chiffres par SMS. Elle n'empêche
+   jamais d'utiliser la boutique ; elle rend la récupération plus sûre. */
+function verifyPhoneModal(sent = false, done = null) {
+  const num = (me && me.phone) || '';
+  const d = modal(`<h2>${T('verifyTitle')}</h2>
+    <p class="hint">${esc(T('verifyHint').replace('[num]', num))}</p>
+    <button class="btn out" id="vStart">${T('verifySend')}</button>
+    <label>${T('verifyCode')}</label><input id="vCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" spellcheck="false">
+    <button class="btn" id="vGo">${T('verifyGo')}</button>
+    <button class="btn out" id="vNo">${T('verifyLater')}</button>
+    <p class="hint" id="vMsg">${sent ? T('verifySent') : ''}</p><p class="err" id="vErr"></p>`);
+  const msg = d.querySelector('#vMsg');
+  const err = d.querySelector('#vErr');
+  const start = async () => {
+    err.textContent = '';
+    const r = await api('/api/phone/start', 'POST', {});
+    if (!r.ok) {
+      err.textContent = r.data && r.data.error === 'sms' ? T('verifyOff')
+        : r.data && r.data.error === 'slow' ? T('tooManyTries') : T('gateOffline');
+      return;
+    }
+    msg.textContent = T('verifySent');
+  };
+  d.querySelector('#vStart').onclick = start;
+  d.querySelector('#vNo').onclick = () => { d.remove(); if (done) done(); };
+  d.querySelector('#vGo').onclick = async () => {
+    const code = d.querySelector('#vCode').value.replace(/\D/g, '');
+    err.textContent = '';
+    if (code.length !== 6) { err.textContent = T('verifyBad'); return; }
+    const r = await api('/api/phone/confirm', 'POST', { code });
+    if (!r.ok) {
+      err.textContent = r.data && r.data.error === 'slow' ? T('tooManyTries') : T('verifyBad');
+      return;
+    }
+    if (me) { me.phoneVerified = true; rememberMe(me); }
+    alert(T('verifyDone'));
+    d.remove();
+    if (done) done(); else render();
+  };
+  /* À l'ouverture depuis les réglages, le code part tout de suite : le geste
+     de l'utilisateur est déjà la demande. */
+  if (!sent) start();
 }
 function resetModal(token) {
   const d = modal(`<h2>${T('resetTitle')}</h2>
@@ -4490,6 +4541,9 @@ function showAuthGate() {
         go.disabled = true;
         const e = await signup(signupMode, ident, pass);
         if (e) { go.disabled = false; err.textContent = e === 'exists' ? T('emailTaken') : e === 'phone_taken' ? T('phoneTaken') : e === 'server' ? T('gateOffline') : T('badCredentials'); return; }
+        /* Numéro à vérifier : la feuille passe avant le nom de la boutique.
+           « Plus tard » garde l'application utilisable tout de suite. */
+        if (phoneVerifyPending) { phoneVerifyPending = false; verifyPhoneModal(true, afterGate); return; }
       } else {
         const identifier = form.querySelector('#gLoginId').value.trim();
         if (!identifier || !pass) { err.textContent = T('badCredentials'); return; }

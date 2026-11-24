@@ -38,6 +38,11 @@ inscrites avec un simple numéro), ajouter :
 - `SENT_API_KEY` : clé API du fournisseur SMS (sent.dm) ;
 - `SENT_PROJECT_ID` : identifiant du projet chez ce même fournisseur.
 
+Le même fournisseur sert à **vérifier le numéro** (code à 6 chiffres, 15
+minutes). L'onglet Réglages de `/admin` donne les cinq étapes de branchement et
+un bouton « Envoyer un SMS d'essai » qui ne demande aucune perte de mot de
+passe pour tester la clé.
+
 L'adresse du support se règle dans `/admin` (onglet Réglages) : numéro WhatsApp
 et, en repli, e-mail du support. Ni l'un ni l'autre n'est écrit dans le code.
 
