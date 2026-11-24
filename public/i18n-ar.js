@@ -2,6 +2,9 @@
 I18N.ar = {
     app: 'المساعد التجاري', shop: 'متجري', online: 'متصل', offline: 'غير متصل', notSignedIn: 'غير مسجل',
     methodCash: 'نقدًا', methodBank: 'بنك',
+    /* Noms de services : la marque s'écrit partout pareil, seul le libellé
+       générique (Espèces, Banque) change de langue. */
+    methodOm: 'Orange Money', methodWave: 'Wave', methodMtn: 'MTN', methodMoov: 'Moov',
     account: 'حسابي', email: 'البريد الإلكتروني', password: 'كلمة المرور (٨ أحرف)', phoneNumber: 'رقم الهاتف',
     createAccount: 'إنشاء حساب', signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', noAccount: 'لا حساب بعد؟',
     accountHint: 'رقم الهاتف للتواصل واسترجاع بياناتك. بياناتك تبقى خاصة.',
@@ -15,7 +18,7 @@ I18N.ar = {
     badPass: 'كلمة المرور قصيرة (٨ أحرف).', emailTaken: 'يوجد حساب بهذا البريد.',
     badCredentials: 'البريد أو كلمة المرور غير صحيحة.', signedInAs: 'الحساب',
     forgot: 'نسيت كلمة المرور؟', forgotTitle: 'نسيت كلمة المرور',
-    forgotHint: 'اكتب بريد الحساب: سيصلك رمز من ٨ خانات بالبريد. وإن لم يكن البريد مفعّلاً، يعطيك الدعم الرمز عبر واتساب.',
+    forgotHint: 'اكتب بريد الحساب أو رقم الهاتف: سيصلك رمز من ٨ خانات بالبريد. وإن لم يكن هناك بريد، يعطيك الدعم الرمز عبر واتساب.',
     sendLink: 'إرسال الرابط', resetSent: 'إذا كان هناك حساب بهذا البريد، فقد أُرسلت رسالة. تحقق أيضاً من مجلد الرسائل غير المرغوبة.',
     mailNotReady: 'إرسال البريد غير مفعّل بعد. اتصل بالدعم لاسترجاع الحساب.',
     resetTitle: 'اختيار كلمة مرور جديدة', newPassword: 'كلمة المرور الجديدة (٨ أحرف على الأقل)',
@@ -29,6 +32,11 @@ I18N.ar = {
     resetNoMail: 'إرسال البريد غير مفعّل بعد: اطلب الرمز من الدعم عبر واتساب.',
     resetCodeBad: 'الرمز غير صحيح أو منتهي. اطلب رمزاً جديداً.',
     resetCodeDone: 'تم تغيير كلمة المرور. سجّل الدخول بالجديدة.',
+    recoveryIdent: 'البريد الإلكتروني أو رقم الهاتف',
+    recoveryBad: 'اكتب بريداً صحيحاً أو رقماً من ٨ أرقام على الأقل.',
+    recoverySupport: 'هذا الحساب بلا بريد إلكتروني: يعطيك الدعم رمزاً عبر واتساب باستخدام رقم المتجر.',
+    recoverySupportBtn: 'مراسلة الدعم',
+    recoveryWaText: 'مرحباً، نسيت كلمة المرور. معرّفي: [id]',
     salesToday: 'مبيعات اليوم', cashOut: 'أموال عند الناس', sell: 'بيع', expense: 'مصروف', withdraw: 'سحب شخصي',
     pastSale: 'أضف بيعا سابقا', pastSaleHint: 'بيع تم قبل اليوم.',
     pastSaleDate: 'متى؟', pastSaleSave: 'حفظ البيع', pastSaleDone: 'تمت إضافة البيع.',

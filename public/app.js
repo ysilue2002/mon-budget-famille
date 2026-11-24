@@ -113,8 +113,8 @@ function lastSeller() {
 function payNumbersLine() {
   const s = db.settings || {};
   const parts = [];
-  if (s.wave) parts.push(`Wave : ${s.wave}`);
-  if (s.om) parts.push(`Orange Money : ${s.om}`);
+  if (s.wave) parts.push(`${methodLabel('Wave')} : ${s.wave}`);
+  if (s.om) parts.push(`${methodLabel('Orange Money')} : ${s.om}`);
   return parts.join(' · ');
 }
 let docQuery = '';
@@ -1590,7 +1590,10 @@ function exportCsv() {
 const METHODS = ['Espèces', 'Orange Money', 'Wave', 'MTN', 'Moov', 'Banque'];
 /* Les moyens de paiement sont enregistrés en français ; seul l'affichage est traduit
    (les noms de services restent inchangés dans toutes les langues). */
-const METHOD_NAME = { 'Espèces': 'methodCash', 'Banque': 'methodBank' };
+const METHOD_NAME = {
+  'Espèces': 'methodCash', 'Banque': 'methodBank',
+  'Orange Money': 'methodOm', 'Wave': 'methodWave', 'MTN': 'methodMtn', 'Moov': 'methodMoov',
+};
 const methodLabel = (m) => (m && METHOD_NAME[m] ? T(METHOD_NAME[m]) : m || '');
 const methodOptions = (sel) => [...new Set([...METHODS, ...(sel ? [sel] : [])])]
   .map((m) => `<option value="${esc(m)}" ${m === sel ? 'selected' : ''}>${esc(methodLabel(m))}</option>`).join('');
@@ -4212,15 +4215,16 @@ function wireAccount(d) {
     d.remove(); render();
   };
   const forgot = d.querySelector('#acForgot');
-  if (forgot) forgot.onclick = () => forgotModal((values().mode === 'email' ? values().ident : '') || d.querySelector('#acLoginId').value.trim());
+  if (forgot) forgot.onclick = () => forgotModal(d.querySelector('#acLoginId').value.trim() || values().ident);
 }
 /* Réinitialisation par code : l'e-mail envoie huit signes, ou l'assistance
-   les donne par WhatsApp. Une seule fenêtre : demander, puis changer. */
-function forgotModal(email = '') {
+   les donne par WhatsApp. Le compte se désigne par e-mail ou par téléphone,
+   parce que beaucoup de boutiques n'ont que leur numéro. */
+function forgotModal(ident = '') {
   const d = modal(`<h2>${T('forgotTitle')}</h2><p class="hint">${T('forgotHint')}</p>
-    <label>${T('email')}</label><input id="fEmail" type="email" value="${esc(email)}" autocomplete="email">
+    <label>${T('recoveryIdent')}</label><input id="fIdent" type="text" value="${esc(ident)}" autocomplete="username" spellcheck="false" placeholder="awa@exemple.com">
     <button class="btn out" id="fOk">${T('sendCode')}</button>
-    <p class="hint" id="fMsg"></p>
+    <p class="hint" id="fMsg"></p><div id="fSupport"></div>
     <label>${T('resetCode')}</label><input id="fCode" type="text" autocapitalize="characters" autocomplete="one-time-code" spellcheck="false" placeholder="ABCD2345">
     <label>${T('newPassword')}</label><input id="fPass" type="password" autocomplete="new-password">
     <button class="btn" id="fApply">${T('applyCode')}</button>
@@ -4228,14 +4232,36 @@ function forgotModal(email = '') {
   const msg = d.querySelector('#fMsg');
   const err = d.querySelector('#fErr');
   d.querySelector('#fNo').onclick = () => d.remove();
+  /* Le code ne peut pas partir seul : proposer WhatsApp à l'assistance avec le
+     numéro déjà écrit, pour que le commerçant n'ait qu'à envoyer le message. */
+  const offerSupport = (who) => {
+    const box = d.querySelector('#fSupport');
+    const wa = String((SUPPORT && SUPPORT.wa) || '').replace(/\D/g, '');
+    if (!box || !wa) return;
+    const a = document.createElement('a');
+    a.className = 'btn whats';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.href = `https://wa.me/${wa}?text=${encodeURIComponent(T('recoveryWaText').replace('[id]', who))}`;
+    a.textContent = T('recoverySupportBtn');
+    box.appendChild(a);
+  };
   d.querySelector('#fOk').onclick = async () => {
-    const addr = d.querySelector('#fEmail').value.trim();
+    const who = d.querySelector('#fIdent').value.trim();
     err.textContent = '';
-    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(addr)) { err.textContent = T('badEmail'); return; }
+    const byMail = who.includes('@') ? /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(who) : who.replace(/\D/g, '').length >= 8;
+    if (!byMail) { err.textContent = T('recoveryBad'); return; }
     d.querySelector('#fOk').disabled = true;
-    const r = await api('/api/forgot', 'POST', { email: addr });
+    const r = await api('/api/forgot', 'POST', { ident: who });
     d.querySelector('#fOk').disabled = false;
-    msg.textContent = r.ok && r.data && r.data.mail === false ? T('resetNoMail') : T('resetCodeSent');
+    const info = (r.ok && r.data) || {};
+    d.querySelector('#fSupport').textContent = '';
+    if (info.support) {
+      msg.textContent = T('recoverySupport');
+      offerSupport(who);
+      return;
+    }
+    msg.textContent = info.mail === false ? T('resetNoMail') : T('resetCodeSent');
   };
   d.querySelector('#fApply').onclick = async () => {
     const code = d.querySelector('#fCode').value.trim();

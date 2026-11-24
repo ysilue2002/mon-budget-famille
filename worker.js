@@ -1138,18 +1138,37 @@ async function api(request, env, url, ctx) {
     return json({ user: publicUser(user) }, 200, { 'set-cookie': cookie });
   }
 
-  /* Demande de réinitialisation : un code à huit signes part par e-mail quand
-     l'envoi est configuré. Sinon l'assistance le donne par WhatsApp depuis
-     l'administration, ce qui couvre les comptes qui n'ont pas d'e-mail. */
+  /* Demande de réinitialisation : un compte se retrouve par e-mail ou par
+     téléphone, comme à la connexion. Un code à huit signes part par e-mail
+     quand l'envoi est configuré. Sans e-mail sur le compte, la réponse le dit
+     franchement et l'assistance remet le code par WhatsApp (onglet Boutiques). */
   if (path === '/api/forgot' && request.method === 'POST') {
     const ip = request.headers.get('cf-connecting-ip') || 'local';
     if (await blocked(env, 'forgot:' + ip, 10)) return json({ ok: true, mail: false });
     await tooMany(env, 'forgot:' + ip, 10, 60 * 60000);
     const body = await readBody(request);
-    const email = String(body.email || '').trim().toLowerCase();
-    if (!validEmail(email)) return json({ ok: true, mail: false });
-    const user = await env.DB.prepare('SELECT id, email FROM users WHERE email = ?').bind(email).first();
-    if (!user || !user.email) return json({ ok: true, mail: false });
+    const ident = String(body.ident || body.email || '').trim();
+    let user = null;
+    if (ident.includes('@')) {
+      const email = ident.toLowerCase();
+      if (!validEmail(email)) return json({ ok: true, mail: false });
+      user = await env.DB.prepare('SELECT id, email FROM users WHERE email = ?').bind(email).first();
+    } else {
+      /* Même tolérance qu'à la connexion : le numéro complet, ou sa fin quand
+         elle ne désigne qu'un seul compte. */
+      const digits = digitsOf(ident);
+      if (digits.length < 8) return json({ ok: true, mail: false });
+      user = await env.DB.prepare('SELECT id, email FROM users WHERE phone_digits = ?').bind(digits).first();
+      if (!user) {
+        const rows = await env.DB.prepare('SELECT id, email FROM users WHERE phone_digits LIKE ?').bind('%' + digits).all();
+        const found = rows.results || [];
+        if (found.length === 1) user = found[0];
+      }
+    }
+    if (!user) return json({ ok: true, mail: false });
+    /* Compte tenu par son téléphone seulement : aucun code ne peut partir tout
+       seul, il faut que l'assistance le remette. */
+    if (!user.email) return json({ ok: true, mail: false, support: true });
     const last = await env.DB.prepare('SELECT created FROM reset_codes WHERE user_id = ? ORDER BY created DESC LIMIT 1').bind(user.id).first();
     if (last && Date.now() - last.created < 5 * 60000) return json({ ok: true, mail: !!env.RESEND_API_KEY });
     await env.DB.prepare('DELETE FROM reset_codes WHERE user_id = ?').bind(user.id).run();
@@ -1157,7 +1176,7 @@ async function api(request, env, url, ctx) {
     await env.DB.prepare('INSERT INTO reset_codes (code, user_id, created, expires, used) VALUES (?, ?, ?, ?, 0)')
       .bind(await sha256('reset:' + code), user.id, Date.now(), Date.now() + 30 * 60000).run();
     const sent = await sendResetMail(env, user.email, code, await officialBase(env, url));
-    return json({ ok: true, mail: sent });
+    return json({ ok: true, mail: sent, support: !sent });
   }
 
   /* Nouveau mot de passe avec le code reçu. L'ancien lien à jeton reste
